@@ -54,6 +54,9 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 - [x] Updated the 64-bit build project to copy the updater and PW Edition version marker next to the editor executable.
 - [x] Added an explicit-release ZIP and SHA-256 packager, packaging contract tests, and [updater setup/release instructions](docs/PW_EDITION_UPDATER.md). [Windows CI run #44816392164](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44816392164) **passed package tests and PowerShell syntax checks**. No engine binary or update release has been published yet.
 
+- [x] **Instrumented Test Level loading** in the 64-bit editor and game source: test-map save, environment refresh, terrain sampling/heightmap creation, entity-bank and terrain loading, AI, scripts and media. Profiling is **opt-in** with `GGCPW_PROFILE_LOAD=1` and creates per-process CSV logs; standard launches don't log. This is diagnostic code, **not a confirmed speedup**.
+- [x] Added [load profiling instructions](docs/PW_LOADING_PROFILE.md), a Python CSV ranking tool and a Windows smoke test. [GitHub Actions run #44817890932](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44817890932) **passed** the Python report tests, isolated Visual Studio x64 compilation, and a real opt-in CSV-writing smoke test. Full engine build remains unverified.
+
 ### In progress — verification needed
 
 - [ ] **Updater end-to-end acceptance:** build and install a disposable PW Edition copy, publish a verified release ZIP/checksum, trigger the in-engine Help menu updater, test download, safe installation, rollback/error handling and the restart prompt. No Windows build or live update has been verified.
@@ -61,7 +64,7 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 - [ ] **PNG + DDS regression test on Windows:** build and load equivalent sample entities using `_D.dds` and `_D.png`; confirm diffuse, normal, metalness/specular, AO, gloss, height, emissive, transparency, material overrides, save/reopen, map archives and standalone exports.
 - [ ] **Shader validation:** compile and run the community animated alpha/emissive PBR shader; compare unchanged default shaders for regressions.
 - [ ] **Build and stability baseline:** compile the fork using Visual Studio 2022 x64 with the original legally owned GameGuru media and required dependencies; test editor launch, tiny FPS level, play/stop, save/reopen and standalone game.
-- [ ] **Loading-time investigation:** measure cold startup, first test, repeat test, return to editor, and standalone load for a tiny world. Do not claim speedups without before/after measurements.
+- [ ] **Loading-time investigation:** profiling hooks are committed and individually Windows-tested, but the full PW Edition engine has not been benchmarked. Measure cold startup, first test, repeat test, return to editor, and standalone load for an empty world and a populated small town. Then optimise the measured bottleneck and verify before/after results.
 
 ### To do — future upgrades
 
