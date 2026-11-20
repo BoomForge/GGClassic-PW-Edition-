@@ -3374,19 +3374,30 @@ void game_freelevel ( void )
 	//  stop ALL sounds
 	game_stopallsounds();
 
-	// Delete occluder thread and close event handles (moved from free game which is too late for multi-level games)
-	if ( g_pOccluderThread )
+	// PW Edition: the original code waited for an occlusion pass but never
+	// stopped or released its worker or events. Terminate it before touching
+	// the previous level's entities, physics or graphics resources.
 	{
-		//Let the occluder know its time to finish
-		g_occluderOn = false;
-
-		//Dave Performance - let the occluder thread know it is okay to begin
-		if ( g_hOccluderBegin ) SetEvent ( g_hOccluderBegin );
-
-		//Dave Performance - wait for occluder to finish first
-		if ( g_hOccluderEnd ) WaitForSingleObject ( g_hOccluderEnd, INFINITE );
+		PWLoadTraceScope pwTraceOccluderShutdown("game.transition.occluder_shutdown");
+		if ( g_pOccluderThread )
+		{
+			g_occluderOn = false;
+			g_pOccluderThread->Stop();
+			if ( g_hOccluderBegin ) SetEvent(g_hOccluderBegin);
+			// Do not free any level objects while the occluder can still read them.
+			g_pOccluderThread->Join();
+			if ( g_pOccluderThread->pThread )
+			{
+				CloseHandle((HANDLE)g_pOccluderThread->pThread);
+				g_pOccluderThread->pThread = NULL;
+			}
+			delete g_pOccluderThread;
+			g_pOccluderThread = NULL;
+		}
+		if ( g_hOccluderBegin ) { CloseHandle(g_hOccluderBegin); g_hOccluderBegin = NULL; }
+		if ( g_hOccluderEnd ) { CloseHandle(g_hOccluderEnd); g_hOccluderEnd = NULL; }
 	}
-	
+
 	//  free any character AI related stuff
 	darkai_release_characters ( );
 	darkai_destroy_all_characterdata ( );
