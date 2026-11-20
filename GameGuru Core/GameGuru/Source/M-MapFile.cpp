@@ -668,19 +668,12 @@ void mapfile_saveproject_fpm ( void )
 				tThisFile = tNameOnly + cstr("_D.dds");
 				#endif
 				if ( FileExist(tThisFile.Get()) ) AddFileToBlock ( 1, tThisFile.Get() );
-				// PW Edition: save companion PNG textures alongside legacy DDS/JPEG.
-				tThisFile = tNameOnly + cstr("_D.png");
-				if ( FileExist(tThisFile.Get()) ) AddFileToBlock ( 1, tThisFile.Get() );
 				#ifdef VRTECH
 				 // Don't include large files until find a nice to way reduce them considerably (or find a faster way to transfer multiplayer FPM)
 				#else
 				 tThisFile = tNameOnly + cstr("_N.dds");
 				 if ( FileExist(tThisFile.Get()) ) AddFileToBlock ( 1, tThisFile.Get() );
 				 tThisFile = tNameOnly + cstr("_S.dds");
-				 if ( FileExist(tThisFile.Get()) ) AddFileToBlock ( 1, tThisFile.Get() );
-				 tThisFile = tNameOnly + cstr("_N.png");
-				 if ( FileExist(tThisFile.Get()) ) AddFileToBlock ( 1, tThisFile.Get() );
-				 tThisFile = tNameOnly + cstr("_S.png");
 				 if ( FileExist(tThisFile.Get()) ) AddFileToBlock ( 1, tThisFile.Get() );
 				#endif
 			}
