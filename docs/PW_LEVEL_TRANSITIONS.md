@@ -10,7 +10,7 @@
 - Multiplayer, initial-title scene loading and the original save-game flow still use their existing paths; their complete validation remains future work.
 - Adds opt-in timing for `game.transition.cleanup`, `game.transition.next_level_init` and `game.transition.fpm_load.total` to the previously implemented profiling CSV.
 
-**Not implemented:** robust restoration of all RPG stats or save-game state, renderer/device-loss recovery, crash recovery or an atomic scene swap. Those require a complete game build and dedicated tests.
+**Further upgrade staged:** opt-in continuity for health, lives, Classic weapon/ammo slots and explicitly managed Lua quest flags is now implemented in source. See [PW persistent level state](PW_PERSISTENT_LEVEL_STATE.md). It is untested and does not implement a full RPG inventory, general save-game system, renderer/device-loss recovery, crash recovery or atomic scene swaps.
 
 ## Change 2 — Avoid redundant level lookup and extraction work
 
