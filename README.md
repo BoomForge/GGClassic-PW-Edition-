@@ -62,11 +62,15 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 - [x] **Connected-area prefetch foundation (source):** during the existing level transition fade, a bounded low-priority worker can pre-read the next FPM to warm Windows' file cache. **Off by default** via `GGCPW_PREFETCH_LEVELS=1`; it does not promise seamless loading. See the [transition implementation and testing guide](docs/PW_LEVEL_TRANSITIONS.md).
 - [x] Added isolated Windows x64 source and runtime tests for level lookup, missing targets, corrupted-cache rejection, root-vs-nested map precedence, cache invalidation and optional prefetch. [CI run #44821610434](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44821610434) **passed Visual Studio C++ compilation and synthetic runtime tests**. These do not compile the entire GameGuru engine.
 
+- [x] **Cross-level health and weapon continuity (source):** added an opt-in `GGCPW_KEEP_LEVEL_STATS=1` path for ordinary standalone in-process `JumpToLevel` transitions. It reuses Classic's existing health, lives, 10 weapon slots and ammunition save/load routines, with an in-memory health/lives fallback if a fresh Lua file is unavailable. Original process-restart handling is retained.
+- [x] **RPG quest/item-state foundation (source):** new `PWSetTransitionValue` / `PWGetTransitionValue` / `PWClearTransitionValues` Lua APIs persist explicitly managed simple flags, counters and strings across connected levels in a non-executable validated data file. This is **not** an automatic RPG inventory system.
+- [x] **Defensive save parsing and delivery (source):** the original v1 weapon-stat loader now validates all 43 values before applying any; standalone export, x64 build copying and the release packager recognise the new `scriptbank/pw_transition_state.lua` module. See [persistent level-state design and deployment](docs/PW_PERSISTENT_LEVEL_STATE.md). **No complete engine build or game test has been performed.**
+
 ### In progress — verification needed
 
 - [ ] **Complete transition regression testing:** build the entire 64-bit engine and a two-/three-level standalone; switch repeatedly (25+ round trips), observe failures, RAM/VRAM/handle growth and player state retention.
 - [ ] **Benchmark both optional transition optimisations:** compare cold first loads and repeat visits with/without `GGCPW_FPM_CACHE` and `GGCPW_PREFETCH_LEVELS`. Enable either by default only if the result is both faster and stable.
-- [ ] **Persistent connected-area gameplay state:** formally verify health, inventory, quest flags, checkpoint persistence and script globals across level changes, including process-restart modes.
+- [ ] **Persistent connected-area gameplay state:** health, lives, weapon slots/ammo and explicitly marked Lua quest values now have source-level continuity hooks, but these remain untested. Verify across real levels and restarts; checkpoint persistence, complete custom inventory integration and early entity-script access are still future work.
 
 - [ ] **Updater end-to-end acceptance:** build and install a disposable PW Edition copy, publish a verified release ZIP/checksum, trigger the in-engine Help menu updater, test download, safe installation, rollback/error handling and the restart prompt. No Windows build or live update has been verified.
 - [ ] **Update-release signing and provenance:** verify the distribution licence, strengthen publisher authentication, and test UAC in a protected folder.
@@ -77,6 +81,7 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 
 ### To do — future upgrades
 
+- [ ] Build an optional **full RPG inventory and quest save system** on top of the PW typed transition-value API; currently scripts explicitly select which simple values to carry.
 - [ ] After testing basic level transitions, investigate **fully seamless/streamed interiors** as a separate, larger architectural project; current prefetching is not live-scene streaming.
 - [ ] Improve the **in-engine update experience** with a native ImGui progress/status panel after the safe external installer is validated.
 - [ ] Reduce unnecessary editor-to-test **loading times** after profiling; preserve caches and correctness. [Upstream #3100](https://github.com/Dark-Basic-Software-Limited/GameGuruRepo/issues/3100).
