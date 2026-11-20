@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-LoadTrace.h" // Pixelwolf Edition: opt-in load profiler
 #include "cOccluderThread.h"
 #include "CGfxC.h"
 #include "DarkLUA.h"
@@ -2539,15 +2540,22 @@ void game_oneoff_nongraphics ( void )
 
 void game_loadinentitiesdatainlevel ( void )
 {
+	PWLoadTraceScope pwTraceEntitiesTotal("game.entities.total");
 	// Load player settings
 	timestampactivity(0,"Load player config");
-	mapfile_loadplayerconfig ( );
+	{
+		PWLoadTraceScope pwTracePlayerConfig("game.entities.player_config");
+		mapfile_loadplayerconfig ( );
+	}
 
 	// Load entity bank
 	t.screenprompt_s="LOADING ENTITY BANK";
 	if ( t.game.gameisexe == 0 ) printscreenprompt(t.screenprompt_s.Get()); else loadingpageprogress(5);
 	timestampactivity(0,t.screenprompt_s.Get());
-	entity_loadbank ( );
+	{
+		PWLoadTraceScope pwTraceEntityBank("game.entities.bank");
+		entity_loadbank ( );
+	}
 
 	#ifdef VRTECH
 	// Load entity elements
@@ -2555,16 +2563,23 @@ void game_loadinentitiesdatainlevel ( void )
 	if ( t.game.gameisexe == 0 ) printscreenprompt(t.screenprompt_s.Get()); else loadingpageprogress(5);
 	timestampactivity(0,t.screenprompt_s.Get());
 	#endif
-	entity_loadelementsdata ( );
+	{
+		PWLoadTraceScope pwTraceEntityElements("game.entities.elements");
+		entity_loadelementsdata ( );
+	}
 }
 
 void game_loadinleveldata ( void )
 {
+	PWLoadTraceScope pwTraceLevelDataTotal("game.level_data.total");
 	//  Load waypoints
 	t.screenprompt_s="LOADING WAYPOINTS DATA";
 	if (  t.game.gameisexe == 0  )  printscreenprompt(t.screenprompt_s.Get()); else loadingpageprogress(5);
 	timestampactivity(0,t.screenprompt_s.Get());
-	waypoint_loaddata ( );
+	{
+		PWLoadTraceScope pwTraceWaypoints("game.level_data.waypoints");
+		waypoint_loaddata ( );
+	}
 	if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
 	waypoint_recreateobjs ( );
 	if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
@@ -2573,7 +2588,10 @@ void game_loadinleveldata ( void )
 	t.screenprompt_s="LOADING TERRAIN DATA";
 	if (  t.game.gameisexe == 0  )  printscreenprompt(t.screenprompt_s.Get()); else loadingpageprogress(5);
 	timestampactivity(0,t.screenprompt_s.Get());
-	terrain_loaddata ( );
+	{
+		PWLoadTraceScope pwTraceTerrainLoad("game.level_data.terrain");
+		terrain_loaddata ( );
+	}
 	if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
 
 	//  Recreate all entities in level
@@ -2581,10 +2599,13 @@ void game_loadinleveldata ( void )
 	if (  t.game.gameisexe == 0  )  printscreenprompt(t.screenprompt_s.Get()); else loadingpageprogress(5);
 	timestampactivity(0,t.screenprompt_s.Get());
 
-	for ( t.tupdatee = 1 ; t.tupdatee<=  g.entityelementlist; t.tupdatee++ )
 	{
-		entity_updateentityobj ( );
-		if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
+		PWLoadTraceScope pwTraceSpawnEntities("game.level_data.create_entities");
+		for ( t.tupdatee = 1 ; t.tupdatee<=  g.entityelementlist; t.tupdatee++ )
+		{
+			entity_updateentityobj ( );
+			if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
+		}
 	}
 	t.terrain.terrainpainteroneshot=0;
 
@@ -2632,6 +2653,7 @@ float GetWAVtoLIPProgress(void);
 
 void game_preparelevel ( void )
 {
+	PWLoadTraceScope pwTracePrepareTotal("game.prepare.total");
 	//Dave Performance - ensure sound volume is 0
 	// 271115 - Dave, you just wiped out all dynamic music volume!
 	//g.musicsystem.percentageVolume = 0;
@@ -2673,7 +2695,10 @@ void game_preparelevel ( void )
 	t.screenprompt_s="LOADING HUD GRAPHICS";
 	if (  t.game.gameisexe == 0  )  printscreenprompt(t.screenprompt_s.Get()); else loadingpageprogress(5);
 	timestampactivity(0,t.screenprompt_s.Get());
-	hud_init ( );
+	{
+		PWLoadTraceScope pwTraceHUD("game.prepare.hud");
+		hud_init ( );
+	}
 
 	//  Load sky spec (for any shaders later that require sun-pos)
 	t.screenprompt_s="LOADING SKY";
@@ -2706,9 +2731,12 @@ void game_preparelevel ( void )
 	#endif	
 	if (  t.game.gameisexe == 0  )  printscreenprompt(t.screenprompt_s.Get()); else loadingpageprogress(5);
 	timestampactivity(0,t.screenprompt_s.Get());
-	gun_activategunsfromentities ( );
-	gun_setup ( );
-	gun_loadonlypresent ( );
+	{
+		PWLoadTraceScope pwTraceWeapons("game.prepare.weapons");
+		gun_activategunsfromentities ( );
+		gun_setup ( );
+		gun_loadonlypresent ( );
+	}
 
 	if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
 
@@ -2747,7 +2775,10 @@ void game_preparelevel ( void )
 	t.screenprompt_s="PREPARING A.I SYSTEM";
 	if (  t.game.gameisexe == 0  )  printscreenprompt(t.screenprompt_s.Get()); else loadingpageprogress(5);
 	timestampactivity(0,t.screenprompt_s.Get());
-	darkai_preparedata ( );
+	{
+		PWLoadTraceScope pwTraceAIPathData("game.prepare.ai_path_data");
+		darkai_preparedata ( );
+	}
 
 	//  Reset waypoint for game activity
 	t.screenprompt_s="RESETTING WAYPOINTS A.I";
@@ -2766,7 +2797,10 @@ void game_preparelevel ( void )
 	t.screenprompt_s="CREATING CHARACTERS";
 	if (  t.game.gameisexe == 0  )  printscreenprompt(t.screenprompt_s.Get()); else loadingpageprogress(5);
 	timestampactivity(0,t.screenprompt_s.Get());
-	darkai_setup_characters ( );
+	{
+		PWLoadTraceScope pwTraceAICharacters("game.prepare.ai_characters");
+		darkai_setup_characters ( );
+	}
 	if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
 
 	//  When all static entities added, complete obstacle map
@@ -2777,7 +2811,10 @@ void game_preparelevel ( void )
 		timestampactivity(0,t.screenprompt_s.Get());
 	}
 	if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
-	darkai_completeobstacles ( );
+	{
+		PWLoadTraceScope pwTraceAIObstacles("game.prepare.ai_obstacles");
+		darkai_completeobstacles ( );
+	}
 	if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
 
 	//  setup infinilights
@@ -2795,8 +2832,11 @@ void game_preparelevel ( void )
 	if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
 
 	//  load required scripts
-	lua_init ( );
-	lua_scanandloadactivescripts ( );
+	{
+		PWLoadTraceScope pwTraceScripts("game.prepare.scripts");
+		lua_init ( );
+		lua_scanandloadactivescripts ( );
+	}
 
 	#ifdef VRTECH
 	// if still generating LIP file, wait here
@@ -2813,7 +2853,10 @@ void game_preparelevel ( void )
 	#endif
 
 	// load entity sounds and video
-	entity_loadactivesoundsandvideo ( );
+	{
+		PWLoadTraceScope pwTraceMedia("game.prepare.entity_media");
+		entity_loadactivesoundsandvideo ( );
+	}
 }
 
 void game_preparelevel_forplayer ( void )
