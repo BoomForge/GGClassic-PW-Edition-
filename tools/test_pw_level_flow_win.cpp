@@ -54,6 +54,13 @@ int main()
     // Cached lookup and explicit subfolder names.
     assert(PWLevelFlow::Resolve(mapbank, "cave", area));
     assert(PWLevelFlow::Resolve(mapbank, "Interiors/cave.fpm", area));
+    // A newly created direct FPM overrides a previously cached nested match.
+    Put(mapbank + "cave.fpm", "synthetic-root-level");
+    assert(PWLevelFlow::Resolve(mapbank, "cave", area));
+    assert(area.relative == "cave.fpm");
+    assert(DeleteFileA((mapbank + "cave.fpm").c_str()));
+    assert(PWLevelFlow::Resolve(mapbank, "cave", area));
+    assert(area.relative == "Interiors\\cave.fpm");
     assert(!PWLevelFlow::Resolve(mapbank, "../cave", area));
     assert(!PWLevelFlow::Resolve(mapbank, "C:\\Windows\\exploit.fpm", area));
     assert(!PWLevelFlow::Resolve(mapbank, "not-here", area));
