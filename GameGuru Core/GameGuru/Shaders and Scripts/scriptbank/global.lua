@@ -215,55 +215,97 @@ function GameLoopQuit()
  gameloop.quit()
 end
 
+-- PW Edition: independent, opt-in connected-area quest state.
+-- Classic projects without the companion module retain their old behaviour.
+local pwTransitionModuleLoaded, pwTransitionModule = pcall(require, "scriptbank\\pw_transition_state")
+if not pwTransitionModuleLoaded then pwTransitionModule = nil end
+
+function PWSetTransitionValue(key, value)
+ if pwTransitionModule then return pwTransitionModule.set(key, value) end
+ return false
+end
+
+function PWGetTransitionValue(key, fallback)
+ if pwTransitionModule then return pwTransitionModule.get(key, fallback) end
+ return fallback
+end
+
+function PWClearTransitionValues()
+ if pwTransitionModule then pwTransitionModule.clear() end
+end
+
 function GameLoopSaveStats()
- file = io.open("savegames\\standalonelevelstats.dat", "w+")
- io.output(file)
- io.write("v1\n")
- io.write(g_PlayerHealth .. "\n")
- io.write(g_PlayerLives .. "\n")
- WeaponID = GetPlayerWeaponID()
- io.write(WeaponID .. "\n")
- for index = 1, 10, 1 do
-  WeaponID = GetWeaponSlot ( index )
-  io.write(WeaponID .. "\n")
-  WeaponAmmoQty = GetWeaponAmmo ( index )
-  io.write(WeaponAmmoQty .. "\n")
-  WeaponAmmoClipQty = GetWeaponClipAmmo ( index )
-  io.write(WeaponAmmoClipQty .. "\n")
-  WeaponAmmoPoolQty = GetWeaponPoolAmmo ( index )
-  io.write(WeaponAmmoPoolQty .. "\n")
+ -- Reuse Classic's existing v1 health/lives and 10 weapon-slot save format.
+ -- Avoid leaving a partially written file when the destination is unavailable.
+ local file = io.open("savegames\\standalonelevelstats.dat", "w+")
+ if not file then return end
+ local ok = file:write("v1\n", tostring(g_PlayerHealth or 0), "\n",
+                            tostring(g_PlayerLives or 0), "\n",
+                            tostring(GetPlayerWeaponID() or 0), "\n")
+ if ok then
+  for index = 1, 10 do
+   ok = file:write(tostring(GetWeaponSlot(index) or 0), "\n",
+                   tostring(GetWeaponAmmo(index) or 0), "\n",
+                   tostring(GetWeaponClipAmmo(index) or 0), "\n",
+                   tostring(GetWeaponPoolAmmo(index) or 0), "\n")
+   if not ok then break end
+  end
  end
- io.close(file)
+ local closed = file:close()
+ if ok and closed and pwTransitionModule then
+  pwTransitionModule.save()
+ end
 end
 
 function GameLoopLoadStats()
- file = io.open("savegames\\standalonelevelstats.dat", "r")
- if file ~= nil then
-  io.input(file)
-  versionString = io.read()
-  g_PlayerHealth = tonumber(io.read())
-  g_PlayerLives = tonumber(io.read())
-  SetPlayerHealth(g_PlayerHealth)
-  SetPlayerLives(g_PlayerLives)
-  CurrentlyHeldWeaponID = tonumber(io.read())
-  for index = 1, 10, 1 do
-   WeaponID = tonumber(io.read())
-   if WeaponID > 0 then
-    SetWeaponSlot ( index, WeaponID, WeaponID )
-    ChangePlayerWeaponID(WeaponID)
-   else
-    SetWeaponSlot ( index, 0, 0 )
+ local file = io.open("savegames\\standalonelevelstats.dat", "r")
+ if not file then return end
+ local versionString = file:read("*l")
+ local saved = {}
+ local valid = versionString == "v1"
+ if valid then
+  -- Three player stats plus four values for each of 10 weapon slots.
+  -- Parse the whole file first; corrupt/truncated saves must not partly
+  -- overwrite a newly initialised player's stats or inventory.
+  for index = 1, 43 do
+   local line = file:read("*l")
+   local value = tonumber(line)
+   if value == nil or value ~= value or value < -2147483648
+      or value > 2147483647 or math.floor(value) ~= value then
+    valid = false
+    break
    end
-   WeaponAmmoQty = tonumber(io.read())
-   SetWeaponAmmo ( index, WeaponAmmoQty ) 
-   WeaponAmmoClipQty = tonumber(io.read())
-   SetWeaponClipAmmo ( index, WeaponAmmoClipQty )
-   WeaponAmmoPoolQty = tonumber(io.read())
-   SetWeaponPoolAmmo ( index, WeaponAmmoPoolQty )
+   saved[index] = value
   end
-  io.close(file)
-  ChangePlayerWeaponID(CurrentlyHeldWeaponID)
  end
+ file:close()
+ if not valid then return end
+
+ g_PlayerHealth = saved[1]
+ g_PlayerLives = saved[2]
+ SetPlayerHealth(g_PlayerHealth)
+ SetPlayerLives(g_PlayerLives)
+ local heldWeaponID = saved[3]
+ local offset = 4
+ for index = 1, 10 do
+  local weaponID = saved[offset]
+  local ammo = saved[offset+1]
+  local clip = saved[offset+2]
+  local pool = saved[offset+3]
+  if weaponID > 0 then
+   SetWeaponSlot(index, weaponID, weaponID)
+   ChangePlayerWeaponID(weaponID)
+  else
+   SetWeaponSlot(index, 0, 0)
+  end
+  SetWeaponAmmo(index, ammo)
+  SetWeaponClipAmmo(index, clip)
+  SetWeaponPoolAmmo(index, pool)
+  offset = offset + 4
+ end
+ ChangePlayerWeaponID(heldWeaponID)
+
+ if pwTransitionModule then pwTransitionModule.load() end
 end
 
 function PlayerControl()
