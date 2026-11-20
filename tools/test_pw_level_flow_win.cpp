@@ -85,6 +85,13 @@ int main()
     assert(Read(restored + "header.dat") == "synthetic-header");
     assert(Read(restored + "visuals.ini") == "synthetic-visuals");
 
+    // A corrupted cache member must NOT be restored, even for an unchanged archive.
+    const std::string cachedHeader = PWFPMCache::CacheRoot(interiors + "cave.fpm") + "header.dat";
+    Put(cachedHeader, "corrupted-cache-data");
+    assert(!PWFPMCache::Restore(interiors + "cave.fpm", restored));
+    assert(PWFPMCache::Remember(interiors + "cave.fpm", extracted, items));
+    assert(PWFPMCache::Restore(interiors + "cave.fpm", restored));
+
     // Changed FPM must invalidate the snapshot instead of returning stale assets.
     Put(interiors + "cave.fpm", "synthetic-level-archive-modified");
     assert(!PWFPMCache::Restore(interiors + "cave.fpm", restored));
