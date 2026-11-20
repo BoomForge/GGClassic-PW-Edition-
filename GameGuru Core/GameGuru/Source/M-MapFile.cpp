@@ -1210,6 +1210,8 @@ void mapfile_collectfoldersandfiles ( cstr levelpathfolder )
 	addtocollection("scriptbank\\gameloop.lua");
 	addtocollection("scriptbank\\gameplayercontrol.lua");
 	addtocollection("scriptbank\\global.lua");
+	// PW Edition: standalone projects using connected-area state need the companion module.
+	if (FileExist("scriptbank\\pw_transition_state.lua") == 1) addtocollection("scriptbank\\pw_transition_state.lua");
 	addtocollection("scriptbank\\music.lua");
 	addfoldertocollection(cstr(cstr("languagebank\\")+g.language_s+"\\artwork\\watermark").Get() );
 	addfoldertocollection("scriptbank\\people\\ai");
@@ -3313,6 +3315,8 @@ void mapfile_savestandalone_start ( void )
 	addtocollection("scriptbank\\gameloop.lua");
 	addtocollection("scriptbank\\gameplayercontrol.lua");
 	addtocollection("scriptbank\\global.lua");
+	// PW Edition: standalone projects using connected-area state need the companion module.
+	if (FileExist("scriptbank\\pw_transition_state.lua") == 1) addtocollection("scriptbank\\pw_transition_state.lua");
 	addtocollection("scriptbank\\music.lua");
 
 	// ensure key scripts are part of standalone export
