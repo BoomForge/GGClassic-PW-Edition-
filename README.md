@@ -60,7 +60,7 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 - [x] **Safer standalone level jumps (source):** scripted transitions now check the target FPM before ending the current level. Missing or unsafe destinations are rejected without destroying the active level, and repeated mapbank subfolder lookup can reuse a verified path.
 - [x] **Optional repeat-level extraction reuse (source):** added an FPM extraction cache keyed to the unchanged archive's size and modified timestamp, with cache-file verification and fallback to Classic's original extraction method. **Off by default** via `GGCPW_FPM_CACHE=1` until the engine passes real-world tests.
 - [x] **Connected-area prefetch foundation (source):** during the existing level transition fade, a bounded low-priority worker can pre-read the next FPM to warm Windows' file cache. **Off by default** via `GGCPW_PREFETCH_LEVELS=1`; it does not promise seamless loading. See the [transition implementation and testing guide](docs/PW_LEVEL_TRANSITIONS.md).
-- [x] Added isolated Windows x64 source and runtime tests for level lookup, missing targets, cache invalidation and optional prefetch; these do not compile the entire GameGuru engine.
+- [x] Added isolated Windows x64 source and runtime tests for level lookup, missing targets, cache invalidation and optional prefetch. [CI run #44820989378](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44820989378) **passed Visual Studio C++ compilation and synthetic runtime tests**. These do not compile the entire GameGuru engine.
 
 ### In progress — verification needed
 
