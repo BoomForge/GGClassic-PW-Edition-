@@ -42,7 +42,7 @@ function Check-Relative([string]$relative) {
     -not $part.EndsWith(".") -and -not $part.EndsWith(" ")) "Unsafe package path."
  }
  # Explicitly excludes entitybank, terrainbank, FPM files, levels and local settings.
- $allowed=$name -match '^(?i:(Guru-MapEditor\.exe|GameGuru\.exe|pw-updater\.ps1|pw-edition-version\.txt|[a-z0-9_.-]+\.dll|Files\\effectbank\\reloaded\\[a-z0-9_.-]+\.fx))$'
+ $allowed=$name -match '^(?i:(Guru-MapEditor\.exe|GameGuru\.exe|pw-updater\.ps1|pw-edition-version\.txt|[a-z0-9_.-]+\.dll|Files\\effectbank\\reloaded\\[a-z0-9_.-]+\.fx|Files\\scriptbank\\(?:global|pw_transition_state)\.lua))$'
  Require $allowed "Unapproved update file: $name"
  return $name
 }
