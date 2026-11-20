@@ -668,6 +668,9 @@ void mapfile_saveproject_fpm ( void )
 				tThisFile = tNameOnly + cstr("_D.dds");
 				#endif
 				if ( FileExist(tThisFile.Get()) ) AddFileToBlock ( 1, tThisFile.Get() );
+				// PW Edition: save companion PNG textures alongside legacy DDS/JPEG.
+				tThisFile = tNameOnly + cstr("_D.png");
+				if ( FileExist(tThisFile.Get()) ) AddFileToBlock ( 1, tThisFile.Get() );
 				#ifdef VRTECH
 				 // Don't include large files until find a nice to way reduce them considerably (or find a faster way to transfer multiplayer FPM)
 				#else
@@ -675,13 +678,18 @@ void mapfile_saveproject_fpm ( void )
 				 if ( FileExist(tThisFile.Get()) ) AddFileToBlock ( 1, tThisFile.Get() );
 				 tThisFile = tNameOnly + cstr("_S.dds");
 				 if ( FileExist(tThisFile.Get()) ) AddFileToBlock ( 1, tThisFile.Get() );
+				 tThisFile = tNameOnly + cstr("_N.png");
+				 if ( FileExist(tThisFile.Get()) ) AddFileToBlock ( 1, tThisFile.Get() );
+				 tThisFile = tNameOnly + cstr("_S.png");
+				 if ( FileExist(tThisFile.Get()) ) AddFileToBlock ( 1, tThisFile.Get() );
 				#endif
 			}
 			strEnt = cstr(Lower(Right(t.tfile_s.Get(),6)));
 			#ifdef VRTECH
 			if ( strcmp ( strEnt.Get(), "_d.jpg" ) == NULL )
 			#else
-			if ( strcmp ( strEnt.Get(), "_d.dds" ) == NULL || strcmp ( strEnt.Get(), "_n.dds" ) == NULL || strcmp ( strEnt.Get(), "_s.dds" ) == NULL )
+			if ( strcmp ( strEnt.Get(), "_d.dds" ) == NULL || strcmp ( strEnt.Get(), "_n.dds" ) == NULL || strcmp ( strEnt.Get(), "_s.dds" ) == NULL
+				|| strcmp ( strEnt.Get(), "_d.png" ) == NULL || strcmp ( strEnt.Get(), "_n.png" ) == NULL || strcmp ( strEnt.Get(), "_s.png" ) == NULL )
 			#endif
 			{
 				AddFileToBlock ( 1, t.tfile_s.Get() );
@@ -5108,7 +5116,7 @@ void CreateItineraryFile ( void )
 		{
 			LPSTR pString = g_sDefaultAssetFiles[n].Get();
 			for ( int c = 0; c < strlen(pString); c++ )
-				WriteMemblockByte ( 1, pos++, (unsigned char) pString[c] ); //PE: chars like 'ö' will set -10 and generate errors.
+				WriteMemblockByte ( 1, pos++, (unsigned char) pString[c] ); //PE: chars like 'Ã¶' will set -10 and generate errors.
 			WriteMemblockByte ( 1, pos++, 0 );
 		}
 		SetDir ( g.fpscrootdir_s.Get() );
