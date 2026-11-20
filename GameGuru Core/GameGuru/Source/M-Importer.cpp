@@ -1945,8 +1945,20 @@ void importer_loadmodel ( void )
 					cstr pTextureFile = pMesh->pTextures[iTextureStage].pName;
 					if ( FileExist ( pTextureFile.Get() ) == 0 )
 					{
-						pTextureFile = Left ( pTextureFile.Get(), strlen(pTextureFile.Get())-4 );
-						pTextureFile = pTextureFile + ".dds";
+						// PW Edition: converted meshes may reference a texture extension
+						// that is no longer present. Keep DDS first for legacy projects,
+						// then accept a same-name PNG without forcing a conversion.
+						const size_t nameLength = strlen(pTextureFile.Get());
+						if (nameLength > 4)
+						{
+							cstr pTextureBase = Left(pTextureFile.Get(), nameLength - 4);
+							cstr pDDSFile = pTextureBase + ".dds";
+							cstr pPNGFile = pTextureBase + ".png";
+							if (FileExist(pDDSFile.Get()) == 1)
+								pTextureFile = pDDSFile;
+							else
+								pTextureFile = pPNGFile;
+						}
 					}
 					if ( FileExist ( pTextureFile.Get() ) == 1 )
 					{
