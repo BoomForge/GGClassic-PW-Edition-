@@ -2982,6 +2982,24 @@ void entity_getgunidandflakid ( void )
 	}
 }
 
+// PW Edition: retain native DDS loading and try a PNG of the same name only
+// when a referenced DDS texture could not be loaded. Explicit PNG paths
+// continue through the engine's existing image loader unchanged.
+static int pw_load_entity_texture_with_png_fallback ( cstr textureFile, int loadMode, int textureDivide )
+{
+	int textureID = loadinternaltextureex(textureFile.Get(), loadMode, textureDivide);
+	if (textureID == 0)
+	{
+		const size_t filenameLength = strlen(textureFile.Get());
+		if (filenameLength >= 4 && stricmp(textureFile.Get() + filenameLength - 4, ".dds") == 0)
+		{
+			cstr pngFile = Left(textureFile.Get(), filenameLength - 4) + ".png";
+			textureID = loadinternaltextureex(pngFile.Get(), loadMode, textureDivide);
+		}
+	}
+	return textureID;
+}
+
 void entity_loadtexturesandeffect ( void )
 {
 	//  If entity object not exist, reset var
@@ -3040,17 +3058,17 @@ void entity_loadtexturesandeffect ( void )
 		if (  g.gdividetexturesize == 0  )  t.tthistexdir_s = "effectbank\\reloaded\\media\\white_D.dds";
 		if (  t.entityprofile[t.entid].transparency == 0 ) 
 		{
-			t.texuseid=loadinternaltextureex(t.tthistexdir_s.Get(),1,t.tfullorhalfdivide);
+			t.texuseid=pw_load_entity_texture_with_png_fallback(t.tthistexdir_s.Get(),1,t.tfullorhalfdivide);
 		}
 		else
 		{
-			t.texuseid=loadinternaltextureex(t.tthistexdir_s.Get(),5,t.tfullorhalfdivide);
+			t.texuseid=pw_load_entity_texture_with_png_fallback(t.tthistexdir_s.Get(),5,t.tfullorhalfdivide);
 		}
 		if (  t.texuseid == 0 ) 
 		{
 			t.texdir_s=t.entityprofile[t.entid].texd_s;
 			t.texaltdir_s=t.entityprofile[t.entid].texaltd_s;
-			t.texuseid=loadinternaltextureex(t.texdir_s.Get(),1,t.tfullorhalfdivide);
+			t.texuseid=pw_load_entity_texture_with_png_fallback(t.texdir_s.Get(),1,t.tfullorhalfdivide);
 		}
 		if (  t.texuseid == 0 ) 
 		{
@@ -3071,7 +3089,7 @@ void entity_loadtexturesandeffect ( void )
 			}
 			t.texdir_s=t.tlimbtex_s;
 			t.texaltdir_s=t.entityprofile[t.entid].texaltd_s;
-			t.texuseid=loadinternaltextureex(t.texdir_s.Get(),1,t.tfullorhalfdivide);
+			t.texuseid=pw_load_entity_texture_with_png_fallback(t.texdir_s.Get(),1,t.tfullorhalfdivide);
 		}
 
 		//  Load ALT texture if available
@@ -3096,19 +3114,29 @@ void entity_loadtexturesandeffect ( void )
 				LPSTR pMeshIDTexture = t.entityprofile[t.entid].texoverride_s[iMeshIndex].Get();
 				if (strlen(pMeshIDTexture) > 0)
 				{
-					int iLoadMeshIDTexture = loadinternaltextureex(pMeshIDTexture, 1, t.tfullorhalfdivide);
+					int iLoadMeshIDTexture = pw_load_entity_texture_with_png_fallback(pMeshIDTexture, 1, t.tfullorhalfdivide);
 					sMesh* pMesh = pObject->ppMeshList[iMeshIndex];
 					if (pMesh) SetBaseTextureStage (pMesh, 0, iLoadMeshIDTexture);
-					if (stricmp(pMeshIDTexture + strlen(pMeshIDTexture) - strlen("_color.dds"), "_color.dds") == NULL)
+					// Multi-material overrides accept both _color.dds and _color.png
+					// while keeping the existing DDS-first normal-map lookup.
+					const size_t textureNameLength = strlen(pMeshIDTexture);
+					const size_t colorSuffixLength = strlen("_color.dds");
+					const bool isColorTexture = textureNameLength >= colorSuffixLength
+						&& (stricmp(pMeshIDTexture + textureNameLength - colorSuffixLength, "_color.dds") == 0
+							|| stricmp(pMeshIDTexture + textureNameLength - colorSuffixLength, "_color.png") == 0);
+					if (isColorTexture)
 					{
-						// also attempt to load normal
-						char pNewTexName[MAX_PATH];
-						strcpy(pNewTexName, pMeshIDTexture);
-						pNewTexName[strlen(pNewTexName) - strlen("_color.dds")] = 0;
-						strcat(pNewTexName, "_normal.dds");
-						iLoadMeshIDTexture = loadinternaltextureex(pNewTexName, 1, t.tfullorhalfdivide);
-						sMesh* pMesh = pObject->ppMeshList[iMeshIndex];
-						if (pMesh) SetBaseTextureStage (pMesh, 2, iLoadMeshIDTexture);
+						const size_t prefixLength = textureNameLength - colorSuffixLength;
+						if (prefixLength + strlen("_normal.dds") < MAX_PATH)
+						{
+							char pNewTexName[MAX_PATH];
+							memcpy(pNewTexName, pMeshIDTexture, prefixLength);
+							pNewTexName[prefixLength] = 0;
+							strcat(pNewTexName, "_normal.dds");
+							iLoadMeshIDTexture = pw_load_entity_texture_with_png_fallback(pNewTexName, 1, t.tfullorhalfdivide);
+							sMesh* pMesh = pObject->ppMeshList[iMeshIndex];
+							if (pMesh && iLoadMeshIDTexture > 0) SetBaseTextureStage (pMesh, 2, iLoadMeshIDTexture);
+						}
 					}
 				}
 			}
@@ -3223,14 +3251,14 @@ void entity_loadtexturesandeffect ( void )
 					t.texdirN_s = t.texdirnoext_s+"_normal.dds";
 				else
 					t.texdirN_s = t.texdirnoext_s+"_n.dds";
-				t.texuseid = loadinternaltextureex(t.texdirN_s.Get(),1,t.tfullorhalfdivide);
+				t.texuseid = pw_load_entity_texture_with_png_fallback(t.texdirN_s.Get(),1,t.tfullorhalfdivide);
 				if ( t.texuseid == 0 ) 
 				{
 					if ( iEffectProfile == 1 )
 						t.texdirN_s = t.texdirnoext_s+"_n.dds";
 					else
 						t.texdirN_s = t.texdirnoext_s+"_normal.dds";
-					t.texuseid = loadinternaltextureex(t.texdirN_s.Get(),1,t.tfullorhalfdivide);
+					t.texuseid = pw_load_entity_texture_with_png_fallback(t.texdirN_s.Get(),1,t.tfullorhalfdivide);
 					if ( t.texuseid == 0 ) 
 					{
 						t.texuseid = loadinternaltextureex("effectbank\\reloaded\\media\\blank_N.dds",1,t.tfullorhalfdivide);
@@ -3244,12 +3272,12 @@ void entity_loadtexturesandeffect ( void )
 					if ( iEffectProfile == 1 )
 					{
 						t.texdirS_s = t.texdirnoext_s+"_metalness.dds";
-						t.texuseid = loadinternaltextureex(t.texdirS_s.Get(),1,t.tfullorhalfdivide);
+						t.texuseid = pw_load_entity_texture_with_png_fallback(t.texdirS_s.Get(),1,t.tfullorhalfdivide);
 						if ( t.texuseid == 0 ) 
 						{
 							//PE: We dont use _s.dds ?
 							t.texdirS_s = t.texdirnoext_s+"_specular.dds";
-							t.texuseid = loadinternaltextureex(t.texdirS_s.Get(),1,t.tfullorhalfdivide);
+							t.texuseid = pw_load_entity_texture_with_png_fallback(t.texdirS_s.Get(),1,t.tfullorhalfdivide);
 							if ( t.texuseid == 0 ) 
 							{
 								// 261117 - search material for stock metalness
@@ -3257,7 +3285,7 @@ void entity_loadtexturesandeffect ( void )
 								int iMaterialIndex = t.entityprofile[t.entid].materialindex;
 								sprintf ( pFullFilename, "effectbank\\reloaded\\media\\materials\\%d_Metalness.dds", iMaterialIndex );
 								t.texdirS_s = pFullFilename;
-								t.texuseid = loadinternaltextureex(t.texdirS_s.Get(),1,t.tfullorhalfdivide);
+								t.texuseid = pw_load_entity_texture_with_png_fallback(t.texdirS_s.Get(),1,t.tfullorhalfdivide);
 								if ( t.texuseid == 0 ) 
 								{
 									t.texuseid = loadinternaltextureex("effectbank\\reloaded\\media\\blank_black.dds",1,t.tfullorhalfdivide);
@@ -3268,7 +3296,7 @@ void entity_loadtexturesandeffect ( void )
 					else
 					{
 						t.texdirS_s = t.texdirnoext_s+"_s.dds";
-						t.texuseid = loadinternaltextureex(t.texdirS_s.Get(),1,t.tfullorhalfdivide);
+						t.texuseid = pw_load_entity_texture_with_png_fallback(t.texdirS_s.Get(),1,t.tfullorhalfdivide);
 					}
 				}
 				else
@@ -3277,7 +3305,7 @@ void entity_loadtexturesandeffect ( void )
 					if (  t.entityprofile[t.entid].specular == 2  )  t.texdirS_s = "effectbank\\reloaded\\media\\blank_low_S.dds";
 					if (  t.entityprofile[t.entid].specular == 3  )  t.texdirS_s = "effectbank\\reloaded\\media\\blank_medium_S.dds";
 					if (  t.entityprofile[t.entid].specular == 4  )  t.texdirS_s = "effectbank\\reloaded\\media\\blank_high_S.dds";
-					t.texuseid = loadinternaltextureex(t.texdirS_s.Get(),1,t.tfullorhalfdivide);
+					t.texuseid = pw_load_entity_texture_with_png_fallback(t.texdirS_s.Get(),1,t.tfullorhalfdivide);
 				}
 				t.entityprofile[t.entid].texsid = t.texuseid;
 
@@ -3286,7 +3314,7 @@ void entity_loadtexturesandeffect ( void )
 				{
 					// non-PBR legacy behaviour
 					t.texdirI_s = t.texdirnoext_s+"_i.dds";
-					t.texuseid = loadinternaltextureex(t.texdirI_s.Get(),1,t.tfullorhalfdivide);
+					t.texuseid = pw_load_entity_texture_with_png_fallback(t.texdirI_s.Get(),1,t.tfullorhalfdivide);
 					if ( t.texuseid == 0 )
 					{
 						// if no _I file, try to find and load _CUBE file (load mode 2 = cube)
@@ -3316,11 +3344,11 @@ void entity_loadtexturesandeffect ( void )
 
 				// Assign AMBIENT OCCLUSION MAP
 				t.texdirO_s = t.texdirnoext_s+"_o.dds";
-				t.texuseid = loadinternaltextureex(t.texdirO_s.Get(),1,t.tfullorhalfdivide);
+				t.texuseid = pw_load_entity_texture_with_png_fallback(t.texdirO_s.Get(),1,t.tfullorhalfdivide);
 				if ( t.texuseid == 0 ) 
 				{
 					t.texdirO_s = t.texdirnoext_s+"_ao.dds";
-					t.texuseid = loadinternaltextureex(t.texdirO_s.Get(),1,t.tfullorhalfdivide);
+					t.texuseid = pw_load_entity_texture_with_png_fallback(t.texdirO_s.Get(),1,t.tfullorhalfdivide);
 					if ( t.texuseid == 0 ) 
 					{
 						t.texuseid = loadinternaltextureex("effectbank\\reloaded\\media\\blank_O.dds",1,t.tfullorhalfdivide);
@@ -3345,7 +3373,7 @@ void entity_loadtexturesandeffect ( void )
 				{
 					// gloss texture
 					cstr pGlosstex_s = t.texdirnoext_s+"_gloss.dds";
-					t.texuseid = loadinternaltextureex(pGlosstex_s.Get(),1,t.tfullorhalfdivide);
+					t.texuseid = pw_load_entity_texture_with_png_fallback(pGlosstex_s.Get(),1,t.tfullorhalfdivide);
 					if ( t.texuseid == 0 ) 
 					{
 						// 261117 - search material for stock metalness
@@ -3353,7 +3381,7 @@ void entity_loadtexturesandeffect ( void )
 						int iMaterialIndex = t.entityprofile[t.entid].materialindex;
 						sprintf ( pFullFilename, "effectbank\\reloaded\\media\\materials\\%d_Gloss.dds", iMaterialIndex );
 						pGlosstex_s = pFullFilename;
-						t.texuseid = loadinternaltextureex(pGlosstex_s.Get(),1,t.tfullorhalfdivide);
+						t.texuseid = pw_load_entity_texture_with_png_fallback(pGlosstex_s.Get(),1,t.tfullorhalfdivide);
 						if ( t.texuseid == 0 ) 
 						{
 							t.texuseid = loadinternaltextureex("effectbank\\reloaded\\media\\white_D.dds",1,t.tfullorhalfdivide);
@@ -3364,11 +3392,11 @@ void entity_loadtexturesandeffect ( void )
 					// mask or height texture
 					#ifdef VRTECH
 					cstr pHeighttex_s = t.texdirnoext_s+"_mask.dds";
-					t.texuseid = loadinternaltextureex(pHeighttex_s.Get(),1,t.tfullorhalfdivide);
+					t.texuseid = pw_load_entity_texture_with_png_fallback(pHeighttex_s.Get(),1,t.tfullorhalfdivide);
 					if ( t.texuseid == 0 ) 
 					{
 						pHeighttex_s = t.texdirnoext_s+"_height.dds";
-						t.texuseid = loadinternaltextureex(pHeighttex_s.Get(),1,t.tfullorhalfdivide);
+						t.texuseid = pw_load_entity_texture_with_png_fallback(pHeighttex_s.Get(),1,t.tfullorhalfdivide);
 						if (t.texuseid == 0)
 						{
 							t.texuseid = loadinternaltextureex("effectbank\\reloaded\\media\\blank_black.dds", 1, t.tfullorhalfdivide);
@@ -3377,7 +3405,7 @@ void entity_loadtexturesandeffect ( void )
 					t.entityprofile[t.entid].texhid = t.texuseid;
 					#else
 					cstr pHeighttex_s = t.texdirnoext_s+"_height.dds";
-					if( g.skipunusedtextures == 0 ) t.texuseid = loadinternaltextureex(pHeighttex_s.Get(),1,t.tfullorhalfdivide);
+					if( g.skipunusedtextures == 0 ) t.texuseid = pw_load_entity_texture_with_png_fallback(pHeighttex_s.Get(),1,t.tfullorhalfdivide);
 					if ( t.texuseid == 0 || g.skipunusedtextures == 1 )
 					{
 						t.texuseid = loadinternaltextureex("effectbank\\reloaded\\media\\blank_black.dds",1,t.tfullorhalfdivide);
@@ -3395,28 +3423,28 @@ void entity_loadtexturesandeffect ( void )
 					//PE: Illumination overwrite detail.
 					use_illumination = true;
 					cstr pDetailtex_s = t.texdirnoext_s + "_illumination.dds";
-					t.entityprofile[t.entid].texlid = loadinternaltextureex(pDetailtex_s.Get(), 1, t.tfullorhalfdivide);
+					t.entityprofile[t.entid].texlid = pw_load_entity_texture_with_png_fallback(pDetailtex_s.Get(),1,t.tfullorhalfdivide);
 					if (t.entityprofile[t.entid].texlid == 0)
 					{
 						cstr pDetailtex_s = t.texdirnoext_s + "_emissive.dds"; // _emissive
-						t.entityprofile[t.entid].texlid = loadinternaltextureex(pDetailtex_s.Get(), 1, t.tfullorhalfdivide);
+						t.entityprofile[t.entid].texlid = pw_load_entity_texture_with_png_fallback(pDetailtex_s.Get(),1,t.tfullorhalfdivide);
 						if (t.entityprofile[t.entid].texlid == 0)
 						{
 							if (g.gpbroverride == 1) 
 							{
 								// PE: Also support _i when using gpbroverride == 1.
 								t.texdirI_s = t.texdirnoext_s + "_i.dds";
-								t.entityprofile[t.entid].texlid = loadinternaltextureex(t.texdirI_s.Get(), 1, t.tfullorhalfdivide);
+								t.entityprofile[t.entid].texlid = pw_load_entity_texture_with_png_fallback(t.texdirI_s.Get(),1,t.tfullorhalfdivide);
 							}
 							if (t.entityprofile[t.entid].texlid == 0) 
 							{
 								// Detail texture
 								cstr pDetailtex_s = t.texdirnoext_s + "_detail.dds";
 								#ifdef VRTECH
-								t.entityprofile[t.entid].texlid = loadinternaltextureex(pDetailtex_s.Get(), 1, t.tfullorhalfdivide);
+								t.entityprofile[t.entid].texlid = pw_load_entity_texture_with_png_fallback(pDetailtex_s.Get(),1,t.tfullorhalfdivide);
 								if (t.entityprofile[t.entid].texlid == 0)
 								#else
-								if( g.skipunusedtextures == 0 ) t.entityprofile[t.entid].texlid = loadinternaltextureex(pDetailtex_s.Get(), 1, t.tfullorhalfdivide);
+								if( g.skipunusedtextures == 0 ) t.entityprofile[t.entid].texlid = pw_load_entity_texture_with_png_fallback(pDetailtex_s.Get(),1,t.tfullorhalfdivide);
 								if (t.entityprofile[t.entid].texlid == 0 || g.skipunusedtextures == 1)
 								#endif
 								{
