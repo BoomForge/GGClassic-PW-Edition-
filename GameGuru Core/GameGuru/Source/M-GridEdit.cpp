@@ -9,6 +9,8 @@
 #include "M-WelcomeSystem.h"
 #include "M-Widget.h"
 #include "direct.h"
+#include <shellapi.h>
+#include <string>
 
 #ifdef VRTECH
 //Windows Mixed Reality Support
@@ -2356,6 +2358,56 @@ void mapeditorexecutable_loop(void)
 					strcpy(cForceTutorialName, "01 - Getting started");
 				}
 				#endif
+				// Pixelwolf Edition: launch our trusted, locally installed update helper.
+				// Downloads are staged outside the running editor; it must close before binaries change.
+				if (ImGui::MenuItem("Check for PW Edition Updates..."))
+				{
+					char modulePath[MAX_PATH] = { 0 };
+					DWORD pathLength = GetModuleFileNameA(NULL, modulePath, MAX_PATH);
+					if (pathLength == 0 || pathLength >= MAX_PATH)
+					{
+						MessageBoxA(NULL, "Unable to locate this editor installation.", "PW Edition Updater", MB_OK | MB_ICONERROR);
+					}
+					else
+					{
+						std::string executablePath(modulePath);
+						size_t lastSlash = executablePath.find_last_of("\\/");
+						if (lastSlash == std::string::npos)
+						{
+							MessageBoxA(NULL, "Unable to locate the editor folder.", "PW Edition Updater", MB_OK | MB_ICONERROR);
+						}
+						else
+						{
+							std::string installationDir = executablePath.substr(0, lastSlash);
+							std::string updaterPath = installationDir + "\\pw-updater.ps1";
+							if (GetFileAttributesA(updaterPath.c_str()) == INVALID_FILE_ATTRIBUTES)
+							{
+								MessageBoxA(NULL, "The PW Edition updater is not installed. Build or install a PW Edition package that includes pw-updater.ps1.", "PW Edition Updater", MB_OK | MB_ICONWARNING);
+							}
+							else
+							{
+								char systemDir[MAX_PATH] = { 0 };
+								UINT systemLength = GetSystemDirectoryA(systemDir, MAX_PATH);
+								if (systemLength == 0 || systemLength >= MAX_PATH)
+								{
+									MessageBoxA(NULL, "Cannot locate Windows PowerShell.", "PW Edition Updater", MB_OK | MB_ICONERROR);
+								}
+								else
+								{
+									std::string powershellExe = std::string(systemDir) + "\\WindowsPowerShell\\v1.0\\powershell.exe";
+									std::string executableName = executablePath.substr(lastSlash + 1);
+									std::string parameters = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + updaterPath +
+										"\" -InstallDir \"" + installationDir + "\" -EditorPid " + std::to_string(GetCurrentProcessId()) +
+										" -ExeName \"" + executableName + "\"";
+									HINSTANCE result = ShellExecuteA(NULL, "open", powershellExe.c_str(), parameters.c_str(), installationDir.c_str(), SW_HIDE);
+									if ((INT_PTR)result <= 32)
+										MessageBoxA(NULL, "Unable to start the PW Edition updater.", "PW Edition Updater", MB_OK | MB_ICONERROR);
+								}
+							}
+						}
+					}
+				}
+
 				if (ImGui::MenuItem("About")) {
 					bAbout_Window = true;
 					bAbout_Window_First_Run = true;
