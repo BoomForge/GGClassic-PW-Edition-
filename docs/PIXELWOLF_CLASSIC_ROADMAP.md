@@ -29,6 +29,18 @@ The fork began **identical to upstream master** (comparison returned 0 commits a
 
 **Not verified:** Windows compilation, shader runtime compilation, editor startup, faster loading, modified asset import, real-time shadow quality, or project compatibility. Do not call this a working or improved binary until tested on Windows.
 
+## PNG textures alongside DDS — source changes staged 2026-11-21
+
+The user's requirement is **add PNG, keep DDS**. Existing Classic image loaders already handle PNG in some contexts; the missing support involves format-specific model/material lookup and packaging.
+
+Implemented on the current development branch (not yet compiled or tested):
+- `GameGuru Core/GameGuru/Source/M-Entity.cpp`: DDS-first fallback to same-name PNG for entity base maps and companion normal, specular/metalness, AO, gloss, height, emissive/illumination, detail texture lookups; _color.png multi-material override companion handling.
+- `GameGuru Core/GameGuru/Source/M-Importer.cpp`: FBX converted-texture lookup tries existing texture names first, then a same-name DDS if present, and otherwise a same-name PNG.
+- `GameGuru Core/GameGuru/Source/M-MapFile.cpp`: adds PNG _D/_N/_S files to the applicable level/archive file list without removing DDS entries.
+- Root `README.md` now contains **Completed / In progress / To do** upgrade tracking, including status distinctions.
+
+**Acceptance still open:** Build with VS2022; load PNG and DDS sets for one static Blender model and one rigged model; verify importer previews, material stages, map archive save/reopen and standalone packaging; check no DDS regressions. Other specialised texture formats (lightmaps, terrain generated textures and legacy character-creator internals) remain format-specific until explicitly validated. Do not claim universal PNG support yet.
+
 ## Remaining issues in priority order
 
 | Priority | Area | Issue / evidence | Acceptance goal |
