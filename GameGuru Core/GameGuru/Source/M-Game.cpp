@@ -2084,6 +2084,7 @@ void game_masterroot_gameloop_afterloopcode(int iUseVRTest)
 		&& t.game.quitflag == 0
 		&& Len(t.game.jumplevel_s.Get()) > 0
 		&& pw_keep_player_stats_between_levels();
+	bool pwCanWriteFreshStatsFile = false;
 	if (pwInProcessJump)
 	{
 		g_pwHealthAcrossLevels = t.player[t.plrid].health;
@@ -2093,7 +2094,8 @@ void game_masterroot_gameloop_afterloopcode(int iUseVRTest)
 		// Prevent an older save file from being mistaken for this transition.
 		const char* pwStatsPath = "savegames\\standalonelevelstats.dat";
 		DWORD oldAttrs = GetFileAttributesA(pwStatsPath);
-		if (oldAttrs == INVALID_FILE_ATTRIBUTES || DeleteFileA(pwStatsPath))
+		pwCanWriteFreshStatsFile = oldAttrs == INVALID_FILE_ATTRIBUTES || DeleteFileA(pwStatsPath) != 0;
+		if (pwCanWriteFreshStatsFile)
 		{
 			LuaSetInt("g_PlayerHealth", g_pwHealthAcrossLevels);
 			LuaSetInt("g_PlayerLives", g_pwLivesAcrossLevels);
@@ -2104,7 +2106,7 @@ void game_masterroot_gameloop_afterloopcode(int iUseVRTest)
 			timestampactivity(0, "PW Edition: old level-stats file could not be cleared");
 		}
 	}
-	if (t.game.allowfragmentation == 2 || pwInProcessJump)
+	if (t.game.allowfragmentation == 2 || (pwInProcessJump && pwCanWriteFreshStatsFile))
 	{
 		char pLUACustomSaveCall[256];
 		strcpy ( pLUACustomSaveCall, "GameLoopSaveStats" );
@@ -2115,7 +2117,7 @@ void game_masterroot_gameloop_afterloopcode(int iUseVRTest)
 			// Only read back the Lua weapon snapshot if a fresh one was created.
 			// Health/lives remain protected by the in-process fallback above.
 			const char* pwStatsPath = "savegames\\standalonelevelstats.dat";
-			g_pwInProcessLuaStatsAvailable =
+			g_pwInProcessLuaStatsAvailable = pwCanWriteFreshStatsFile &&
 				GetFileAttributesA(pwStatsPath) != INVALID_FILE_ATTRIBUTES;
 		}
 	}
