@@ -5025,31 +5025,16 @@ void importer_load_textures ( void )
 			//  found texture specified in imported model
 			t.tSourceName_s = t.tthisfile_s;
 
-			//  check if texture file exists alonside model file
-			char pFindFile[512];
-			t.tFileName_s = t.importer.objectFileOriginalPath + t.tSourceName_s;
-			strcpy ( pFindFile, t.tFileName_s.Get() );
-			if ( FileExist(pFindFile)  ==  0 ) 
+			// PW Edition: avoid unsafe fixed-size strcpy/strcat on Blender's
+			// embedded absolute texture paths. Keep DDS/PNG companions available.
+			const auto imageFileExists = [](const std::string& path) -> bool
 			{
-				// if not, try just the filename itself (no path)
-				int iFoundFilename = -1;
-				for ( int n = strlen(pFindFile)-1; n > 0; n-- )
-				{
-					if ( pFindFile[n] == '\\' || pFindFile[n] == '/' )
-					{
-						iFoundFilename = n;
-						break;
-					}
-				}
-				if ( iFoundFilename != -1 )
-				{
-					char pFilenameOnly[512];
-					strcpy ( pFilenameOnly, pFindFile+iFoundFilename+1 );
-					strcpy ( pFindFile, t.importer.objectFileOriginalPath.Get() );
-					strcat ( pFindFile, pFilenameOnly );
-				}
-			}
-			t.tFileName_s = pFindFile;
+				DWORD attrs = GetFileAttributesA(path.c_str());
+				return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
+			};
+			const std::string pwTexture = PWImport::FindTexture(
+				t.importer.objectFileOriginalPath.Get(), t.tSourceName_s.Get(), imageFileExists);
+			t.tFileName_s = pwTexture.empty() ? "" : pwTexture.c_str();
 
 			//  ensure file is not a path or contains invalid characters
 			if ( strcmp ( Right(t.tFileName_s.Get(),1) , "/" ) == 0 || strcmp ( Right(t.tFileName_s.Get(),1) , "\\" ) == 0  )  t.tFileName_s = "";
@@ -5130,13 +5115,15 @@ void importer_load_textures ( void )
 			}
 			if (  t.tlimbname_s != "" ) 
 			{
-				t.tSourceName_s=t.tlimbname_s;
-				t.tFileName_s=t.importer.objectFileOriginalPath+t.tSourceName_s;
-				if (  FileExist(t.tFileName_s.Get()) == 0 ) 
+				const auto imageFileExists = [](const std::string& path) -> bool
 				{
-					t.tSourceName_s = ""; t.tSourceName_s=t.tSourceName_s+Left(t.tlimbname_s.Get(),Len(t.tlimbname_s.Get())-4)+".dds";
-					t.tFileName_s=t.importer.objectFileOriginalPath+t.tSourceName_s;
-				}
+					DWORD attrs = GetFileAttributesA(path.c_str());
+					return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
+				};
+				const std::string pwTexture = PWImport::FindTexture(
+					t.importer.objectFileOriginalPath.Get(), t.tlimbname_s.Get(), imageFileExists);
+				t.tSourceName_s = PWImport::BaseName(pwTexture).c_str();
+				t.tFileName_s = pwTexture.c_str();
 				if (  FileExist(t.tFileName_s.Get()) == 1 ) 
 				{
 					importer_addtexturefiletolist ( t.tFileName_s, t.tSourceName_s, &tCount );
