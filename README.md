@@ -35,6 +35,8 @@ A> Due to this public repository being hammered by anonymous cloning, we have mo
 
 The goal is a **fast, familiar first-person world builder** for an early-2000s-style 3D RPG that will grow gradually over a long period. DDS support must remain intact. New graphics formats are **additional**, not replacements.
 
+This tracker reports the latest **development-branch** progress. The default `master` branch may not contain those source changes until the draft PR is tested and merged.
+
 Statuses below distinguish **committed source changes** from **tested runtime behaviour**. A checked source task does not mean a Windows executable has been built or verified.
 
 ### Completed — checked and committed in source
