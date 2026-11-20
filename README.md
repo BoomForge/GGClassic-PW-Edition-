@@ -68,7 +68,7 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 
 - [x] **Safer per-level cleanup (source):** replaced the original never-ending occluder worker loop with cooperative stop/join, then release its Win32 worker and event handles before entities, AI and physics are unloaded. Added a profiler phase for shutdown. See [cleanup and importer engineering notes](docs/PW_IMPORT_AND_LEVEL_CLEANUP.md). **Full-engine verification pending**.
 - [x] **Blender/Mixamo FBX import hardening (source):** safe, case-insensitive FBX detection; find missing textures by basename alongside the model; retain DDS with additional PNG/TGA/JPEG fallback; guard null meshes, short filenames, full texture lists and legacy fixed-buffer path handling. This **does not yet fix bone/clip retargeting**.
-- [x] Added isolated VS2022 Windows x64 importer path and repeated worker-start/stop checks. [CI run #44838123583](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44838123583) passed those synthetic tests. The later importer changes still require full GameGuru compilation.
+- [x] Added isolated VS2022 Windows x64 importer path and repeated worker-start/stop checks. [CI run #44838327649](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44838327649) passed those synthetic tests. The isolated checks pass at the latest development source commit; full GameGuru compilation and actual FBX/level behaviour remain unverified.
 
 ### In progress — verification needed
 
