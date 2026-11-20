@@ -364,4 +364,9 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <!-- PW Edition: the updater is a local, user-consented helper, shipped beside the editor EXE. -->
+  <Target Name="CopyPWEditionUpdater" AfterTargets="Build" Condition="'$(Platform)' == 'x64'">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\tools\pw-updater.ps1;$(MSBuildProjectDirectory)\..\..\tools\pw-edition-version.txt"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
 </Project>
