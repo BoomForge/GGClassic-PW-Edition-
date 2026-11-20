@@ -124,7 +124,7 @@ function Apply-Update([string]$dir) {
  $manifest=Validate-Manifest $dir
  $backupDir=Join-Path $dir "backup"
  [void](New-Item -ItemType Directory -Path $backupDir -Force)
- $written=New-Object Collections.ArrayList
+ $written=[System.Collections.ArrayList]::new()
  try {
   # Back up everything first: a failed copy can then restore the original state.
   foreach ($f in $manifest.files) {
@@ -227,9 +227,9 @@ try {
  }
 
  if (-not (Can-Write $InstallDir)) {
-  $args='-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "'+$PSCommandPath+
+  $argumentLine='-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "'+$PSCommandPath+
    '" -Apply -InstallDir "'+$InstallDir+'" -StageDir "'+$payload+'" -ExeName "'+$ExeName+'"'
-  $child=Start-Process -FilePath (Join-Path $PSHOME "powershell.exe") -ArgumentList $args -Verb RunAs -Wait -PassThru
+  $child=Start-Process -FilePath (Join-Path $PSHOME "powershell.exe") -ArgumentList $argumentLine -Verb RunAs -Wait -PassThru
   Require ($child.ExitCode -eq 0) "Elevation or installation was cancelled/failed."
  } else {
   Apply-Update $payload
