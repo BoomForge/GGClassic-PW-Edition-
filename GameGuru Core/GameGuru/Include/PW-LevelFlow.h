@@ -82,9 +82,9 @@ namespace PWLevelFlow
     {
         if (!SafeRequestedName(request)) return false;
         const std::string base = Root(mapbank);
-        if (base.empty() || base.size() >= MAX_PATH - 240) return false;
+        if (base.empty()) return false;
         const std::string level = Normalise(request);
-        if (!SafeRequestedName(level)) return false;
+        if (!SafeRequestedName(level) || base.size() + level.size() >= MAX_PATH) return false;
 
         static std::map<std::string, std::string> previous;
         static std::mutex cacheMutex;
