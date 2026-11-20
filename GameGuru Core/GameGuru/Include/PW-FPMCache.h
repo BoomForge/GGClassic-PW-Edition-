@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <map>
 #include <mutex>
 #include <string>
@@ -120,7 +121,7 @@ namespace PWFPMCache
         DWORD n = GetTempPathA(MAX_PATH, temp);
         if (n == 0 || n >= MAX_PATH) return "";
         char folder[90] = {};
-        sprintf_s(folder, "GGCPW-FPMCache-%lu\\%016llx\\",
+        sprintf_s(folder, sizeof(folder), "GGCPW-FPMCache-%lu\\%016llx\\",
             (unsigned long)GetCurrentProcessId(), Hash(Lower(archive)));
         return Root(temp) + folder;
     }
