@@ -5,6 +5,7 @@
 #include "stdafx.h"
 #include "gameguru.h"
 #include "PW-LoadTrace.h" // Pixelwolf Edition: opt-in load profiler
+#include "PW-LevelFlow.h" // Pixelwolf Edition: safe area transitions
 #include "cOccluderThread.h"
 #include "CGfxC.h"
 #include "DarkLUA.h"
@@ -185,6 +186,7 @@ std::vector<std::string> preload_setup;
 
 void game_masterroot_gameloop_initcode(int iUseVRTest)
 {
+	PWLoadTraceScope pwTraceGameLevelInit("game.transition.next_level_init");
 	//PE: For this to work we need to support decrypting files.
 	#ifdef WIP_PROLOADLEVELTEXTURES
 	//PE: START level proloader here.
@@ -330,6 +332,15 @@ void game_masterroot_gameloop_initcode(int iUseVRTest)
 			{
 				t.game.jumplevel_s = t.game.pAdvanceWarningOfLevelFilename;
 				strcpy ( t.game.pAdvanceWarningOfLevelFilename, "" );
+			}
+
+			// PW Edition: avoid repeating a mapbank folder scan for known connected areas.
+			// Invalid/missing destinations still use the original Classic fallback path.
+			if (t.game.gameisexe == 1)
+			{
+				PWLevelFlow::Destination pwKnownDestination;
+				if (PWLevelFlow::Resolve(g.mysystem.mapbankAbs_s.Get(), t.game.jumplevel_s.Get(), pwKnownDestination))
+					t.game.jumplevel_s = pwKnownDestination.relative.c_str();
 			}
 
 			// work out first level from exe name (copied to jumplevel_s)
@@ -3291,6 +3302,7 @@ void game_stopallsounds ( void )
 
 void game_freelevel ( void )
 {
+	PWLoadTraceScope pwTraceLevelCleanup("game.transition.cleanup");
 	//  hide any jetpacks, etc
 	hud_free ( );
 
@@ -4534,9 +4546,22 @@ void game_jump_to_level_from_lua ( void )
 {
 	if (  t.game.gameisexe == 1 ) 
 	{
-		if (  t.game.gameloop == 1 && t.game.levelendingcycle  ==  0 ) 
+		if (  t.game.gameloop == 1 && t.game.levelendingcycle  ==  0 )
 		{
-			t.game.jumplevel_s = t.tleveltojump_s;
+			PWLevelFlow::Destination pwDestination;
+			if (!PWLevelFlow::Resolve(g.mysystem.mapbankAbs_s.Get(), t.tleveltojump_s.Get(), pwDestination))
+			{
+				// Reject bad or missing FPM before the game tears down this level.
+				// Preserve existing player, scripts and resources on error.
+				t.s_s = cstr("PW Edition: Cannot enter level '") + t.tleveltojump_s + "'.";
+				timestampactivity(0, t.s_s.Get());
+				lua_prompt();
+				return;
+			}
+			// While Classic's fade plays, optionally warm the next FPM in Windows' cache.
+			// No GameGuru state is accessed from this background worker.
+			PWLevelFlow::Prefetch(pwDestination);
+			t.game.jumplevel_s = pwDestination.relative.c_str();
 			t.game.levelendingcycle = 4000;
 		}
 	}
