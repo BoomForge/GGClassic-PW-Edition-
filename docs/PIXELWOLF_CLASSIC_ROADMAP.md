@@ -41,6 +41,18 @@ Implemented on the current development branch (not yet compiled or tested):
 
 **Acceptance still open:** Build with VS2022; load PNG and DDS sets for one static Blender model and one rigged model; verify importer previews, material stages, map archive save/reopen and standalone packaging; check no DDS regressions. Other specialised texture formats (lightmaps, terrain generated textures and legacy character-creator internals) remain format-specific until explicitly validated. Do not claim universal PNG support yet.
 
+## Test Level loading profiler — source and CI completed (2026-11-21)
+
+The next performance phase is **measure before changing behaviour**, especially before skipping terrain work or removing save-before-preview safeguards. Relevant evidence: `editor_previewmapormultiplayer_initcode` performs **1,050,625 terrain-height queries** when terrain is present. This is a possible bottleneck, not a measured conclusion.
+
+**Implemented in the development branch:** a Windows QueryPerformanceCounter RAII profiler (`PW-LoadTrace.h`) activated only by `GGCPW_PROFILE_LOAD=1`, integrated with Test Level preview initialisation, test-map save, terrain-height sampling, heightmap generation, environment reload, entity bank, level data, AI, weapon, HUD, script and media load phases. CSV is written to the user's Windows temp directory. A Python analysis tool and report tests were added, with [benchmark instructions](docs/PW_LOADING_PROFILE.md).
+
+**Verified:** [Windows CI run #44817890932](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44817890932) passed Python report tests, isolated VS2022 x64 compilation of the profiler header, and end-to-end generation and analysis of a synthetic timing CSV. The GitHub source commits were independently read back.
+
+**Not verified:** compiling the full GameGuru executable, actual Test Level timing in a licensed PW Edition installation, or any observed reduction in load time.
+
+**Next:** compile the engine, profile repeated empty and populated Test Level runs, rank expensive stages and then implement one targeted performance change with before/after timing and regression checks. Do not present this as an optimisation completed until a measured improvement exists.
+
 ## Remaining issues in priority order
 
 | Priority | Area | Issue / evidence | Acceptance goal |
