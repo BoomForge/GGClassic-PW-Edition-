@@ -20,10 +20,10 @@ $ChecksumName="$AssetName.sha256"
 $InstallDir=[IO.Path]::GetFullPath($InstallDir).TrimEnd('\')
 
 function Notice([string]$message) {
- [void][Windows.Forms.MessageBox]::Show($message,$Title,"OK","Information")
+ [void][System.Windows.Forms.MessageBox]::Show($message,$Title,"OK","Information")
 }
 function Ask([string]$message) {
- return [Windows.Forms.MessageBox]::Show($message,$Title,"YesNo","Question") -eq "Yes"
+ return [System.Windows.Forms.MessageBox]::Show($message,$Title,"YesNo","Question") -eq "Yes"
 }
 function Require([bool]$condition,[string]$message) {
  if (-not $condition) { throw $message }
@@ -89,7 +89,7 @@ function Stage-Zip([string]$zipPath,[string]$dir,[string]$tag) {
    $entries[$name]=$entry
   }
   Require ($entries.ContainsKey("pw-release.json")) "ZIP release manifest missing."
-  $reader=New-Object IO.StreamReader($entries["pw-release.json"].Open())
+  $reader=[System.IO.StreamReader]::new($entries["pw-release.json"].Open())
   try { $manifest=$reader.ReadToEnd() | ConvertFrom-Json }
   finally { $reader.Dispose() }
   Require ([string]$manifest.version -eq $tag) "Release tag/ZIP version mismatch."
@@ -101,7 +101,7 @@ function Stage-Zip([string]$zipPath,[string]$dir,[string]$tag) {
    $names[$name]=$true
   }
   Require (($names.Count+1) -eq $entries.Count) "Unexpected ZIP content."
-  [IO.File]::WriteAllText((Join-Path $dir "pw-release.json"),($manifest | ConvertTo-Json -Depth 12),(New-Object Text.UTF8Encoding($false)))
+  [IO.File]::WriteAllText((Join-Path $dir "pw-release.json"),($manifest | ConvertTo-Json -Depth 12),([System.Text.UTF8Encoding]::new($false)))
   foreach ($name in $names.Keys) {
    $target=Safe-Path $dir $name
    [void](New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force)
@@ -235,6 +235,6 @@ try {
   Apply-Update $payload
  }
 } catch {
- [void][Windows.Forms.MessageBox]::Show($_.Exception.Message,$Title,"OK","Error")
+ [void][System.Windows.Forms.MessageBox]::Show($_.Exception.Message,$Title,"OK","Error")
  exit 1
 }
