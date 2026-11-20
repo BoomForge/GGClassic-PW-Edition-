@@ -61,6 +61,8 @@ The isolated x64 C++ contract test under `tools/test_pw_level_flow_win.cpp` crea
 
 GitHub workflow: [PW Edition level transitions validation](../.github/workflows/pw-level-transitions-validation.yml).
 
+**Verified:** [Windows x64 CI run #44821335693](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44821335693) completed successfully. It compiled the isolated C++14 helpers and ran tests for missing and unsafe level requests, stale and newly preferred mapbank paths, corrupted FPM cache entries, archive modification and asynchronous prefetching.
+
 **Crucial limitation:** These synthetic tests do not compile `M-Game.cpp` or `M-MapFile.cpp` as part of the full engine and do not prove compatibility with real GameGuru FPM maps.
 
 ## Required real-world acceptance
