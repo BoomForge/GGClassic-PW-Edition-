@@ -2078,7 +2078,7 @@ void game_masterroot_gameloop_afterloopcode(int iUseVRTest)
 	// Keep Classic's original process-restart state transfer. For ordinary
 	// standalone level jumps, PW Edition can opt into the very same Lua format.
 	// Never carry over stats on quit, multiplayer, or returning to the main menu.
-	const bool pwInProcessJump = t.game.allowfragmentation != 2
+	const bool pwInProcessJump = t.game.allowfragmentation == 1
 		&& t.game.gameisexe == 1
 		&& t.game.runasmultiplayer == 0
 		&& t.game.quitflag == 0
