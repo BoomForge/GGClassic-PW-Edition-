@@ -23,7 +23,8 @@ RELEASE_VERSION = re.compile(r"^\d+\.\d+\.\d+$")
 ALLOWED = re.compile(
     r"(?i)^(Guru-MapEditor\.exe|GameGuru\.exe|pw-updater\.ps1|"
     r"pw-edition-version\.txt|[a-z0-9_.-]+\.dll|"
-    r"Files/effectbank/reloaded/[a-z0-9_.-]+\.fx)$"
+    r"Files/effectbank/reloaded/[a-z0-9_.-]+\.fx|"
+    r"Files/scriptbank/(?:global|pw_transition_state)\.lua)$"
 )
 HERE = Path(__file__).resolve().parent
 
