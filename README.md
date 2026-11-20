@@ -49,15 +49,23 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 - [x] Extended `M-MapFile.cpp` to preserve PNG `_D`, `_N`, `_S` companion files in the existing level/map archive workflow without removing DDS handling.
 - [x] Created a detailed [technical roadmap](docs/PIXELWOLF_CLASSIC_ROADMAP.md) of remaining engineering risks, source references and test criteria.
 
+- [x] Wired **Help > Check for PW Edition Updates...** into the active 64-bit ImGui editor source, using a local update helper rather than the disabled legacy updater. **Windows UI test outstanding**.
+- [x] Committed a GitHub Releases updater with version comparison, HTTPS download, SHA-256 verification, allowlisted package contents, staged installation after the editor closes, file backups/rollback, optional Windows UAC, and **restart confirmation**. **Source committed, not yet tested on Windows**.
+- [x] Updated the 64-bit build project to copy the updater and PW Edition version marker next to the editor executable.
+- [x] Added an explicit-release ZIP and SHA-256 packager, packaging contract tests, and [updater setup/release instructions](docs/PW_EDITION_UPDATER.md). No binary/release has been published yet.
+
 ### In progress — verification needed
 
+- [ ] **Updater end-to-end acceptance:** build and install a disposable PW Edition copy, publish a verified release ZIP/checksum, trigger the in-engine Help menu updater, test download, safe installation, rollback/error handling and the restart prompt. No Windows build or live update has been verified.
+- [ ] **Update-release signing and provenance:** verify the distribution licence, strengthen publisher authentication, and test UAC in a protected folder.
 - [ ] **PNG + DDS regression test on Windows:** build and load equivalent sample entities using `_D.dds` and `_D.png`; confirm diffuse, normal, metalness/specular, AO, gloss, height, emissive, transparency, material overrides, save/reopen, map archives and standalone exports.
 - [ ] **Shader validation:** compile and run the community animated alpha/emissive PBR shader; compare unchanged default shaders for regressions.
-- [ ] **Build and stability baseline:** compile the fork using Visual Studio 2022, Desktop C++, MFC and the original legally owned GameGuru media; test editor launch, tiny FPS level, play/stop, save/reopen and standalone game.
+- [ ] **Build and stability baseline:** compile the fork using Visual Studio 2022 x64 with the original legally owned GameGuru media and required dependencies; test editor launch, tiny FPS level, play/stop, save/reopen and standalone game.
 - [ ] **Loading-time investigation:** measure cold startup, first test, repeat test, return to editor, and standalone load for a tiny world. Do not claim speedups without before/after measurements.
 
 ### To do — future upgrades
 
+- [ ] Improve the **in-engine update experience** with a native ImGui progress/status panel after the safe external installer is validated.
 - [ ] Reduce unnecessary editor-to-test **loading times** after profiling; preserve caches and correctness. [Upstream #3100](https://github.com/Dark-Basic-Software-Limited/GameGuruRepo/issues/3100).
 - [ ] Improve **Blender/Mixamo animated character FBX imports**, including skeletons, animation clips and texture paths. [Upstream #1894](https://github.com/Dark-Basic-Software-Limited/GameGuruRepo/issues/1894).
 - [ ] Fix **texture overrides, material paths and missing textures** during import and game export. [Upstream #4659](https://github.com/Dark-Basic-Software-Limited/GameGuruRepo/issues/4659).
