@@ -52,7 +52,7 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 - [x] Wired **Help > Check for PW Edition Updates...** into the active 64-bit ImGui editor source, using a local update helper rather than the disabled legacy updater. **Windows UI test outstanding**.
 - [x] Committed a GitHub Releases updater with version comparison, HTTPS download, SHA-256 verification, allowlisted package contents, staged installation after the editor closes, file backups/rollback, optional Windows UAC, and **restart confirmation**. **Source committed, not yet tested on Windows**.
 - [x] Updated the 64-bit build project to copy the updater and PW Edition version marker next to the editor executable.
-- [x] Added an explicit-release ZIP and SHA-256 packager, packaging contract tests, and [updater setup/release instructions](docs/PW_EDITION_UPDATER.md). No binary/release has been published yet.
+- [x] Added an explicit-release ZIP and SHA-256 packager, packaging contract tests, and [updater setup/release instructions](docs/PW_EDITION_UPDATER.md). [Windows CI run #44816392164](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44816392164) **passed package tests and PowerShell syntax checks**. No engine binary or update release has been published yet.
 
 ### In progress — verification needed
 
