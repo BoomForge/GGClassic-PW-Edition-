@@ -32,7 +32,7 @@ To include approved supporting files:
 
     python tools/make_pw_release.py --build-dir "D:\GGClassic-PW-Build" --version 0.1.1 --out-dir dist --include "Files/effectbank/reloaded/pw_shader.fx" --include "MyPatch.dll"
 
-The tool packages only the built engine executable, PW updater script and release version marker, plus explicitly opted-in DLLs or Files/effectbank/reloaded/*.fx files. It does NOT distribute proprietary GameGuru content, user levels or full asset/media banks.
+The tool packages only the built engine executable, PW updater script and release version marker, plus explicitly opted-in DLLs, Files/effectbank/reloaded/*.fx shaders, and the two explicitly allowlisted transition Lua scripts (Files/scriptbank/global.lua and Files/scriptbank/pw_transition_state.lua). It does NOT package game levels or full asset/media banks. Confirm redistribution rights before publishing modified GameGuru scripts or binaries.
 
 Create a **stable GitHub release** tagged v0.1.0 in BoomForge/GGClassic-PW-Edition- and attach both output assets:
 - dist/GGClassic-PW-Edition-win64.zip
@@ -59,7 +59,7 @@ Packaging tests:
 
 ## Security and limitations
 
-Allowlisted updates may replace only the engine EXE, root DLLs, the PW updater/version marker, and explicitly named Files/effectbank/reloaded FX shaders. Levels, settings, FPM/FPE, entitybank and terrainbank are excluded. All extracted paths are checked and all staged files are SHA-256 checked again before installation. Existing files are backed up before any writes.
+Allowlisted updates may replace only the engine EXE, root DLLs, the PW updater/version marker, explicitly named Files/effectbank/reloaded FX shaders, and the two approved Files/scriptbank transition Lua files. Levels, settings, FPM/FPE, entitybank and terrainbank are excluded. All extracted paths are checked and all staged files are SHA-256 checked again before installation. Existing files are backed up before any writes.
 
 Release SHA-256 files provide download integrity but not an independent publisher signature if the release account itself is compromised. Authenticode/code signing and stronger provenance checks are future hardening. Current user prompts are Windows dialog boxes launched from the editor, not yet embedded progress bars in ImGui.
 
