@@ -1,0 +1,44 @@
+name: PW Edition import and cleanup validation
+
+on:
+  pull_request:
+    paths:
+      - "GameGuru Core/GameGuru/Include/PW-ImportPaths.h"
+      - "GameGuru Core/GameGuru/Source/M-Importer.cpp"
+      - "GameGuru Core/GameGuru/Source/M-Game.cpp"
+      - "GameGuru Core/Dark Basic Public Shared/Include/cOccluderThread.h"
+      - "tools/test_pw_import_paths_win.cpp"
+      - "tools/test_pw_occluder_thread_win.cpp"
+      - ".github/workflows/pw-import-and-cleanup-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  importer-occluder-contract:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Visual Studio C++ 2022 x64
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do set "VS_PATH=%%i"
+          if not defined VS_PATH exit /b 1
+          echo VS_PATH=%VS_PATH%>> "%GITHUB_ENV%"
+      - name: Compile C++ tests
+        shell: cmd
+        run: |
+          call "%VS_PATH%\Common7\Tools\VsDevCmd.bat" -arch=x64 >nul
+          cl.exe /nologo /std:c++14 /EHsc /W4 /WX /I "GameGuru Core\GameGuru\Include" "tools\test_pw_import_paths_win.cpp" /Fe:pw-import-path-test.exe
+          if errorlevel 1 exit /b 1
+          cl.exe /nologo /std:c++14 /EHsc /W3 /I "GameGuru Core\Dark Basic Public Shared\Include" "tools\test_pw_occluder_thread_win.cpp" "GameGuru Core\Dark Basic Public Shared\Dark Basic Pro SDK\DarkSDKMore\CPU3D\cThread.cpp" /Fe:pw-occluder-test.exe
+          if errorlevel 1 exit /b 1
+      - name: Run importer path and repeated thread cleanup
+        shell: pwsh
+        run: |
+          ./pw-import-path-test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'FBX texture path tests failed' }
+          ./pw-occluder-test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Occluder shutdown tests failed' }
