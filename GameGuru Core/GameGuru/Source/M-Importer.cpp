@@ -942,8 +942,9 @@ cstr importer_getfilenameonly ( LPSTR pFileAndPossiblePath )
 			return pFileAndPossiblePath;
 	}
 
+	if (!pFileAndPossiblePath) return "";
 	cstr pFileNameOnly = pFileAndPossiblePath;
-	for ( int n = strlen(pFileAndPossiblePath); n > 0; n-- )
+	for ( int n = (int)strlen(pFileAndPossiblePath) - 1; n >= 0; n-- )
 	{
 		if ( pFileAndPossiblePath[n] == '\\' || pFileAndPossiblePath[n] == '/' )
 		{
@@ -1026,7 +1027,7 @@ int importer_addtexturefiletolist ( cstr fileName, cstr sourceName, int* tCount 
 			}
 		}
 	}
-	return t.tfound;
+	return (t.tfound > 0 && t.tfound < IMPORTERTEXTURESMAX) ? t.tfound : 0;
 }
 
 void importer_addtoimagelistandloadifexist ( LPSTR pImgFilename, int iOptionalStage, int iOptionalBaseImageSlotIndex )
@@ -1037,6 +1038,8 @@ void importer_addtoimagelistandloadifexist ( LPSTR pImgFilename, int iOptionalSt
 		// assign image to new slot in image list
 		int iInsertedAtSlot = importer_addtexturefiletolist ( pImgFilename, pImgFilename, &tCount );
 
+		// Full texture list: do not write to slot zero or corrupt importer state.
+		if (iInsertedAtSlot <= 0) return;
 		// assign any special texture 'stage' value
 		t.importerTextures[iInsertedAtSlot].iOptionalStage = iOptionalStage;
 		t.importerTextures[iInsertedAtSlot].iAssociatedBaseImage = iOptionalBaseImageSlotIndex;
@@ -1054,14 +1057,10 @@ void importer_findimagetypesfromlist ( cstr fileName, int iBaseImageSlotIndex, i
 {
 	// get base filename extension (deduct image format ext)
 	LPSTR pExt = NULL;
-	for ( int iImgFormat = 0; iImgFormat < 4; iImgFormat++ )
+	const char* pwKnownExt[] = { ".png", ".dds", ".tga", ".jpg", ".jpeg" };
+	for ( const char* candidate : pwKnownExt )
 	{
-		if ( iImgFormat == 0 ) pExt = ".png";
-		if ( iImgFormat == 1 ) pExt = ".dds";
-		if ( iImgFormat == 2 ) pExt = ".tga";
-		if ( iImgFormat == 3 ) pExt = ".jpg";
-		if ( strnicmp ( fileName.Get()+strlen(fileName.Get())-strlen(pExt), pExt, strlen(pExt) ) == NULL ) 
-			break;
+		if (PWImport::EndsWithI(fileName.Get(), candidate)) { pExt = const_cast<char*>(candidate); break; }
 	}
 	if ( pExt == NULL ) return;
 
@@ -1082,7 +1081,7 @@ void importer_findimagetypesfromlist ( cstr fileName, int iBaseImageSlotIndex, i
 		if ( iImgType == 4) pImgType = "_diff";
 		if ( iImgType == 5) pImgType = "_dif";
 		
-		if ( strnicmp ( pBaseNoFileExt.Get()+strlen(pBaseNoFileExt.Get())-strlen(pImgType), pImgType, strlen(pImgType) ) == NULL )
+		if (PWImport::EndsWithI(pBaseNoFileExt.Get(), pImgType))
 		{
 			// get base filename (minus image type)
 			cstr pBaseFile = cstr(Left(pBaseNoFileExt.Get(),Len(pBaseNoFileExt.Get())-Len(pImgType)));
@@ -1150,7 +1149,9 @@ void importer_findandremoveentry ( cstr sFileToRemove )
 {
 	for ( int tCount = 1 ; tCount <= IMPORTERTEXTURESMAX; tCount++ )
 	{
-		if ( strnicmp ( t.importerTextures[tCount].fileName.Get(), sFileToRemove.Get(), strlen(sFileToRemove.Get())-4 ) == NULL ) 
+		if (Len(sFileToRemove.Get()) >= 4 &&
+			PWImport::EndsWithI(t.importerTextures[tCount].fileName.Get(),
+				PWImport::BaseName(sFileToRemove.Get()).c_str())) 
 		{
 			if ( ImageExist ( t.importerTextures[tCount].imageID ) == 1 ) DeleteImage ( t.importerTextures[tCount].imageID );
 			t.importerTextures[tCount].imageID = 0;
@@ -1166,14 +1167,10 @@ void importer_removeentryandassociatesof ( int tCount )
 
 	// get base filename extension (deduct image format ext)
 	LPSTR pExt = NULL;
-	for ( int iImgFormat = 0; iImgFormat < 4; iImgFormat++ )
+	const char* pwKnownExt[] = { ".png", ".dds", ".tga", ".jpg", ".jpeg" };
+	for ( const char* candidate : pwKnownExt )
 	{
-		if ( iImgFormat == 0 ) pExt = ".png";
-		if ( iImgFormat == 1 ) pExt = ".dds";
-		if ( iImgFormat == 2 ) pExt = ".tga";
-		if ( iImgFormat == 3 ) pExt = ".jpg";
-		if ( strnicmp ( pRemoveTextureFile+strlen(pRemoveTextureFile)-strlen(pExt), pExt, strlen(pExt) ) == NULL ) 
-			break;
+		if (PWImport::EndsWithI(pRemoveTextureFile, candidate)) { pExt = const_cast<char*>(candidate); break; }
 	}
 	if ( pExt == NULL ) return;
 
@@ -1187,7 +1184,7 @@ void importer_removeentryandassociatesof ( int tCount )
 		if ( iImgType == 1 ) pImgType = "_color";
 		if ( iImgType == 2 ) pImgType = "_d";
 		if ( iImgType == 3 ) pImgType = "_albedo";
-		if ( strnicmp ( pBaseNoFileExt.Get()+strlen(pBaseNoFileExt.Get())-strlen(pImgType), pImgType, strlen(pImgType) ) == NULL ) 
+		if (PWImport::EndsWithI(pBaseNoFileExt.Get(), pImgType)) 
 		{
 			// get base filename (minus image type)
 			cstr pBaseFile = cstr(Left(pBaseNoFileExt.Get(),Len(pBaseNoFileExt.Get())-Len(pImgType)));
@@ -1305,7 +1302,9 @@ void importer_applyimagelisttextures ( bool bCubeMapOnly, int iOptionalOnlyUpdat
 				for ( int tCount = 1; tCount <= t.tcounttextures; tCount++ )
 				{
 					LPSTR pThisImageItem = t.importerTextures[tCount].fileName.Get();
-					if ( strnicmp ( pThisImageItem + strlen(pThisImageItem) - strlen(pSearch), pSearch, strlen(pSearch)-4 ) == NULL )
+					if (strlen(pSearch) >= 4 && strlen(pThisImageItem) >= strlen(pSearch) &&
+						strnicmp(pThisImageItem + strlen(pThisImageItem) - strlen(pSearch),
+							pSearch, strlen(pSearch)-4) == NULL)
 					{
 						iFindImageSlotIndex = tCount;
 					}
@@ -1934,7 +1933,7 @@ void importer_loadmodel ( void )
 		SetDir(cstr(g.rootdir_s+"importer\\temp").Get());
 		bool bUseTexturesFromConversion = false;
 		sObject* pObject = GetObjectData ( t.importer.objectnumber );
-		if ( pObject )
+		if ( pObject && pObject->ppMeshList )
 		{
 			tCount = 0;
 			const auto fileExists = [](const std::string& path) -> bool
