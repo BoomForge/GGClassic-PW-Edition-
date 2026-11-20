@@ -369,4 +369,10 @@
     <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\tools\pw-updater.ps1;$(MSBuildProjectDirectory)\..\..\tools\pw-edition-version.txt"
           DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
   </Target>
+  <!-- PW Edition: compile-time script companions for opt-in connected-area state. -->
+  <Target Name="CopyPWEditionTransitionScripts" AfterTargets="Build" Condition="'$(Platform)' == 'x64'">
+    <MakeDir Directories="$(OutDir)Files\scriptbank" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\GameGuru\Shaders and Scripts\scriptbank\global.lua;$(MSBuildProjectDirectory)\..\GameGuru\Shaders and Scripts\scriptbank\pw_transition_state.lua"
+          DestinationFolder="$(OutDir)Files\scriptbank" SkipUnchangedFiles="true" />
+  </Target>
 </Project>
