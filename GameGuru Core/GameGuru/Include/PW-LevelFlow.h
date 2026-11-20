@@ -155,7 +155,7 @@ namespace PWLevelFlow
         if (fileName == NULL) return 0;
         HANDLE file = CreateFileA(fileName->c_str(), GENERIC_READ,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
-            OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL); // retain normal Windows file-cache behaviour
         delete fileName;
         if (file != INVALID_HANDLE_VALUE)
         {
