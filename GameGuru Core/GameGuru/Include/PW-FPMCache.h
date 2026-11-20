@@ -199,7 +199,7 @@ namespace PWFPMCache
         if (!Stat(sourceArchive, source)) return false;
 
         const std::string cache = CacheRoot(sourceArchive);
-        if (cache.empty() || cache.size() + 220 >= MAX_PATH) return false;
+        if (cache.empty() || cache.size() >= MAX_PATH - 2) return false;
         if (!EnsureDirectories(cache + "placeholder")) return false;
 
         Snapshot shot;
