@@ -94,7 +94,9 @@ namespace PWLevelFlow
             const std::map<std::string, std::string>::iterator cached = previous.find(key);
             if (cached != previous.end())
             {
-                if (IsFile(base + cached->second))
+                // A newly added root-level FPM takes priority over an old nested cache hit.
+                if (IsFile(base + cached->second) &&
+                    (cached->second == level || !IsFile(base + level)))
                 {
                     out.relative = cached->second;
                     out.absolute = base + out.relative;
