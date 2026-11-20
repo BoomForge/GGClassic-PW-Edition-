@@ -5,6 +5,7 @@
 // Includes
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-ImportPaths.h" // PW Edition: safe Blender/Mixamo texture path handling
 
 #if defined(_WIN64) && !defined(ENABLEIMGUI)
 //PE: for 64 bits file dialogs.
@@ -1686,7 +1687,7 @@ void importer_loadmodel ( void )
 
 	// check if importing an FBX for first time
 	bool bHasFBXExtension = false;
-	if ( strnicmp ( t.importer.objectFilename.Get() + strlen(t.importer.objectFilename.Get()) - 4, ".fbx", 4 ) == NULL ) bHasFBXExtension = true;
+	if ( PWImport::EndsWithI(t.importer.objectFilename.Get(), ".fbx") ) bHasFBXExtension = true;
 	if ( bHasFBXExtension == true && g_iFirstTimeFBXImport == 0 )
 	{
 		// set-up importer for FBX friendly import settings
@@ -1704,14 +1705,14 @@ void importer_loadmodel ( void )
 	t.strwork = ""; t.strwork = t.strwork + t.importer.objectFileOriginalPath + t.importer.objectFilename;
 	if ( FileExist ( t.strwork.Get() ) ) 
 	{
-		if ( strnicmp ( t.strwork.Get() + strlen(t.strwork.Get()) - 4, ".fbx", 4 )==NULL )
+		if ( PWImport::EndsWithI(t.strwork.Get(), ".fbx") )
 		{
 			extern bool g_bOverrideXCacheWhenUsingImporter;
 			g_bOverrideXCacheWhenUsingImporter = true;
 			LoadFBX ( t.strwork.Get(), t.importer.objectnumber );
 			g_bOverrideXCacheWhenUsingImporter = false;
 			//SetObjectRenderMatrixMode ( t.importer.objectnumber, 1 );
-			g_bLoadedFBXModel = true;
+			g_bLoadedFBXModel = ObjectExist(t.importer.objectnumber) == 1;
 		}
 		else
 		{
@@ -1724,11 +1725,11 @@ void importer_loadmodel ( void )
 		t.strwork = ""; t.strwork = t.strwork + g.fpscrootdir_s + "\\Files\\"+t.importer.objectFilename;
 		if (  FileExist( t.strwork.Get() ) ) 
 		{
-			if ( strnicmp ( t.strwork.Get() + strlen(t.strwork.Get()) - 4, ".fbx", 4 )==NULL )
+			if ( PWImport::EndsWithI(t.strwork.Get(), ".fbx") )
 			{
 				LoadFBX ( t.strwork.Get(), t.importer.objectnumber );
 				//SetObjectRenderMatrixMode ( t.importer.objectnumber, 1 );
-				g_bLoadedFBXModel = true;
+				g_bLoadedFBXModel = ObjectExist(t.importer.objectnumber) == 1;
 			}
 			else
 			{
@@ -1927,7 +1928,8 @@ void importer_loadmodel ( void )
 			t.importerTextures[tCount].iAssociatedBaseImage = 0;
 		}
 
-		// first check if importer has textures from FBX conversion
+		// Resolve converted FBX materials without depending on Blender/Mixamo
+		// absolute texture paths. DDS and PNG remain supported side-by-side.
 		cstr sOldDir = GetDir();
 		SetDir(cstr(g.rootdir_s+"importer\\temp").Get());
 		bool bUseTexturesFromConversion = false;
@@ -1935,74 +1937,60 @@ void importer_loadmodel ( void )
 		if ( pObject )
 		{
 			tCount = 0;
+			const auto fileExists = [](const std::string& path) -> bool
+			{
+				const DWORD attrs = GetFileAttributesA(path.c_str());
+				return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
+			};
 			for ( int iMesh = 0; iMesh < pObject->iMeshCount; iMesh++ )
 			{
 				sMesh* pMesh = pObject->ppMeshList[iMesh];
+				if (!pMesh || !pMesh->pTextures) continue; // FBX can contain empty meshes
 				int iStoreImageSlotIndexForBase = -1;
 				for ( int iTextureStage = 0; iTextureStage < pMesh->dwTextureCount; iTextureStage++ )
 				{
-					int iSlotUsed = -1;
-					cstr pTextureFile = pMesh->pTextures[iTextureStage].pName;
-					if ( FileExist ( pTextureFile.Get() ) == 0 )
+					int iSlotUsed = 0;
+					const char* referencedName = pMesh->pTextures[iTextureStage].pName;
+					const std::string reference = referencedName ? referencedName : "";
+					std::string found = PWImport::FindTexture(
+						std::string(g.rootdir_s.Get()) + "importer\\temp\\", reference, fileExists);
+					if (found.empty())
+						found = PWImport::FindTexture(t.importer.objectFileOriginalPath.Get(), reference, fileExists);
+					if (!found.empty())
 					{
-						// PW Edition: converted meshes may reference a texture extension
-						// that is no longer present. Keep DDS first for legacy projects,
-						// then accept a same-name PNG without forcing a conversion.
-						const size_t nameLength = strlen(pTextureFile.Get());
-						if (nameLength > 4)
-						{
-							cstr pTextureBase = Left(pTextureFile.Get(), nameLength - 4);
-							cstr pDDSFile = pTextureBase + ".dds";
-							cstr pPNGFile = pTextureBase + ".png";
-							if (FileExist(pDDSFile.Get()) == 1)
-								pTextureFile = pDDSFile;
-							else
-								pTextureFile = pPNGFile;
-						}
-					}
-					if ( FileExist ( pTextureFile.Get() ) == 1 )
-					{
-						cstr pAbsoluteFile = g.rootdir_s + "importer\\temp\\" + pTextureFile;
-						iSlotUsed = importer_addtexturefiletolist ( pAbsoluteFile.Get(), pAbsoluteFile.Get(), &tCount );
+						iSlotUsed = importer_addtexturefiletolist(found.c_str(), found.c_str(), &tCount);
 						bUseTexturesFromConversion = true;
 					}
+					else if (!reference.empty())
+					{
+						// Keep a visible missing reference in the importer instead of
+						// silently dropping material stages during FBX import.
+						const std::string expected = PWImport::Folder(t.importer.objectFileOriginalPath.Get())
+							+ PWImport::BaseName(reference);
+						iSlotUsed = importer_addtexturefiletolist(expected.c_str(), expected.c_str(), &tCount);
+					}
+					#ifdef ENABLEIMGUI
 					else
 					{
-						// FBX conversion had no textures produced, so add texture filename directly to importer image list
-						// which we can then use later to find associate texture files
-						if ( strlen ( pMesh->pTextures[iTextureStage].pName ) > 0 )
-						{
-							cstr pAbsoluteFile = t.importer.objectFileOriginalPath + pMesh->pTextures[iTextureStage].pName;
-							iSlotUsed = importer_addtexturefiletolist ( pAbsoluteFile.Get(), pAbsoluteFile.Get(), &tCount );
-						}
-						#ifdef ENABLEIMGUI
-						else 
-						{
-							//PE:Some models have empty texture field, just add blank.
-							//PE:We should always have one , so user can change the texture. (even if not found).
-							cstr pAbsoluteFile = t.importer.objectFileOriginalPath + "blank";
-							iSlotUsed = importer_addtexturefiletolist(pAbsoluteFile.Get(), pAbsoluteFile.Get(), &tCount);
-						}
-						#endif
+						const std::string placeholder = PWImport::Folder(t.importer.objectFileOriginalPath.Get()) + "blank";
+						iSlotUsed = importer_addtexturefiletolist(placeholder.c_str(), placeholder.c_str(), &tCount);
 					}
-					if ( iSlotUsed > -1 )
+					#endif
+					if (iSlotUsed > 0)
 					{
-						if ( iTextureStage == 0 ) 
-						{
-							// base texture (color)
+						if (iTextureStage == 0)
 							iStoreImageSlotIndexForBase = iSlotUsed;
-						}
 						else
 						{
-							// associate other stages to above base stage
 							t.importerTextures[iSlotUsed].iOptionalStage = iTextureStage;
 							t.importerTextures[iSlotUsed].iAssociatedBaseImage = iStoreImageSlotIndexForBase;
 						}
 					}
 				}
 			}
-			SetDir(sOldDir.Get());
 		}
+		// Always restore the working folder, including when the model is invalid.
+		SetDir(sOldDir.Get());
 		if ( bUseTexturesFromConversion == true )
 		{
 			// if model did not have its own textures, texture with external ones next to FBX model
