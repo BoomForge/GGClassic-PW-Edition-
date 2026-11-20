@@ -39,6 +39,21 @@ bool g_bInEditor = true;
 int g_iMasterRootState = 0;
 int g_iActivelyUsingVRNow = 0;
 
+// PW Edition: level-to-level player continuity without forcing an EXE restart.
+// Opt-in pending full GameGuru standalone validation. Process-restart mode retains
+// its original GameLoopSaveStats/GameLoopLoadStats behaviour unchanged.
+static bool g_pwInProcessStatsPending = false;
+static bool g_pwInProcessLuaStatsAvailable = false;
+static int g_pwHealthAcrossLevels = 0;
+static int g_pwLivesAcrossLevels = 0;
+static bool pw_keep_player_stats_between_levels()
+{
+    char setting[8] = { 0 };
+    const DWORD length = GetEnvironmentVariableA("GGCPW_KEEP_LEVEL_STATS", setting, sizeof(setting));
+    return length == 1 && setting[0] == '1';
+}
+
+
 // 
 //  Game Module to manage all game flow
 // 
@@ -1735,16 +1750,28 @@ void game_masterroot_gameloop_initcode(int iUseVRTest)
 	// resort texture list to ignore objects set to be ignored
 	DoTextureListSort ( );
 
-	// if reloading standalone level, need to restore basic stats from LUA save file
-	if ( g.iStandaloneIsReloading == 2 )
+	// Restore player stats after the new level has created its player and weapon systems.
+	// Restart mode uses the original on-disk Lua mechanism. For normal transitions,
+	// we also keep a process-local health/lives snapshot if the Lua file is missing.
+	if ( g.iStandaloneIsReloading == 2 || g_pwInProcessStatsPending )
 	{
-		// call LUA function from game which updates stats via LUA script
-		char pLUACustomLoadCall[256];
-		strcpy ( pLUACustomLoadCall, "GameLoopLoadStats" );
-		LuaSetFunction ( pLUACustomLoadCall, 0, 0 ); 
-		LuaCall ( );
-
-		physics_player_refreshcount(); //PE: Update weapon count.
+		if (g.iStandaloneIsReloading == 2 || g_pwInProcessLuaStatsAvailable)
+		{
+			char pLUACustomLoadCall[256];
+			strcpy ( pLUACustomLoadCall, "GameLoopLoadStats" );
+			LuaSetFunction ( pLUACustomLoadCall, 0, 0 );
+			LuaCall ( );
+			physics_player_refreshcount(); // Recount restored weapon slots.
+		}
+		if (g_pwInProcessStatsPending && t.game.gameisexe == 1 && t.game.runasmultiplayer == 0)
+		{
+			// C++ fallback ensures that health/lives still cross a connected-area jump
+			// even when the optional Lua weapon-state save is unavailable.
+			t.player[t.plrid].health = g_pwHealthAcrossLevels;
+			t.player[t.plrid].lives = g_pwLivesAcrossLevels;
+		}
+		g_pwInProcessStatsPending = false;
+		g_pwInProcessLuaStatsAvailable = false;
 	}
 
 	// one final command to improve static physics performance
@@ -2048,13 +2075,49 @@ bool game_masterroot_gameloop_loopcode(int iUseVRTest)
 
 void game_masterroot_gameloop_afterloopcode(int iUseVRTest)
 {
-	// first save current level stats before reset LUA
-	if ( t.game.allowfragmentation == 2 )
+	// Keep Classic's original process-restart state transfer. For ordinary
+	// standalone level jumps, PW Edition can opt into the very same Lua format.
+	// Never carry over stats on quit, multiplayer, or returning to the main menu.
+	const bool pwInProcessJump = t.game.allowfragmentation != 2
+		&& t.game.gameisexe == 1
+		&& t.game.runasmultiplayer == 0
+		&& t.game.quitflag == 0
+		&& Len(t.game.jumplevel_s.Get()) > 0
+		&& pw_keep_player_stats_between_levels();
+	if (pwInProcessJump)
+	{
+		g_pwHealthAcrossLevels = t.player[t.plrid].health;
+		g_pwLivesAcrossLevels = t.player[t.plrid].lives;
+		g_pwInProcessStatsPending = true;
+		g_pwInProcessLuaStatsAvailable = false;
+		// Prevent an older save file from being mistaken for this transition.
+		const char* pwStatsPath = "savegames\\standalonelevelstats.dat";
+		DWORD oldAttrs = GetFileAttributesA(pwStatsPath);
+		if (oldAttrs == INVALID_FILE_ATTRIBUTES || DeleteFileA(pwStatsPath))
+		{
+			LuaSetInt("g_PlayerHealth", g_pwHealthAcrossLevels);
+			LuaSetInt("g_PlayerLives", g_pwLivesAcrossLevels);
+			// GameLoopSaveStats writes health/lives and the 10 weapon/ammo slots.
+		}
+		else
+		{
+			timestampactivity(0, "PW Edition: old level-stats file could not be cleared");
+		}
+	}
+	if (t.game.allowfragmentation == 2 || pwInProcessJump)
 	{
 		char pLUACustomSaveCall[256];
 		strcpy ( pLUACustomSaveCall, "GameLoopSaveStats" );
-		LuaSetFunction ( pLUACustomSaveCall, 0, 0 ); 
+		LuaSetFunction ( pLUACustomSaveCall, 0, 0 );
 		LuaCall ( );
+		if (pwInProcessJump)
+		{
+			// Only read back the Lua weapon snapshot if a fresh one was created.
+			// Health/lives remain protected by the in-process fallback above.
+			const char* pwStatsPath = "savegames\\standalonelevelstats.dat";
+			g_pwInProcessLuaStatsAvailable =
+				GetFileAttributesA(pwStatsPath) != INVALID_FILE_ATTRIBUTES;
+		}
 	}
 
 	// free any lua activity (restore FOV if ingame activity there)
