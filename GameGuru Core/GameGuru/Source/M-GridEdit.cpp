@@ -6,6 +6,7 @@
 // Includes 
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-LoadTrace.h" // Pixelwolf Edition: optional load profiling
 #include "M-WelcomeSystem.h"
 #include "M-Widget.h"
 #include "direct.h"
@@ -8528,6 +8529,7 @@ void editor_showquickstart ( int iForceMainOpen )
 
 void editor_previewmapormultiplayer_initcode ( int iUseVRTest )
 {
+	PWLoadTraceScope pwTracePreviewInit("editor.preview_init.total");
 	//  store if project modified
 	t.storeprojectmodified=g.projectmodified;
 	g_tstoreprojectmodifiedstatic = g.projectmodifiedstatic; 
@@ -8753,7 +8755,10 @@ void editor_previewmapormultiplayer_initcode ( int iUseVRTest )
 	// And save the level to levelbank\testmap before launch preview
 	// so we can restore to this level if it crashes
 	g.gpretestsavemode=1;
-	gridedit_save_test_map ( );
+	{
+		PWLoadTraceScope pwTraceTestMapSave("editor.preview_init.save_test_map");
+		gridedit_save_test_map ( );
+	}
 	g.gpretestsavemode=0;
 
 	// Now saves all part-files into temp FPM file (which multiplayer can pick up later)
@@ -8765,10 +8770,13 @@ void editor_previewmapormultiplayer_initcode ( int iUseVRTest )
 		mapfile_saveproject_fpm ( );
 	}
 
-	// GCStore could have assed assets since the last 'test game' so refresh internal lists
-	sky_init ( );
-	terrain_initstyles ( );
-	grass_initstyles();
+	// Refresh preview environment references; measure their cost separately.
+	{
+		PWLoadTraceScope pwTraceEnvironmentRefresh("editor.preview_init.refresh_environment");
+		sky_init ( );
+		terrain_initstyles ( );
+		grass_initstyles();
+	}
 
 	// Re-acquire indices now the lists have changed
 	// takes visuals.sky$ visuals.terrain$ visuals.vegetation$
@@ -8936,9 +8944,10 @@ void editor_previewmapormultiplayer_initcode ( int iUseVRTest )
 	SetCameraFOV ( 75 );
 	g.grav_f=-5.0;
 
-	// store original terrain heights
+	// Store original terrain heights; 1025x1025 samples can dominate a small-map test.
 	if ( t.terrain.TerrainID>0 ) 
 	{
+		PWLoadTraceScope pwTraceTerrainSamples("editor.preview_init.terrain_height_samples");
 		for ( t.z = 0 ; t.z<=  1024; t.z++ )
 		{
 			for ( t.x = 0 ; t.x<=  1024; t.x++ )
@@ -8949,9 +8958,10 @@ void editor_previewmapormultiplayer_initcode ( int iUseVRTest )
 		}
 	}
 
-	// Create heightmap from this terrain (for quad reduction)
+	// Create heightmap from terrain (for quad reduction).
 	if ( t.terrain.TerrainID>0 ) 
 	{
+		PWLoadTraceScope pwTraceHeightmap("editor.preview_init.heightmap_generation");
 		t.terrain.terrainregionupdate=0;
 		terrain_refreshterrainmatrix ( );
 		t.theightfile_s=g.mysystem.levelBankTestMap_s+"heightmap.dds"; //"levelbank\\testmap\\heightmap.dds";
