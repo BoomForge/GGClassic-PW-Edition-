@@ -57,7 +57,16 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 - [x] **Instrumented Test Level loading** in the 64-bit editor and game source: test-map save, environment refresh, terrain sampling/heightmap creation, entity-bank and terrain loading, AI, scripts and media. Profiling is **opt-in** with `GGCPW_PROFILE_LOAD=1` and creates per-process CSV logs; standard launches don't log. This is diagnostic code, **not a confirmed speedup**.
 - [x] Added [load profiling instructions](docs/PW_LOADING_PROFILE.md), a Python CSV ranking tool and a Windows smoke test. [GitHub Actions run #44817890932](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44817890932) **passed** the Python report tests, isolated Visual Studio x64 compilation, and a real opt-in CSV-writing smoke test. Full engine build remains unverified.
 
+- [x] **Safer standalone level jumps (source):** scripted transitions now check the target FPM before ending the current level. Missing or unsafe destinations are rejected without destroying the active level, and repeated mapbank subfolder lookup can reuse a verified path.
+- [x] **Optional repeat-level extraction reuse (source):** added an FPM extraction cache keyed to the unchanged archive's size and modified timestamp, with cache-file verification and fallback to Classic's original extraction method. **Off by default** via `GGCPW_FPM_CACHE=1` until the engine passes real-world tests.
+- [x] **Connected-area prefetch foundation (source):** during the existing level transition fade, a bounded low-priority worker can pre-read the next FPM to warm Windows' file cache. **Off by default** via `GGCPW_PREFETCH_LEVELS=1`; it does not promise seamless loading. See the [transition implementation and testing guide](docs/PW_LEVEL_TRANSITIONS.md).
+- [x] Added isolated Windows x64 source and runtime tests for level lookup, missing targets, cache invalidation and optional prefetch; these do not compile the entire GameGuru engine.
+
 ### In progress — verification needed
+
+- [ ] **Complete transition regression testing:** build the entire 64-bit engine and a two-/three-level standalone; switch repeatedly (25+ round trips), observe failures, RAM/VRAM/handle growth and player state retention.
+- [ ] **Benchmark both optional transition optimisations:** compare cold first loads and repeat visits with/without `GGCPW_FPM_CACHE` and `GGCPW_PREFETCH_LEVELS`. Enable either by default only if the result is both faster and stable.
+- [ ] **Persistent connected-area gameplay state:** formally verify health, inventory, quest flags, checkpoint persistence and script globals across level changes, including process-restart modes.
 
 - [ ] **Updater end-to-end acceptance:** build and install a disposable PW Edition copy, publish a verified release ZIP/checksum, trigger the in-engine Help menu updater, test download, safe installation, rollback/error handling and the restart prompt. No Windows build or live update has been verified.
 - [ ] **Update-release signing and provenance:** verify the distribution licence, strengthen publisher authentication, and test UAC in a protected folder.
@@ -68,6 +77,7 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 
 ### To do — future upgrades
 
+- [ ] After testing basic level transitions, investigate **fully seamless/streamed interiors** as a separate, larger architectural project; current prefetching is not live-scene streaming.
 - [ ] Improve the **in-engine update experience** with a native ImGui progress/status panel after the safe external installer is validated.
 - [ ] Reduce unnecessary editor-to-test **loading times** after profiling; preserve caches and correctness. [Upstream #3100](https://github.com/Dark-Basic-Software-Limited/GameGuruRepo/issues/3100).
 - [ ] Improve **Blender/Mixamo animated character FBX imports**, including skeletons, animation clips and texture paths. [Upstream #1894](https://github.com/Dark-Basic-Software-Limited/GameGuruRepo/issues/1894).
