@@ -17,15 +17,16 @@ class cOccluderThread : public cThread
 
 		unsigned int Run ( )
 		{
-			while ( 1 )
+			// PW Edition: the worker must stop before its level's objects are freed.
+			// game_freelevel() calls Stop(), wakes the begin event, and Join().
+			while ( !m_bTerminate )
 			{
-				//Dave Performance - wait until we are told to begin
-				if ( g_hOccluderBegin ) WaitForSingleObject ( g_hOccluderBegin, INFINITE );
-				//Do some occluding!
+				if ( !g_hOccluderBegin ) break;
+				const DWORD status = WaitForSingleObject ( g_hOccluderBegin, INFINITE );
+				if ( status != WAIT_OBJECT_0 || m_bTerminate ) break;
 				CPU3DDoOcclude ();
-				//Set the event to let everyone know we have finished
-				//if ( g_hOccluderEnd ) SetEvent ( g_hOccluderEnd );
 			}
+			if ( g_hOccluderEnd ) SetEvent ( g_hOccluderEnd );
 
 			return 1;
 		}
