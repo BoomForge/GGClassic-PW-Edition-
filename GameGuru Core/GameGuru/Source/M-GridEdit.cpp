@@ -14245,9 +14245,19 @@ void editor_refresheditmarkers ( void )
 void editor_visuals ( void )
 {
 	//  Control entity selection and alpha of layers
-	if (  t.refreshgrideditcursor == 1 ) 
+	if (  t.refreshgrideditcursor == 1 )
 	{
+		const DWORD pwPreviewStart = GetTickCount();
 		gridedit_recreateentitycursor ( );
+		const DWORD pwPreviewMs = GetTickCount() - pwPreviewStart;
+		if (pwPreviewMs > 100)
+		{
+			char details[256] = { 0 };
+			sprintf_s(details, sizeof(details),
+				"PW ASSET PLACEMENT: 3D cursor preview %lu ms, bank ID %d",
+				(unsigned long)pwPreviewMs, t.gridentity);
+			timestampactivity(0, details);
+		}
 		t.refreshgrideditcursor=0;
 	}
 	gridedit_displayentitycursor ( );
