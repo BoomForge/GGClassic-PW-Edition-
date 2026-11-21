@@ -6,7 +6,7 @@
 
 Searched all 30 accessible BoomForge GitHub repositories (including archived repos), repository names, public search and related commit history. No standalone EFPSE Model Bridge converter source repository was found.
 
-- BoomForge/EFPSE---PW contains installer/assets/src/EFPSEBridgeIntegration.cs and PixelwolfModelImportReview.cs. They launch an **external converter executable** and review its MD3/PNG outputs. They are not the converter source.
+- **Verified EFPSE Studio build integration:** BoomForge/EFPSE---PW's installer/main.go uses `//go:embed assets`, checks the SHA-256 of `EFPSE-Model-Bridge-v1.0.4.exe` (`62a5f26a87ad2c334a0b17c44fc83045cf3ef175882eb789b8c37cc4ef196f66`), and installs that executable under `ModelBridge/`. Its `EFPSEBridgeIntegration.cs` launches the process, while `PixelwolfModelImportReview.cs` validates/reviews the resulting MD3/PNG assets. Thus EFPSE Studio **bundles and uses the working converter** but its GitHub snapshot does **not contain the converter's importer/animation source**. README explicitly lists the EXE among large binary dependencies excluded from GitHub.
 - Commit 207ff498 in EFPSE---PW verifies that the external Model Bridge responds to EFPSE_MODEL_BRIDGE_INITIAL_PROJECT. It does not implement FBX loader or retargeting.
 - Archived EFPSE Model Bridge documentation describes Three.js FBXLoader/GLTFLoader, skeletal/morph clip preview, and baking vertices to Quake III MD3 frames. **MD3 vertex frames do not preserve bones and weights**, so the bridge is not an already-working Mixamo/GameGuru retargeter.
 - A ChatGPT Library checksum manifest mentions EFPSE-Model-Bridge-v1.0.4-Source.zip. The ZIP itself has not been recovered/inspected. Its checksum is not source code.
