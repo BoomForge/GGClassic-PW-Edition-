@@ -59,13 +59,28 @@ internal static class Program
 
         string vswhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
                                       @"Microsoft Visual Studio\Installer\vswhere.exe");
-        if (!File.Exists(vswhere)) throw new InvalidOperationException("Install Visual Studio 2022 Desktop development with C++, x64 MFC and Windows SDK first. Steam is unchanged.");
-        string vsroot = (await Capture(vswhere,
-            "-latest -products * -requires Microsoft.Component.MSBuild -property installationPath", null)).Trim();
-        if (vsroot.Length == 0) throw new InvalidOperationException("MSBuild not found. Steam is unchanged.");
+        // A plain Visual Studio/VS Code install isn't enough: the GameGuru
+        // solution needs the VS2022 v143 x64 compiler, MSBuild and C++ MFC.
+        // vswhere ships with the free Microsoft Build Tools installation.
+        string vsroot = "";
+        if (File.Exists(vswhere))
+        {
+            vsroot = (await Capture(vswhere,
+                "-latest -products * -version \"[17.0,18.0)\" -requires Microsoft.Component.MSBuild Microsoft.VisualStudio.Component.VC.Tools.x86.x64 Microsoft.VisualStudio.Component.VC.ATLMFC -property installationPath",
+                null)).Trim();
+        }
+        if (vsroot.Length == 0)
+        {
+            await OfferBuildToolsInstallation();
+            return 0; // No Steam changes. User reruns after Microsoft setup finishes.
+        }
         string msbuild = Path.Combine(vsroot.Split('\n', StringSplitOptions.RemoveEmptyEntries).Last().Trim(),
                                      @"MSBuild\Current\Bin\MSBuild.exe");
-        if (!File.Exists(msbuild)) throw new FileNotFoundException("MSBuild.exe not found", msbuild);
+        if (!File.Exists(msbuild))
+        {
+            await OfferBuildToolsInstallation();
+            return 0;
+        }
 
         if (MessageBox.Show(
             "Download the latest PW Edition GitHub source and build it on this computer?\n\n" +
@@ -151,6 +166,55 @@ internal static class Program
             try { Directory.Delete(temp, recursive: true); }
             catch (Exception e) { Console.WriteLine("Temporary source cleanup failed: " + temp + " (" + e.Message + ")"); }
         }
+    }
+
+    static async Task OfferBuildToolsInstallation()
+    {
+        // Official Microsoft Build Tools 2022 bootstrapper, not bundled or
+        // redistributed by PW Edition. Users approve installation separately.
+        const string microsoftSetup = "https://aka.ms/vs/17/release/vs_buildtools.exe";
+        const string microsoftDocs = "https://learn.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-build-tools?view=vs-2022";
+        var response = MessageBox.Show(
+            "The Visual Studio 2022 C++ compiler/build tools are missing or incomplete.\n\n" +
+            "PW Edition currently compiles your licensed GameGuru source locally, so it needs Microsoft's FREE Build Tools (not the full Visual Studio editor).\n\n" +
+            "Download and open the official Microsoft installer now?\n" +
+            "The C++ workload, MFC and Windows SDK will be preselected for review.\n\n" +
+            "Setup needs internet, several GB of disk space and may ask for administrator permission. " +
+            "When Microsoft's installation finishes, restart this updater.\n\n" +
+            "No GameGuru or Steam files have been changed.",
+            "Pixelwolf PW Edition - Set up build tools", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+        if (response != DialogResult.Yes)
+        {
+            Console.WriteLine("Build tools installation declined. See " + microsoftDocs);
+            return;
+        }
+        string folder = Path.Combine(Path.GetTempPath(), "Pixelwolf-GGC-Microsoft-Tools");
+        Directory.CreateDirectory(folder);
+        string installer = Path.Combine(folder, "vs_buildtools.exe");
+        using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+        Console.WriteLine("Downloading official Microsoft Visual Studio 2022 Build Tools installer...");
+        using (var reply = await http.GetAsync(microsoftSetup, HttpCompletionOption.ResponseHeadersRead))
+        {
+            reply.EnsureSuccessStatusCode();
+            await using var destination = File.Create(installer);
+            await reply.Content.CopyToAsync(destination);
+        }
+        if (new FileInfo(installer).Length < 100_000)
+            throw new InvalidDataException("Microsoft Build Tools download was unexpectedly small. Open " + microsoftSetup + " manually.");
+        Console.WriteLine("Launching Microsoft setup with C++ x64 tools, MFC and Windows SDK selected.");
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = installer,
+            Arguments = "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended " +
+                        "--add Microsoft.VisualStudio.Component.VC.ATLMFC " +
+                        "--add Microsoft.VisualStudio.Component.Windows11SDK.26100",
+            UseShellExecute = true
+        });
+        MessageBox.Show(
+            "Microsoft setup has been opened. Complete its installation, then relaunch the PW Edition updater.\n\n" +
+            "You don't need Visual Studio IDE, just the Build Tools.\n\n" +
+            "Steam files remain unchanged.",
+            "Pixelwolf PW Edition", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     static string InstallWithRollback(string build, string steam, string sha)
