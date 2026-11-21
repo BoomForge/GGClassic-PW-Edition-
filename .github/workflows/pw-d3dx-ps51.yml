@@ -1,0 +1,38 @@
+name: PW D3DX dependency preparation Windows PowerShell 5.1
+on:
+  push:
+    branches: [work/pw-community-integration-20261121]
+    paths:
+      - 'tools/pw-prepare-d3dx.ps1'
+      - '.github/workflows/pw-d3dx-ps51.yml'
+  pull_request:
+    paths:
+      - 'tools/pw-prepare-d3dx.ps1'
+      - '.github/workflows/pw-d3dx-ps51.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  legacy-powershell-d3dx:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - name: Run D3DX preparation using Windows PowerShell 5.1 (not pwsh 7)
+        shell: cmd
+        run: |
+          powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "tools\pw-prepare-d3dx.ps1"
+      - name: Verify both official Microsoft x64 libraries and idempotency
+        shell: powershell
+        run: |
+          $libRoot = 'GameGuru Core/SDK/DirectX/Lib/x64'
+          foreach ($name in @('d3dx9.lib', 'd3dx11.lib')) {
+            $file = Join-Path $libRoot $name
+            if (-not (Test-Path -LiteralPath $file) -or (Get-Item -LiteralPath $file).Length -lt 1024) {
+              throw "Missing x64 library: $file"
+            }
+            Write-Host "$name size $((Get-Item -LiteralPath $file).Length)"
+          }
+          ./tools/pw-prepare-d3dx.ps1
