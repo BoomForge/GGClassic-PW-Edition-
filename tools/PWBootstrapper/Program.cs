@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Windows.Forms;
 
@@ -50,6 +51,9 @@ internal static class Program
     static readonly string[] FilesToInstall =
     {
         "Guru-MapEditor.exe",
+        "Pixelwolf-GGC-Updater.exe",
+        "Launch-PW-Edition.cmd",
+        "pw-installed-commit.txt",
         "pw-updater.ps1",
         "pw-edition-version.txt",
         @"Files\scriptbank\global.lua",
@@ -58,12 +62,12 @@ internal static class Program
     };
 
     [STAThread]
-    static int Main()
+    static int Main(string[] args)
     {
         try
         {
             InitLog();
-            return Run().GetAwaiter().GetResult();
+            return Run(args).GetAwaiter().GetResult();
         }
         catch (Exception e)
         {
@@ -81,22 +85,30 @@ internal static class Program
         }
     }
 
-    static async Task<int> Run()
+    static async Task<int> Run(string[] args)
     {
         Console.WriteLine("PIXELWOLF GAMEGURU CLASSIC - LOCAL WINDOWS UPDATER");
         Console.WriteLine("Compiles the fork locally. This EXE contains no GameGuru binaries or commercial assets.");
         Console.WriteLine("You need GameGuru Classic from Steam and VS2022 Desktop C++ with x64 SDK/MFC.");
         Console.WriteLine("Your levels, media and Steam GameGuru.exe launcher are never replaced.\n");
 
-        using var picker = new FolderBrowserDialog
+        string? requested = args.FirstOrDefault(a => a.StartsWith("--install-dir=", StringComparison.OrdinalIgnoreCase));
+        string? selected = requested is null ? null : requested["--install-dir=".Length..].Trim('"');
+        if (selected is null)
         {
-            Description = "Select Steam GameGuru Classic folder (containing Files and GameGuru.exe)",
-            UseDescriptionForTitle = true,
-            ShowNewFolderButton = false
-        };
-        if (picker.ShowDialog() != DialogResult.OK) return 0;
-        string steam = Path.GetFullPath(picker.SelectedPath).TrimEnd(Path.DirectorySeparatorChar);
+            using var picker = new FolderBrowserDialog
+            {
+                Description = "Select Steam GameGuru Classic folder (containing Files and GameGuru.exe)",
+                UseDescriptionForTitle = true,
+                ShowNewFolderButton = false
+            };
+            if (picker.ShowDialog() != DialogResult.OK) return 0;
+            selected = picker.SelectedPath;
+        }
+        string steam = Path.GetFullPath(selected).TrimEnd(Path.DirectorySeparatorChar);
         ValidateSteam(steam);
+        LogOutput("Selected GameGuru installation: " + steam);
+        LogOutput("Target editor (not the Steam launcher): " + Path.Combine(steam, "Guru-MapEditor.exe"));
 
         string vswhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
                                       @"Microsoft Visual Studio\Installer\vswhere.exe");
@@ -181,11 +193,25 @@ internal static class Program
                 await Execute(msbuild, Q(Path.Combine(root, project)) + " /t:Build /p:Configuration=Release /p:Platform=x64 /m:2 /nologo /v:minimal", root);
             }
             string built = Path.Combine(root, @"PW-Build\Release");
+            // The C++ compiler can report success while staging an older or wrong
+            // editor target. Never install unless the PW-branded editor marker
+            // is present in the compiled executable itself.
+            string engine = Path.Combine(built, "Guru-MapEditor.exe");
+            if (!File.Exists(engine) || !HasCompiledPWBrand(engine))
+                throw new InvalidDataException("The compiled editor lacks the PW Edition branding marker; refusing to replace Steam files. See updater log.");
+
+            // This bootstrapper is our own independently authored binary. Copy it
+            // alongside the engine so Help > PW Edition Updates can launch it.
+            string currentUpdater = Environment.ProcessPath ?? throw new IOException("Cannot identify the updater executable.");
+            File.Copy(currentUpdater, Path.Combine(built, "Pixelwolf-GGC-Updater.exe"), overwrite: true);
+            File.WriteAllText(Path.Combine(built, "Launch-PW-Edition.cmd"),
+                "@echo off\r\ncd /d \"%~dp0\"\r\nstart \"\" \"%~dp0Guru-MapEditor.exe\"\r\n", Encoding.ASCII);
+            File.WriteAllText(Path.Combine(built, "pw-installed-commit.txt"), sha + Environment.NewLine, Encoding.ASCII);
             foreach (var relative in FilesToInstall)
                 if (!File.Exists(Path.Combine(built, relative)))
                     throw new FileNotFoundException("Required PW build output missing; nothing installed: " + relative);
-            Console.WriteLine("\nFull x64 build complete. Files ready:");
-            foreach (var relative in FilesToInstall) Console.WriteLine("  " + relative);
+            LogOutput("\nFull x64 build complete. PW-branded editor verified. Files ready:");
+            foreach (var relative in FilesToInstall) LogOutput("  " + relative);
 
             ValidateSteam(steam);
             if (Process.GetProcessesByName("GameGuru").Length > 0 ||
@@ -193,7 +219,8 @@ internal static class Program
                 throw new InvalidOperationException("Close GameGuru Classic and its editor before installing. Steam has not been modified.");
             if (MessageBox.Show(
                 "Build passed at commit " + sha[..10] + ".\n\n" +
-                "Install the six compiled/allowlisted PW Edition files into:\n" + steam + "\n\n" +
+                "Install the verified PW-branded editor, updater and supporting files into:\n" + steam + "\n\n" +
+                "The original Steam GameGuru.exe will remain untouched.\n\n" +
                 "Original versions will be backed up outside Steam. Your assets and original launcher are preserved.\n\nInstall now?",
                 "Confirm local Steam update", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
             {
@@ -201,11 +228,22 @@ internal static class Program
                 return 0;
             }
             string backup = InstallWithRollback(built, steam, sha);
-            Console.WriteLine("\nSUCCESS. Steam: " + steam + "\nBackup: " + backup);
-            MessageBox.Show(
-                "PW Edition installed from commit " + sha[..10] + ".\n\nBackup: " + backup +
-                "\n\nRun Guru-MapEditor.exe from the chosen GameGuru Classic folder and test on a disposable level.",
-                "Pixelwolf PW Edition", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            var installed = Path.Combine(steam, "Guru-MapEditor.exe");
+            if (Digest(engine) != Digest(installed))
+                throw new IOException("Post-install editor SHA-256 mismatch. Check backup " + backup);
+            LogOutput("\nSUCCESS. PW Edition verified at " + installed + "\nCommit: " + sha + "\nBackup: " + backup);
+            if (MessageBox.Show(
+                "PW Edition installed and SHA-256 verified from commit " + sha[..10] + ".\n\n" +
+                "Editor: " + installed + "\n\n" +
+                "Steam's normal Play button may still start stock GameGuru. Use the new Launch-PW-Edition.cmd or the editor EXE directly.\n\n" +
+                "Launch the verified PW Edition editor now?",
+                "Pixelwolf PW Edition installed", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+            {
+                Process.Start(new ProcessStartInfo(installed) {
+                    UseShellExecute = true,
+                    WorkingDirectory = steam
+                });
+            }
             return 0;
         }
         finally
@@ -264,6 +302,17 @@ internal static class Program
             "Pixelwolf PW Edition", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
+    static bool HasCompiledPWBrand(string exe)
+    {
+        // The exact ASCII text used by M-GridEdit.cpp for the editor window title.
+        byte[] marker = Encoding.ASCII.GetBytes("GameGuru Classic - PW Edition | ");
+        using var stream = File.OpenRead(exe);
+        // Read-only inspection of the editor image; this doesn't execute code.
+        byte[] data = new byte[stream.Length];
+        stream.ReadExactly(data);
+        return data.AsSpan().IndexOf(marker) >= 0;
+    }
+
     static string InstallWithRollback(string build, string steam, string sha)
     {
         string backup = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -312,6 +361,17 @@ internal static class Program
                 string target = Path.Combine(steam, item.name);
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 string source = Path.Combine(build, item.name);
+                // Windows refuses to overwrite an executable that is currently
+                // running from the selected installation. In that case we are
+                // already running precisely this updater binary, so leave it.
+                if (item.name.Equals("Pixelwolf-GGC-Updater.exe", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(Path.GetFullPath(Environment.ProcessPath ?? ""), Path.GetFullPath(target),
+                                  StringComparison.OrdinalIgnoreCase))
+                {
+                    if (Digest(source) != Digest(target)) throw new IOException("Running updater differs from staged updater.");
+                    LogOutput("Keeping current in-use updater: " + item.name);
+                    continue;
+                }
                 string staged = target + ".pw-tmp-" + Guid.NewGuid().ToString("N");
                 try
                 {
