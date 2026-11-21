@@ -70,3 +70,15 @@ The owner's 21 November Windows screenshots **disproved** the prior claim that t
 - The owner's existing inventory includes real FPE/BMP pairs; the earlier completely empty panel is therefore not evidence that their GameGuru assets were absent.
 
 **Acceptance still required** on the owner's Windows machine: full source build, `Entity Library` visible on launch, folder sections populated, at least three distinct real asset thumbnails loading, lower/side panel splitters resizing without overlap, original icons recovered and reported accurately in updater log, and neutral Classic style. Keep PR #1 in draft until accepted. Do not call a successful CI compile a visual test.
+
+## V6 corrective implementation — duplicate asset panels and authentic icon verification (21 Nov 2026)
+
+The owner's latest screenshot still showed an overlapping `Entity Library` AND `Entities` panel with a transparent background, circular PW-generated graphics, and inaccurate thumbnails. Source has now been changed as follows:
+
+- `PWEngineDockspaceV6`: one bottom-central `Asset Browser##PWAssetBrowser` window docked into the SAME left/centre/right workspace node tree; no `TABENTITYNAME` window or dummy `##Object Library ExternalWindow` is created. The previous `Entities` window lists entities already placed in a map, NOT the disk asset library. Scene Hierarchy provides level-instance selection.
+- The Asset Browser is permanent, has no separate close button, tracks its actual dock node after saved-layout restore, and retains Classic's folder/category filters, asset thumbnails, and click-to-add behaviour. Its window background is opaque.
+- Reset the colour palette to the original-style light Windows appearance through `myLightStyle`, not the modern dark/cyan PW colour scheme. Do **not** call this a pixel-identical restoration of the MFC launcher: the new editor uses ImGui.
+- Stop loading the generic `Files/editors/gfx/missing.bmp` as if it were each asset's actual preview. Genuine BMP/PNG/JPG/JPEG files are loaded; absent previews use a labelled placeholder with the existing click-to-add operation.
+- The local Windows updater now detects antialiased blue-circle generated icons by scanning the known cyan rim, tries verified owner's backed-up originals and local Steam GameGuru.exe resources, and logs an explicit list of still-unrecoverable original toolbar images. **It cannot manufacture missing copyrighted stock artwork.**
+
+**Acceptance:** Build success only verifies compilation. The owner must run the actual Windows editor and confirm one docked bottom browser, visible grouped folders, diverse correct previews, no viewport bleed-through, Classic-style palette, and original icon restoration. The draft PR remains unmerged and any items not visually verified remain outstanding.
