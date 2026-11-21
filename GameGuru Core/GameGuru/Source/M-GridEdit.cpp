@@ -23327,6 +23327,10 @@ float ImGuiGetMouseY(void)
 #ifdef ENABLEIMGUI
 void process_entity_library(void)
 {
+	// Opening Add brings the bottom Asset Library tab forward once.
+	static bool wasLibraryOpen = false;
+	const bool justOpened = bExternal_Entities_Window && !wasLibraryOpen;
+	wasLibraryOpen = bExternal_Entities_Window;
 	if (bExternal_Entities_Window)
 	{
 		ImGuiWindowFlags ex_window_flags = ImGuiWindowFlags_NoMove;
@@ -23355,6 +23359,8 @@ void process_entity_library(void)
 		time(&tCurrentTimeSec);
 
 		ImGui::Begin("Entity Library##ExternalWindow", &bExternal_Entities_Window, ex_window_flags);
+		if (justOpened)
+			ImGui::SetWindowFocus("Entity Library##ExternalWindow");
 
 		bool bAddSelectionToGame = false;
 		bool bIsWeDocked = ImGui::IsWindowDocked();
