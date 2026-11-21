@@ -2458,6 +2458,21 @@ void mapeditorexecutable_loop(void)
 				}
 				if (ImGui::MenuItem("Verify PW Edition Executable"))
 					PWShowInstalledBuildDetails();
+				ImGui::Separator();
+				// Can be turned on while a slow project is already open. Begin and
+				// slow-stage markers survive in the trace even if the next load hangs.
+				const bool tracingNow = pw_loadtrace_enabled();
+				if (ImGui::MenuItem("Capture Load Diagnostics (CSV)", NULL, tracingNow))
+					SetEnvironmentVariableA("GGCPW_PROFILE_LOAD", tracingNow ? "0" : "1");
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Log each future project/Test Level phase to %%TEMP%%\\GGCPW-loadtrace-<pid>.csv");
+				if (ImGui::MenuItem("Open Load Diagnostics Folder"))
+				{
+					char tempPath[MAX_PATH] = { 0 };
+					DWORD pathLen = GetTempPathA(MAX_PATH, tempPath);
+					if (pathLen > 0 && pathLen < MAX_PATH)
+						ShellExecuteA(NULL, "open", tempPath, NULL, NULL, SW_SHOWNORMAL);
+				}
 				ImGui::EndMenu();
 			}
 			ImGui::EndMenuBar();
