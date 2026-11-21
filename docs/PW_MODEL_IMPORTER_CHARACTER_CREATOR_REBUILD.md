@@ -2,6 +2,26 @@
 
 **Decision date:** 21 November 2026. **Status:** approved direction, engineering design. Neither module has been rebuilt yet; existing tools remain intact pending compatibility testing.
 
+## Recovered Model Bridge v1.0.7 source — VERIFIED 21 November 2026
+
+The project owner supplied `EFPSE-Model-Bridge-v1.0.7.exe` (SHA-256 `73bfb2f5c4f2fddc316957abc1818d4acb964eee6a3e73e35401546000bfdf46`). Offline inspection identifies a **Go 1.23.2 Windows x64 binary** with a `go:embed` browser application. We reconstructed its embed.FS name/data pointer table, preserving original file bytes and lengths. **33 files (1,285,624 bytes) were extracted. All 30 embedded JavaScript files passed syntax-only checks.** No EXE or recovered JS was executed.
+
+Recovered source includes:
+- `web/app.js`: native frontend workflow for OBJ/FBX/GLTF/GLB/DirectX X; file and texture discovery, animation mixer/clip preview, attachments to bones, animation pose sampling, material assignment, thumbnail and export assembly.
+- `web/x-parser.js`: DirectX .x mesh parser with SkinWeights, AnimationSet/AnimationKey and animation tick metadata.
+- `web/x-loader.js`: DirectX skeleton hierarchy, inverse bind poses, up-to-four normalized skin weights, skinned mesh and clips. This is strong reference code for a **skeleton-preserving GameGuru loader**.
+- `web/ascii-fbx.js`: static geometry-only ASCII FBX fallback. The **animated** FBX path uses bundled Three.js loader, not this parser.
+- `web/vendor/local-three.js` + `web/vendor/three-runtime.js`: vendor loader/render/animation runtime; audit upstream licences before copying to any distributable engine.
+- `web/conversion-utils.js`, `web/material-texture-utils.js`, `web/alpha-material-utils.js`, `web/gameguru-fpe.js`, `web/sampling-utils.js`, `web/md3.js`: coordinate and scale, material/alpha/FPE metadata, time sampling and MD3 generation.
+- Original `web/*test.mjs` regression sources, all syntax checked (NOT executed).
+- v1.0.7 explicitly **disables Rhino 3DM import** despite earlier advertised support.
+
+**Crucial boundary:** Model Bridge **does load skeletal source data**, and plays source clips, but **bakes skinned vertex positions to MD3**, losing bones and per-vertex skin weights in final output. No generic Mixamo-to-GameGuru animation retargeter was found. We must implement and validate an explicit native bone mapping / skeleton preserving export contract.
+
+**Remaining unrecovered component:** the Go HTTP/backend source. The browser frontend calls `/api/convert-dds`, `/api/decompress-x`, `/api/export-asset`, `/api/export-package`, `/api/project-info`, `/api/select-project`, `/api/session`, `/api/ping`. These remain compiled Go implementations, and cannot be claimed as original source. The older v1.0.4 Source.zip is still not located. EFPSE Studio bundled v1.0.4; version compatibility with 1.0.7 is not yet proven.
+
+Recovered source and SHA manifests were packaged as a downloadable ZIP in the owner's ChatGPT development conversation. **Not automatically checked into this GitHub repository** pending a licence/dependency audit and conscious selection of code to port. Re-run an extraction from the original user-supplied v1.0.7 binary when preparing a port.
+
 ## Model Bridge source discovery
 
 Searched all 30 accessible BoomForge GitHub repositories (including archived repos), repository names, public search and related commit history. No standalone EFPSE Model Bridge converter source repository was found.
