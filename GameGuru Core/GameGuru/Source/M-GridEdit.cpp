@@ -23431,7 +23431,11 @@ void process_entity_library(void)
 		static int max_load_persync = 200; //First time only , changed later to 15
 		bReleaseIconsDynamic = true;
 #else
-		int max_load_persync = 2000;
+        // Do not decode thousands of asset BMP/PNG previews in a single GUI
+        // frame: it makes the viewport and asset dragging appear frozen.
+        // Spread first-time thumbnails across frames; loaded previews are
+        // cached in iPreview exactly as before.
+        int max_load_persync = 24;
 #endif
 
 		int preview_count = 0;
