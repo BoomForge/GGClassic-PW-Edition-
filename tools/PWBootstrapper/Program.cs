@@ -688,98 +688,143 @@ try {
 
     static void RestoreNativeClassicToolbar(string build, string steam, List<string> installFiles)
     {
-        string stockLauncher = Path.Combine(steam, "GameGuru.exe");
-        if (!File.Exists(stockLauncher))
+        // The MFC bitmap resources in GameGuru IDE/Editor.rc were never all
+        // guaranteed to be embedded in GameGuru.exe. The *original* Editor.exe
+        // (when present) is a more appropriate source; try each licensed local
+        // executable, and any unmodified original BMP strips shipped beside it.
+        var strips = new (int Resource, string File, string[] Names)[]
         {
-            LogOutput("Original GameGuru.exe unavailable; cannot recover authentic Classic toolbar art.");
-            return;
-        }
-        // LOAD_LIBRARY_AS_DATAFILE prevents running the executable or loading
-        // Steam dependencies. RT_BITMAP resources are read-only.
-        IntPtr module = LoadResourceModule(stockLauncher, IntPtr.Zero, 0x00000002);
-        if (module == IntPtr.Zero)
-        {
-            LogOutput("Could not read stock toolbar bitmap resources from " + stockLauncher);
-            return;
-        }
-        // Names and column indexes follow GameGuru IDE/Editor.rc, 42px bitmaps.
-        var strips = new (int Resource, string[] Names)[]
-        {
-            (152, new[] { "newlevel.png", "loadlevel.png", "savelevel.png" }),
-            (178, new[] { "entity.png", "markers.png", "builder.png" }),
-            (180, new[] { "shape.png", "level.png", "storedlevel.png", "blendmode.png", "rampmode.png", "painttexture.png", "paintgrass.png" }),
-            (182, new[] { "newwaypoints.png", "waypoints.png" }),
-            (186, new[] { "testgame.png", "socialvr.png" })
+            (152, "StandardToolbar2.bmp", new[] { "newlevel.png", "loadlevel.png", "savelevel.png" }),
+            (178, "ModeToolbar3.bmp", new[] { "entity.png", "markers.png", "builder.png" }),
+            (180, "TerrainToolbar.bmp", new[] { "shape.png", "level.png", "storedlevel.png", "blendmode.png", "rampmode.png", "painttexture.png", "paintgrass.png" }),
+            (182, "WaypointToolbar.bmp", new[] { "newwaypoints.png", "waypoints.png" }),
+            (186, "GameToolbar.bmp", new[] { "testgame.png", "socialvr.png" })
         };
-        int recovered = 0, missing = 0;
-        try
+        string[] stockExecutables =
         {
-            foreach (var (resource, names) in strips)
+            Path.Combine(steam, "Editor.exe"),
+            Path.Combine(steam, "GameGuru IDE", "Editor.exe"),
+            Path.Combine(steam, "GameGuru.exe")
+        };
+        int recovered = 0;
+        var attemptedSources = new List<string>();
+        foreach (string originalExe in stockExecutables.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!File.Exists(originalExe)) continue;
+            IntPtr module = LoadResourceModule(originalExe, IntPtr.Zero, 0x00000002);
+            if (module == IntPtr.Zero)
             {
-                IntPtr hBitmap = LoadOriginalBitmap(module, (IntPtr)resource, 0, 0, 0, 0x2000);
-                if (hBitmap == IntPtr.Zero)
+                LogOutput("Could not read local Classic bitmap resources from " + originalExe);
+                continue;
+            }
+            attemptedSources.Add(originalExe);
+            try
+            {
+                foreach (var (resource, _, names) in strips)
                 {
-                    int alternate = FindUniqueOriginalToolbarStrip(module, names.Length);
-                    if (alternate > 0)
-                        hBitmap = LoadOriginalBitmap(module, (IntPtr)alternate, 0, 0, 0, 0x2000);
+                    // Don't extract more when all of this strip's originals
+                    // already exist in the target/staged files.
+                    bool needsRecovery = names.Any(name =>
+                    {
+                        string rel = Path.Combine("Files", "editors", "uiv3", name);
+                        string stage = Path.Combine(build, rel);
+                        string installed = Path.Combine(steam, rel);
+                        return !(File.Exists(stage) && !IsGeneratedPWIcon(stage)) &&
+                               !(File.Exists(installed) && !IsGeneratedPWIcon(installed) &&
+                                   !IsLegacyPWTextTile(installed, false));
+                    });
+                    if (!needsRecovery) continue;
+
+                    IntPtr handle = LoadOriginalBitmap(module, (IntPtr)resource, 0, 0, 0, 0x2000);
+                    if (handle == IntPtr.Zero)
+                    {
+                        int alternate = FindUniqueOriginalToolbarStrip(module, names.Length);
+                        if (alternate > 0)
+                            handle = LoadOriginalBitmap(module, (IntPtr)alternate, 0, 0, 0, 0x2000);
+                    }
+                    if (handle == IntPtr.Zero) continue;
+                    try
+                    {
+                        using var bitmap = Bitmap.FromHbitmap(handle);
+                        recovered += RecoverStockToolbarStrip(bitmap, names, build, steam, installFiles,
+                            Path.GetFileName(originalExe) + " RT_BITMAP " + resource);
+                    }
+                    catch (Exception err)
+                    {
+                        LogOutput("Classic resource " + resource + " read failed: " + err.Message, stderr: true);
+                    }
+                    finally { DeleteOriginalBitmap(handle); }
                 }
-                if (hBitmap == IntPtr.Zero)
-                {
-                    LogOutput("Classic toolbar RT_BITMAP " + resource +
-                        " unavailable, with no unique compatible local original; preserving existing artwork.");
-                    missing += names.Length;
-                    continue;
-                }
+            }
+            finally { FreeLibrary(module); }
+        }
+
+        // A few original installations ship the MFC resource bitmap files
+        // alongside the IDE rather than inside Editor.exe. Only exact named
+        // original strips, and only with the expected dimensions, may be used.
+        string[] sourceFolders =
+        {
+            Path.Combine(steam, "res"),
+            Path.Combine(steam, "GameGuru IDE", "res")
+        };
+        foreach (var (_, bitmapName, names) in strips)
+        {
+            foreach (string folder in sourceFolders)
+            {
+                string source = Path.Combine(folder, bitmapName);
+                if (!File.Exists(source)) continue;
+                attemptedSources.Add(source);
                 try
                 {
-                    using var strip = Bitmap.FromHbitmap(hBitmap);
-                    for (int col = 0; col < names.Length; col++)
-                    {
-                        string relative = Path.Combine("Files", "editors", "uiv3", names[col]);
-                        string existing = Path.Combine(steam, relative);
-                        if (File.Exists(existing) && !IsGeneratedPWIcon(existing)) continue;
-                        if (strip.Width < (col + 1) * 42 || strip.Height < 42)
-                        {
-                            LogOutput("Unexpected strip dimensions for RT_BITMAP " + resource + "; preserving " + names[col]);
-                            missing++;
-                            continue;
-                        }
-                        string path = Path.Combine(build, relative);
-                        // Do not overwrite a genuine original already recovered from a backup.
-                        if (File.Exists(path) && !IsGeneratedPWIcon(path)) continue;
-                        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                        // Keep the exact 42x42 Classic artwork, not a 64px
-                        // resampling with altered colours or icon proportions.
-                        using var icon = new Bitmap(42, 42);
-                        using (var graphics = Graphics.FromImage(icon))
-                        {
-                            graphics.Clear(Color.Transparent);
-                            graphics.DrawImage(strip, new Rectangle(0, 0, 42, 42),
-                                new Rectangle(col * 42, 0, 42, 42), GraphicsUnit.Pixel);
-                        }
-                        // MFC toolbar bitmaps sometimes encode transparency
-                        // with pure magenta. Only remove that explicit colour
-                        // key; never replace the genuine original palette.
-                        Color key = icon.GetPixel(0, 0);
-                        if (key.R >= 250 && key.G <= 5 && key.B >= 250)
-                            icon.MakeTransparent(key);
-                        icon.Save(path, ImageFormat.Png);
-                        if (!installFiles.Contains(relative, StringComparer.OrdinalIgnoreCase))
-                            installFiles.Add(relative);
-                        recovered++;
-                    }
+                    using var bitmap = new Bitmap(source);
+                    recovered += RecoverStockToolbarStrip(bitmap, names, build, steam, installFiles, source);
                 }
-                finally { DeleteOriginalBitmap(hBitmap); }
+                catch (Exception err)
+                {
+                    LogOutput("Classic toolbar bitmap unavailable: " + source + " (" + err.Message + ")");
+                }
             }
         }
-        catch (Exception e)
+        LogOutput("Genuine Classic toolbar image recovery: " + recovered +
+                  " PNG files extracted from licensed local resources. Sources checked: " +
+                  (attemptedSources.Count == 0 ? "(none found)" : string.Join(", ", attemptedSources)));
+    }
+
+    static int RecoverStockToolbarStrip(Bitmap strip, string[] names, string build,
+        string steam, List<string> installFiles, string source)
+    {
+        if (strip.Width < names.Length * 42 || strip.Height != 42)
         {
-            // Do not install a partially extracted mismatched icon strip:
-            // preserve stock files, keep explicit log for user troubleshooting.
-            LogOutput("Original Classic resource restoration reported: " + e.Message, stderr: true);
+            LogOutput("Classic toolbar source has incorrect strip dimensions: " +
+                source + " (" + strip.Width + "x" + strip.Height + ")");
+            return 0;
         }
-        finally { FreeLibrary(module); }
-        LogOutput("Recovered " + recovered + " authentic Classic toolbar icons from licensed GameGuru.exe; missing/unsupported: " + missing + ".");
+        int count = 0;
+        for (int col = 0; col < names.Length; ++col)
+        {
+            string relative = Path.Combine("Files", "editors", "uiv3", names[col]);
+            string existing = Path.Combine(steam, relative);
+            string staged = Path.Combine(build, relative);
+            if (File.Exists(staged) && !IsGeneratedPWIcon(staged)) continue;
+            if (File.Exists(existing) && !IsGeneratedPWIcon(existing) &&
+                !IsLegacyPWTextTile(existing, false)) continue;
+            Directory.CreateDirectory(Path.GetDirectoryName(staged)!);
+            using var image = new Bitmap(42, 42);
+            using (var graphics = Graphics.FromImage(image))
+            {
+                graphics.Clear(Color.Transparent);
+                graphics.DrawImage(strip, new Rectangle(0, 0, 42, 42),
+                    new Rectangle(col * 42, 0, 42, 42), GraphicsUnit.Pixel);
+            }
+            Color key = image.GetPixel(0, 0);
+            if (key.R >= 250 && key.G <= 5 && key.B >= 250)
+                image.MakeTransparent(key);
+            image.Save(staged, ImageFormat.Png);
+            if (!installFiles.Contains(relative, StringComparer.OrdinalIgnoreCase))
+                installFiles.Add(relative);
+            ++count;
+        }
+        return count;
     }
 
 
