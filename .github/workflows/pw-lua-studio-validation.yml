@@ -1,0 +1,38 @@
+name: PW Edition Lua Studio compilation
+
+on:
+  pull_request:
+    paths:
+      - "GameGuru Core/GameGuru/Include/PW-LuaStudio.h"
+      - "GameGuru Core/GameGuru/Source/M-GridEdit.cpp"
+      - "tools/test_pw_lua_studio_win.cpp"
+      - ".github/workflows/pw-lua-studio-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lua-studio:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Find Visual Studio 2022
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in ("%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath) do set "VS_PATH=%%i"
+          if not defined VS_PATH exit /b 1
+          echo VS_PATH=%VS_PATH%>> "%GITHUB_ENV%"
+      - name: Compile the native Lua editor code
+        shell: cmd
+        run: |
+          call "%VS_PATH%\Common7\Tools\VsDevCmd.bat" -arch=x64 >nul
+          cl.exe /nologo /EHsc /W3 /std:c++14 /DUNICODE /D_UNICODE /I "GameGuru Core\GameGuru\Include" tools\test_pw_lua_studio_win.cpp /Fe:pw-lua-studio-test.exe /link User32.lib Gdi32.lib Comdlg32.lib
+          if errorlevel 1 exit /b 1
+      - name: Validate Lua API discovery and UTF-8 conversion
+        shell: pwsh
+        run: |
+          ./pw-lua-studio-test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Lua Studio smoke test failed' }
