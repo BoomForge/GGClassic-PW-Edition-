@@ -1654,7 +1654,7 @@ void mapeditorexecutable_loop(void)
 			#else
 			RedockNextWindow = "Character Creator##PropertiesWindow";
 			g_bCharacterCreatorPlusActivated = true; //cyb
-			ImGui::SetWindowFocus(TABENTITYNAME);
+			ImGui::SetWindowFocus("Asset Browser##PWAssetBrowser");
 			#endif
 
 		}
@@ -1724,7 +1724,7 @@ void mapeditorexecutable_loop(void)
 
 			iLaunchAfterSync = 8; //Import model
 			iSkibFramesBeforeLaunch = 5;
-			ImGui::SetWindowFocus(TABENTITYNAME);
+			ImGui::SetWindowFocus("Asset Browser##PWAssetBrowser");
 		}
 		if (ImGui::IsItemHovered() && iSkibFramesBeforeLaunch == 0) ImGui::SetTooltip("%s", "Importer");
 		ImGui::SameLine();
