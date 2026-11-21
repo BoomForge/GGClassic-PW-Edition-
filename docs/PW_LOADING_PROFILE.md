@@ -55,3 +55,13 @@ To disable tracing, close the editor and restart it without the environment vari
 5. How do a fresh empty level, a 10-object town scene and a larger scene compare?
 
 **Do not optimise by removing the save-before-test safety behaviour.** An unexpectedly slow engine is frustrating; losing hours of game work is worse.
+
+## Owner slow-project-load report and one-click capture — 21 November 2026
+
+The owner reports that a test project eventually loaded after more than one minute, despite apparently repeating loading steps. This does not prove an infinite loop or identify a performance bottleneck.
+
+In a repaired PW Edition build, enable PW Edition > Capture Load Diagnostics (CSV), reproduce the slow load, then open PW Edition > Open Load Diagnostics Folder. Look for GGCPW-loadtrace-<pid>.csv in the Windows Temp directory. The GGCPW_PROFILE_LOAD=1 environment-variable alternative remains supported.
+
+Entries prefixed begin. identify a stage entered before an unfinished/hung operation; slow. entries flag completed stages lasting at least 10 seconds. The analyser ignores both marker types when ranking completed durations. If no useful trace appears, add instrumentation at the uncovered location rather than claim a speed-up.
+
+Status: code change pending full owner runtime comparison; no measured improvement claimed.
