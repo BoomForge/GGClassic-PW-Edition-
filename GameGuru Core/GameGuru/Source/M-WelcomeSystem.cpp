@@ -972,7 +972,7 @@ void welcome_mainvr_page ( int iHighlightingButton )
 	welcome_text ( "Look out for regular updates!", 1, 50, 23, 192, true, false );
 	welcome_text ( "Would you like to learn more about GameGuru MAX\nor go directly to the editor and start creating?", 1, 50, 72, 192, true, false );
 	#else
-	welcome_text("WELCOME TO GAMEGURU CLASSIC", 5, 50, 10, 255, false, false);
+	welcome_text("WELCOME TO PIXELWOLF PW EDITION", 5, 50, 10, 255, false, false);
 	welcome_text("Look out for regular updates!", 1, 50, 23, 192, true, false);
 	#endif
 	#endif
