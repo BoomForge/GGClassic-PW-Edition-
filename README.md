@@ -100,6 +100,12 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 - [ ] **Build and stability baseline:** compile the fork using Visual Studio 2022 x64 with the original legally owned GameGuru media and required dependencies; test editor launch, tiny FPS level, play/stop, save/reopen and standalone game.
 - [ ] **Loading-time investigation:** profiling hooks are committed and individually Windows-tested, but the full PW Edition engine has not been benchmarked. Measure cold startup, first test, repeat test, return to editor, and standalone load for an empty world and a populated small town. Then optimise the measured bottleneck and verify before/after results.
 
+### Model Importer 2 and Character Creator 2 — approved direction
+
+- [ ] Rebuild both tools around shared asset material, rig, animation and export contracts, preserving legacy GameGuru features during migration. [Rebuild and Model Bridge research](docs/PW_MODEL_IMPORTER_CHARACTER_CREATOR_REBUILD.md).
+- [ ] Recover full EFPSE Model Bridge converter source; the EFPSE Studio GitHub repo currently contains only its external executable launcher and output review. A historical source ZIP checksum exists in Library, not recovered code.
+- [ ] Evaluate the separate M.I.L.O retro-character-creator-foundation branch for canonical low-poly body/rig, morph, hair/clothing and export design.
+
 ### To do — future upgrades
 
 - [ ] Build an optional **full RPG inventory and quest save system** on top of the PW typed transition-value API; currently scripts explicitly select which simple values to carry.
