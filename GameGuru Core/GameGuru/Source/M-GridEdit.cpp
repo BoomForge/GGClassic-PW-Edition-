@@ -23863,7 +23863,8 @@ void process_entity_library(void)
 												uniqueId++;
 
 											int textureId = 0;
-											if (myfiles->iPreview <= 0)
+												if (myfiles->iPreview == -2) { textureId = 0; }
+											else if (myfiles->iPreview <= 0)
 											{
 												//Only Visible.
 												int gcpy = ImGui::GetCursorPosY();
@@ -23915,8 +23916,8 @@ void process_entity_library(void)
 
 														if (!GetImageExistEx(myfiles->iPreview))
 														{
-															myfiles->iPreview = TOOL_ENTITY;
-															textureId = TOOL_ENTITY;
+															myfiles->iPreview = -2; // Stable missing-preview sentinel; never use a toolbar icon as an asset preview.
+															textureId = 0; // Missing previews use a clearly labelled clickable placeholder.
 														}
 														else {
 															loaded_images++;
@@ -23924,10 +23925,10 @@ void process_entity_library(void)
 														}
 													}
 													else
-														textureId = TOOL_ENTITY;
+														textureId = 0; // Missing previews use a clearly labelled clickable placeholder.
 												}
 												else {
-													textureId = TOOL_ENTITY;
+													textureId = 0; // Missing previews use a clearly labelled clickable placeholder.
 												}
 											}
 											else
@@ -23947,7 +23948,7 @@ void process_entity_library(void)
 																myfiles->iPreview = 0;
 																loaded_images--;
 															}
-															textureId = TOOL_ENTITY;
+															textureId = 0; // Missing previews use a clearly labelled clickable placeholder.
 														}
 														else
 															textureId = myfiles->iPreview;
@@ -24045,7 +24046,9 @@ void process_entity_library(void)
 												}
 
 
-												if (ImGui::ImgBtn(textureId, ImVec2(media_icon_size, media_icon_size), drawCol_back, drawCol_normal, drawCol_hover, drawCol_Down, -1, 0, 0, 0, true))
+												if (textureId > 0 && GetImageExistEx(textureId)
+												? ImGui::ImgBtn(textureId, ImVec2(media_icon_size, media_icon_size), drawCol_back, drawCol_normal, drawCol_hover, drawCol_Down, -1, 0, 0, 0, true)
+												: ImGui::Button("No preview", ImVec2(media_icon_size, media_icon_size)))
 												{
 
 													if (bTutorialCheckAction) TutorialNextAction(); //Clicked get next tutorial action.
