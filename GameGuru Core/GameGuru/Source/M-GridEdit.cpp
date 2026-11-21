@@ -20958,12 +20958,25 @@ void AddPayLoad(ImGuiPayload* payload, bool addtocursor)
 			t.addentityfile_s = payload_n->m_sFolder.Get();
 			if (t.addentityfile_s != "")
 			{
+				const DWORD pwAssetStart = GetTickCount();
 				entity_adduniqueentity(false);
-				t.tasset = t.entid;
-				if (t.talreadyloaded == 0)
+				const DWORD pwAssetLoadMs = GetTickCount() - pwAssetStart;
+				if (pwAssetLoadMs > 100)
 				{
-					editor_filllibrary();
+					char perf[384] = { 0 };
+					sprintf_s(perf, sizeof(perf), "PW ASSET INSERT: model bank load %lu ms (%s)",
+						(unsigned long)pwAssetLoadMs, t.addentityfile_s.Get());
+					timestampactivity(0, perf);
 				}
+				t.tasset = t.entid;
+				// PW's Asset Browser reads the entitybank directly. The old
+				// editor_filllibrary() sends blocking FPSEXCHANGE messages to
+				// the retired external entity pane, costing up to seconds.
+				// Keep it only when actually running the legacy IDE.
+#if !defined(ENABLEIMGUI) || defined(USEOLDIDE)
+				if (t.talreadyloaded == 0)
+					editor_filllibrary();
+#endif
 			}
 			if (addtocursor) {
 
