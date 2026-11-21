@@ -331,29 +331,43 @@ inline bool CanDiscard() {
         L"PW Lua Studio", MB_YESNOCANCEL | MB_ICONQUESTION);
     return answer == IDNO || (answer == IDYES && Save());
 }
-inline void OpenFile() {
+inline bool LoadDocument(const std::wstring& path) {
     State& s = Data();
-    if (!CanDiscard()) return;
-    std::wstring path;
-    if (!Pick(false, path)) return;
     std::ifstream file(path.c_str(), std::ios::binary);
-    if (!file) return;
+    if (!file) {
+        MessageBoxW(s.window, (L"Unable to open Lua script:\n" + path).c_str(),
+                    L"PW Lua Studio", MB_OK | MB_ICONWARNING);
+        return false;
+    }
     std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     if (bytes.size() > 1048576) {
         MessageBoxW(s.window, L"Files larger than 1 MB are not supported.",
-            L"PW Lua Studio", MB_OK | MB_ICONWARNING); return;
+            L"PW Lua Studio", MB_OK | MB_ICONWARNING);
+        return false;
     }
     if (bytes.compare(0, 3, "\xEF\xBB\xBF") == 0) bytes.erase(0, 3);
     std::wstring wide = Utf8(bytes);
     if (!bytes.empty() && wide.empty()) {
         MessageBoxW(s.window, L"Cannot open non-UTF-8 script without risking data loss.",
-            L"PW Lua Studio", MB_OK | MB_ICONWARNING); return;
+            L"PW Lua Studio", MB_OK | MB_ICONWARNING);
+        return false;
     }
     s.suppress = true;
     SetWindowTextW(s.editor, wide.c_str());
     SendMessageW(s.editor, EM_EMPTYUNDOBUFFER, 0, 0);
     s.suppress = false;
-    s.path = path; s.dirty = false; Caption(); Highlight(); SetFocus(s.editor);
+    s.path = path;
+    s.dirty = false;
+    Caption();
+    Highlight();
+    SetFocus(s.editor);
+    return true;
+}
+inline void OpenFile() {
+    State& s = Data();
+    if (!CanDiscard()) return;
+    std::wstring path;
+    if (Pick(false, path)) LoadDocument(path);
 }
 inline LRESULT CALLBACK EditProc(HWND hwnd, UINT message, WPARAM w, LPARAM l) {
     if (message == WM_KEYDOWN && (GetKeyState(VK_CONTROL) & 0x8000)) {
@@ -489,4 +503,38 @@ inline void Open(HWND owner) {
     SetForegroundWindow(hwnd);
     SetFocus(s.editor);
 }
+// Open the selected entity's actual AI-main Lua file in the existing built-in
+// script editor, retaining dirty-file prompts and the current editor state.
+// Only files under the installation's scriptbank are eligible.
+inline bool OpenEntityScript(HWND owner, const char* entityPath) {
+    Open(owner);
+    State& s = Data();
+    if (!s.window || !s.editor) return false;
+    if (!entityPath || !*entityPath) {
+        Status(L"No Lua script assigned. Use Open... to choose one from scriptbank.");
+        OpenFile();
+        return false;
+    }
+    std::string name(entityPath);
+    for (char& c : name) if (c == '/') c = '\\';
+    if (name.size() >= 11 && _strnicmp(name.c_str(), "scriptbank\\", 11) == 0)
+        name.erase(0, 11);
+    if (name.find("..") != std::string::npos || name.find(':') != std::string::npos ||
+        (!name.empty() && name[0] == '\\') || name.empty() ||
+        name.size() < 4 || _stricmp(name.c_str() + name.size() - 4, ".lua") != 0) {
+        MessageBoxW(s.window, L"The assigned Lua path is outside scriptbank or invalid.",
+                    L"PW Lua Studio", MB_OK | MB_ICONWARNING);
+        return false;
+    }
+    // Resolve against the installed editor's scriptbank, not the process
+    // working directory, which can vary when launched from Steam.
+    std::wstring path = s.scriptbank + Utf8(name);
+    if (_wcsicmp(path.c_str(), s.path.c_str()) == 0) {
+        SetFocus(s.editor);
+        return true;
+    }
+    if (!CanDiscard()) return false;
+    return LoadDocument(path);
+}
+
 }
