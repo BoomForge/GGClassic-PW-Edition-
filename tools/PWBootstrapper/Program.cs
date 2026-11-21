@@ -87,6 +87,175 @@ internal static class Program
         }
     }
 
+
+    // The updater-only GitHub release is public and contains no GameGuru
+    // binaries. Future native PW Edition menu updates can refresh BOTH the
+    // installer and the editor without manually downloading another installer.
+    // The digest is published independently by the updater-only CI workflow.
+    static async Task<bool> TrySelfUpdate(string steam)
+    {
+        const string tag = "pw-updater-dev";
+        const string exeName = "Pixelwolf-GGC-Updater.exe";
+        const string digestName = "Pixelwolf-GGC-Updater.sha256";
+        string currentExe = Environment.ProcessPath ?? throw new IOException("Cannot locate running updater.");
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(12) };
+            http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Pixelwolf-GGC-Updater", "1.0"));
+            string api = "https://api.github.com/repos/" + Owner + "/" + Repo + "/releases/tags/" + tag;
+            using var releaseResponse = await http.GetAsync(api);
+            if (releaseResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                LogOutput("Updater-only release has not been published yet; continuing with installed updater.");
+                return false;
+            }
+            releaseResponse.EnsureSuccessStatusCode();
+            using var document = JsonDocument.Parse(await releaseResponse.Content.ReadAsStringAsync());
+            string exeUrl = "", hashUrl = "";
+            foreach (var asset in document.RootElement.GetProperty("assets").EnumerateArray())
+            {
+                string name = asset.GetProperty("name").GetString() ?? "";
+                string url = asset.GetProperty("browser_download_url").GetString() ?? "";
+                if (name == exeName) exeUrl = url;
+                if (name == digestName) hashUrl = url;
+            }
+            if (exeUrl.Length == 0 || hashUrl.Length == 0)
+                throw new IOException("Official release has no paired updater and SHA-256 assets.");
+            if (new Uri(exeUrl).Host != "github.com" || new Uri(hashUrl).Host != "github.com")
+                throw new IOException("Unrecognised updater download host.");
+            string digestText = await http.GetStringAsync(hashUrl);
+            string expected = digestText.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)[0];
+            if (expected.Length != 64 || !expected.All(Uri.IsHexDigit))
+                throw new InvalidDataException("Malformed updater SHA-256 manifest.");
+            if (string.Equals(Digest(currentExe), expected, StringComparison.OrdinalIgnoreCase))
+            {
+                LogOutput("Updater executable is already current.");
+                return false;
+            }
+
+            if (MessageBox.Show(
+                "An updated PW Edition updater is available.\n\n" +
+                "Update the updater first? It will verify the downloaded EXE, back up this version, " +
+                "replace itself only after closing, then resume this engine installation automatically.\n\n" +
+                "Only the independently authored updater EXE is downloaded. GameGuru engine builds remain local.",
+                "PW Edition - Update Updater", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes)
+            {
+                LogOutput("Updater self-update declined; continuing with current version.");
+                return false;
+            }
+
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                                      "Pixelwolf", "GGC-Updater", "self-update", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            string staged = Path.Combine(dir, exeName);
+            using (var data = await http.GetAsync(exeUrl, HttpCompletionOption.ResponseHeadersRead))
+            {
+                data.EnsureSuccessStatusCode();
+                if (data.Content.Headers.ContentLength > 250L * 1024 * 1024)
+                    throw new InvalidDataException("Unexpected updater download size.");
+                await using var from = await data.Content.ReadAsStreamAsync();
+                await using var to = File.Create(staged);
+                await from.CopyToAsync(to);
+            }
+            if (new FileInfo(staged).Length > 250L * 1024 * 1024 ||
+                !string.Equals(Digest(staged), expected, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Downloaded updater failed SHA-256 verification. Nothing replaced.");
+
+            // PowerShell executes only the local, fixed helper we write here,
+            // not any script downloaded from the network.
+            string script = Path.Combine(dir, "install-updater.ps1");
+            File.WriteAllText(script, """
+param(
+  [Parameter(Mandatory=$true)][int]$OldProcessId,
+  [Parameter(Mandatory=$true)][string]$Target,
+  [Parameter(Mandatory=$true)][string]$Staged,
+  [Parameter(Mandatory=$true)][string]$Expected,
+  [Parameter(Mandatory=$true)][string]$InstallRoot
+)
+$ErrorActionPreference = 'Stop'
+try {
+  for ($i = 0; $i -lt 120; $i++) {
+    if (-not (Get-Process -Id $OldProcessId -ErrorAction SilentlyContinue)) { break }
+    Start-Sleep -Milliseconds 500
+  }
+  if (Get-Process -Id $OldProcessId -ErrorAction SilentlyContinue) {
+    throw 'Existing updater did not close within the safe replacement window.'
+  }
+  if ((Get-FileHash -LiteralPath $Staged -Algorithm SHA256).Hash -ne $Expected) {
+    throw 'Staged updater checksum mismatch.'
+  }
+  $backupDir = Join-Path $env:USERPROFILE ('PW-Edition-Backups\updater-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+  New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+  $backup = Join-Path $backupDir 'Pixelwolf-GGC-Updater.exe'
+  Copy-Item -LiteralPath $Target -Destination $backup -ErrorAction Stop
+  if ((Get-FileHash -LiteralPath $Target -Algorithm SHA256).Hash -ne
+      (Get-FileHash -LiteralPath $backup -Algorithm SHA256).Hash) { throw 'Backup verification failed.' }
+  $replaced = $false
+  try {
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+      try {
+        Copy-Item -LiteralPath $Staged -Destination $Target -Force -ErrorAction Stop
+        $replaced = $true
+        break
+      } catch { Start-Sleep -Milliseconds 500 }
+    }
+    if (-not $replaced -or (Get-FileHash -LiteralPath $Target -Algorithm SHA256).Hash -ne $Expected) {
+      throw 'Updater replacement or checksum validation failed.'
+    }
+  } catch {
+    Copy-Item -LiteralPath $backup -Destination $Target -Force
+    throw
+  }
+  $argument = '--install-dir="' + $InstallRoot + '"'
+  Start-Process -FilePath $Target -WorkingDirectory (Split-Path -Parent $Target) -ArgumentList $argument
+} catch {
+  $message = 'Automatic PW Edition updater replacement failed. Original backups retained.' +
+             [Environment]::NewLine + $_.Exception.Message
+  Add-Type -AssemblyName System.Windows.Forms
+  [System.Windows.Forms.MessageBox]::Show($message, 'PW Edition updater') | Out-Null
+  exit 1
+}
+""", Encoding.UTF8);
+
+            var process = new ProcessStartInfo("powershell.exe")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = false,
+                WorkingDirectory = dir
+            };
+            process.ArgumentList.Add("-NoLogo");
+            process.ArgumentList.Add("-NoProfile");
+            process.ArgumentList.Add("-ExecutionPolicy");
+            process.ArgumentList.Add("Bypass");
+            process.ArgumentList.Add("-File");
+            process.ArgumentList.Add(script);
+            process.ArgumentList.Add("-OldProcessId");
+            process.ArgumentList.Add(Environment.ProcessId.ToString());
+            process.ArgumentList.Add("-Target");
+            process.ArgumentList.Add(currentExe);
+            process.ArgumentList.Add("-Staged");
+            process.ArgumentList.Add(staged);
+            process.ArgumentList.Add("-Expected");
+            process.ArgumentList.Add(expected);
+            process.ArgumentList.Add("-InstallRoot");
+            process.ArgumentList.Add(steam);
+            if (Process.Start(process) is null)
+                throw new IOException("Unable to start verified local updater replacement helper.");
+            LogOutput("Verified new updater; helper will replace old EXE and resume installation after exit.");
+            return true;
+        }
+        catch (Exception e)
+        {
+            LogOutput("Updater self-update check failed safely: " + e.Message, stderr: true);
+            MessageBox.Show(
+                "Could not complete the updater self-update safely.\n\n" + e.Message +
+                "\n\nNo updater files have been overwritten by this check. " +
+                "The current updater can still build the engine, or you can retry later.",
+                "PW Edition updater", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
+    }
+
     static async Task<int> Run(string[] args)
     {
         Console.WriteLine("PIXELWOLF GAMEGURU CLASSIC - LOCAL WINDOWS UPDATER");
@@ -111,6 +280,11 @@ internal static class Program
         ValidateSteam(steam);
         LogOutput("Selected GameGuru installation: " + steam);
         LogOutput("Target editor (not the Steam launcher): " + Path.Combine(steam, "Guru-MapEditor.exe"));
+
+        // Check the independent updater channel before building the C++ editor.
+        // If a newer updater is available, launch its verified replacement helper
+        // and resume the install after this process exits.
+        if (await TrySelfUpdate(steam)) return 0;
 
         string vswhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
                                       @"Microsoft Visual Studio\Installer\vswhere.exe");
