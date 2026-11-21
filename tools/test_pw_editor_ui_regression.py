@@ -60,7 +60,7 @@ class PWEditorUiRegressions(unittest.TestCase):
 
     def test_permanent_asset_browser_and_fast_ui_insertions(self):
         # The library is a docked editor pane, never a transient popup.
-        library = GRID[GRID.index("void process_entity_library(void)\\n"):]
+        library = GRID[GRID.rindex("void process_entity_library(void)"):]
         self.assertIn("bExternal_Entities_Window = true;", library)
         self.assertNotIn("bExternal_Entities_Window = false;", library)
         self.assertNotIn("textureId = TOOL_ENTITY;", library)
