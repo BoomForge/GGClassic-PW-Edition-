@@ -118,7 +118,7 @@ static void PWLoadSceneFolders()
             if (folder.id < 1 || folder.id > 1000000 || PWFindFolder(folder.id))
                 continue;
             g_pwFolders.push_back(folder);
-            g_pwFolderNextId = std::max(g_pwFolderNextId, folder.id + 1);
+            g_pwFolderNextId = (std::max)(g_pwFolderNextId, folder.id + 1);
         }
         else if (type == 'E')
         {
