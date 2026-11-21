@@ -2830,7 +2830,7 @@ void mapeditorexecutable_loop(void)
 		// The hierarchy lists actual instances in this loaded level, not
 		// source assets. Selection is fed through the editor's existing
 		// iWidgetSelection path so the gizmo and inspector keep working.
-		if (ImGui::Begin("Scene Hierarchy##PWSceneHierarchy", &g_pwSceneHierarchyOpen, iGenralWindowsFlags))
+		if (ImGui::Begin("Scene Hierarchy##PWSceneHierarchy", &g_pwSceneHierarchyOpen, iGenralWindowsFlags | ImGuiWindowFlags_NoMove))
 		{
 			ImGui::PushItemWidth(-1.0f);
 			ImGui::InputText("##PWSceneSearch", g_pwSceneHierarchySearch, sizeof(g_pwSceneHierarchySearch));
@@ -2876,7 +2876,7 @@ void mapeditorexecutable_loop(void)
 
 		// Persistent inspector is always available even before Classic enters
 		// its dedicated entity-property zoom/edit mode.
-		if (ImGui::Begin("Inspector##PWInspector", NULL, iGenralWindowsFlags))
+		if (ImGui::Begin("Inspector##PWInspector", NULL, iGenralWindowsFlags | ImGuiWindowFlags_NoMove))
 		{
 			const int selected = t.widget.pickedEntityIndex;
 			if (selected > 0 && selected <= g.entityelementlist &&
@@ -6116,7 +6116,7 @@ void mapeditorexecutable_loop(void)
 
 			int iWinFlags = 0;
 			bool bAlwaysOpen = true;
-			ImGui::Begin(TABENTITYNAME, &bAlwaysOpen, iGenralWindowsFlags | ImGuiWindowFlags_NoScrollbar); //, &bAlwaysOpen, iWinFlags);
+			ImGui::Begin(TABENTITYNAME, &bAlwaysOpen, iGenralWindowsFlags | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove); //, &bAlwaysOpen, iWinFlags);
 			static char cSearchEntities[1024] = "\0";
 
 			ImGui::BeginChild("##ChirlEntitiesLeftPanel", ImVec2(ImGui::GetWindowSize().x - 2.0f, fsy*3.0), false, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoNavInputs); //ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_AlwaysHorizontalScrollbar
@@ -23329,7 +23329,7 @@ void process_entity_library(void)
 {
 	if (bExternal_Entities_Window)
 	{
-		ImGuiWindowFlags ex_window_flags = 0;
+		ImGuiWindowFlags ex_window_flags = ImGuiWindowFlags_NoMove;
 		ImGuiIO& io = ImGui::GetIO();
 
 		static int uniqueId = 4000; //PE: Also used for imageID for previews.
