@@ -1,0 +1,50 @@
+name: PW Edition full Windows build probe
+
+on:
+  pull_request:
+    paths:
+      - "GameGuru Core/**"
+      - "GameGuru IDE/**"
+      - ".github/workflows/pw-full-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-x64-compile:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout source only
+        uses: actions/checkout@v4
+        with:
+          lfs: false
+      - name: Set up VS2022 MSBuild
+        uses: microsoft/setup-msbuild@v2
+      - name: Build complete GameGuru Core Release x64 solution
+        shell: cmd
+        run: |
+          msbuild "GameGuru Core\GameGuru.sln" /t:Build /p:Configuration=Release /p:Platform=x64 /m:2 /nologo /v:minimal /fl /flp:logfile=pw-core-build.log;verbosity=normal
+      - name: Build GameGuru IDE launcher Release x64
+        shell: cmd
+        run: |
+          msbuild "GameGuru IDE\GameGuru IDE.sln" /t:Build /p:Configuration=Release /p:Platform=x64 /m:2 /nologo /v:minimal /fl /flp:logfile=pw-ide-build.log;verbosity=normal
+      - name: Verify staged PW editor files
+        shell: pwsh
+        run: |
+          $root = 'PW-Build/Release'
+          foreach ($name in @('Guru-MapEditor.exe','pw-updater.ps1','pw-edition-version.txt','Files/scriptbank/global.lua','Files/scriptbank/pw_transition_state.lua','Files/effectbank/reloaded/apbr_animwithtran_emissive.fx')) {
+            if (-not (Test-Path (Join-Path $root $name))) { throw "Missing output: $name" }
+          }
+          Write-Host 'Build files exist; runtime tests still required.'
+      - name: Print build errors
+        if: failure()
+        shell: pwsh
+        run: |
+          foreach ($file in @('pw-core-build.log','pw-ide-build.log')) {
+            if (Test-Path $file) {
+              Get-Content $file | Select-String -Pattern 'error (C[0-9]+|LNK[0-9]+|MSB[0-9]+)|fatal error|error :' | Select-Object -Last 40 | ForEach-Object { Write-Host $_.Line }
+            }
+          }
+      # No public executable artifact, pending license verification.

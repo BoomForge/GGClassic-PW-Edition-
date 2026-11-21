@@ -70,6 +70,13 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 - [x] **Blender/Mixamo FBX import hardening (source):** safe, case-insensitive FBX detection; find missing textures by basename alongside the model; retain DDS with additional PNG/TGA/JPEG fallback; guard null meshes, short filenames, full texture lists and legacy fixed-buffer path handling. This **does not yet fix bone/clip retargeting**.
 - [x] Added isolated VS2022 Windows x64 importer path and repeated worker-start/stop checks. [CI run #44838327649](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44838327649) passed those synthetic tests. The isolated checks pass at the latest development source commit; full GameGuru compilation and actual FBX/level behaviour remain unverified.
 
+### Windows build and local Steam overlay preparation (21 November 2026)
+
+- [x] Removed the machine-specific D-drive editor output paths, staging PW binaries in the repository-relative PW-Build/Release directory.
+- [x] Staged the new optional shader alongside the updater and Lua companion files.
+- [x] Added an opt-in, source-only Windows x64 full-solution compile probe. Until this passes, the fork is **not** a proven working binary.
+- [ ] Create and verify a PW Edition drop-in overlay for a legitimately owned Steam install. No binaries are published without confirming the distribution licence.
+
 ### In progress — verification needed
 
 - [ ] **Level cleanup regression:** in a compiled editor and standalone game, inspect thread and event-handle counts over 25+ transitions, plus stalled occlusion and return-to-editor cases. The isolated C++ thread test is not a full game test.
