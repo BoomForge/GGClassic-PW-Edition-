@@ -623,18 +623,26 @@ try {
             // The symbol inside the ring varies (including bright white pixels);
             // only the generated cyan rim and transparent corners are invariant.
             if (bmp.GetPixel(63, 63).A != 0) return false;
-            int cyanRingPixels = 0;
-            for (int i = 0; i < 24; i++)
+            // Old PW artwork used several anti-aliased ring radii. Sample
+            // whole circumferences (not two hand-picked pixels) to avoid
+            // mistaking the previous generated circles for stock artwork.
+            int bestRingMatches = 0;
+            for (int radius = 24; radius <= 30; ++radius)
             {
-                double angle = i * 2 * Math.PI / 24;
-                int x = (int)Math.Round(32 + 28 * Math.Cos(angle));
-                int y = (int)Math.Round(32 + 28 * Math.Sin(angle));
-                Color px = bmp.GetPixel(Math.Clamp(x, 0, 63), Math.Clamp(y, 0, 63));
-                if (px.A >= 100 && Math.Abs(px.R - 108) < 35 &&
-                    Math.Abs(px.G - 194) < 35 && Math.Abs(px.B - 235) < 35)
-                    cyanRingPixels++;
+                int matches = 0;
+                for (int i = 0; i < 48; ++i)
+                {
+                    double angle = i * 2 * Math.PI / 48;
+                    int x = (int)Math.Round(31.5 + radius * Math.Cos(angle));
+                    int y = (int)Math.Round(31.5 + radius * Math.Sin(angle));
+                    Color px = bmp.GetPixel(Math.Clamp(x, 0, 63), Math.Clamp(y, 0, 63));
+                    if (px.A >= 80 && Math.Abs(px.R - 108) < 42 &&
+                        Math.Abs(px.G - 194) < 42 && Math.Abs(px.B - 235) < 42)
+                        ++matches;
+                }
+                bestRingMatches = Math.Max(bestRingMatches, matches);
             }
-            return cyanRingPixels >= 6;
+            return bestRingMatches >= 12;
         }
         catch { return false; }
     }
