@@ -37,3 +37,15 @@ This is a source-building install helper, not a magic download of compiled propr
 The original bootstrapper showed `Install Visual Studio 2022 Desktop development with C++, x64 MFC and Windows SDK first. Steam is unchanged.` and exited. That is a machine prerequisite, **not a GameGuru crash**. A replacement bootstrapper detects VS2022 Build Tools as well as the full IDE and offers an optional download of Microsoft's installer from https://aka.ms/vs/17/release/vs_buildtools.exe . The user remains in control of Microsoft setup and may decline it without touching Steam. Required component IDs are documented at https://learn.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-build-tools?view=vs-2022 .
 
 This still compiles the proprietary editor on the licensed local Windows machine; the public workflow uploads only this independently authored bootstrapper, not GameGuru runtime binaries. The new guided flow has **compiled under Windows CI**, but the Microsoft installer UX, permissions, disk usage, Steam overwrite safeguards and compiled engine launch have not been exercised on the owner's Windows computer yet.
+
+## Windows PowerShell 5.1 D3DX extraction repair (21 Nov 2026)
+
+A local owner screenshot showed `Microsoft.PowerShell.Archive.psm1:421` and the local updater stopping with exit code 1 in `tools/pw-prepare-d3dx.ps1`. The previous implementation expanded the *entire* NuGet D3DX package using `Expand-Archive` under a very long temporary GitHub extraction path; the full underlying error was hidden by the GUI, so a specific long-path root cause was **suspected, not proven**.
+
+Remediation committed:
+- `pw-prepare-d3dx.ps1` now streams only official `d3dx11.lib` and `d3dx9.lib` release/x64 entries directly from the Microsoft NuGet archive via .NET ZipArchive. It avoids `Expand-Archive`, checks extracted lengths, offers one clean redownload retry and uses TLS 1.2 for PowerShell 5.1.
+- `tools/PWBootstrapper/Program.cs` now moves the GitHub checkout to a shallow `%LOCALAPPDATA%\PW\b-XXXXXXXX\src` directory before compiling to avoid Windows MAX_PATH pressure.
+- Every compiler/script output line is written to `%LOCALAPPDATA%\Pixelwolf\GGC-Updater\Logs\update-*.log`, and the error dialog displays the final relevant lines plus the log path.
+- `.github/workflows/pw-d3dx-ps51.yml` tests the dependency script using the actual `powershell.exe` 5.1 runtime on Windows Server 2022, rather than only GitHub runner `pwsh` 7. The first Windows PowerShell 5.1 tests passed at GitHub Actions runs 44871381726 and 44871385121.
+
+This does not imply a completed local build or successful Steam installation. The new executable must be tested on the owner's PC, and later missing SDK/link/runtime problems remain possible. The no-write-before-full-build and backup/rollback safeguards remain intact.
