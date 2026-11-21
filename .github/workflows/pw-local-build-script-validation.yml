@@ -4,6 +4,9 @@ on:
     paths:
       - "tools/pw-local-test.ps1"
       - "tools/pw-prepare-d3dx.ps1"
+      - "tools/pw-prepare-steam-imports.ps1"
+      - "tools/steam-api64.def"
+      - "tools/sdkencryptedappticket64.def"
       - "START_PW_TEST_BUILD.cmd"
       - ".github/workflows/pw-local-build-script-validation.yml"
   workflow_dispatch:
@@ -18,7 +21,7 @@ jobs:
       - name: Parse PowerShell scripts without running or copying Steam files
         shell: pwsh
         run: |
-          foreach ($path in @('tools/pw-local-test.ps1','tools/pw-prepare-d3dx.ps1')) {
+          foreach ($path in @('tools/pw-local-test.ps1','tools/pw-prepare-d3dx.ps1','tools/pw-prepare-steam-imports.ps1')) {
             $tokens=$null
             $errors=$null
             $ast=[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path).Path,[ref]$tokens,[ref]$errors)
@@ -34,3 +37,14 @@ jobs:
             throw 'Missing test install isolation checks'
           }
           Write-Host 'Local build script syntax and isolation guards verified. No EXE built, copied or run.'
+      - name: Validate Steam import-link metadata with MSVC
+        shell: pwsh
+        run: |
+          ./tools/pw-prepare-steam-imports.ps1
+          $folder = 'GameGuru Core/SDK/Steamworks SDK/redistributable_bin/win64'
+          foreach ($name in @('steam_api64.lib','sdkencryptedappticket64.lib')) {
+            $lib = Join-Path $folder $name
+            if (-not (Test-Path $lib)) { throw "Expected symbol import library missing: $lib" }
+            if ((Get-Item $lib).Length -lt 128) { throw "Unexpected short Steam import library: $lib" }
+          }
+          Write-Host "Steam import-link metadata generated; no Steam DLL or SDK binary was downloaded."
