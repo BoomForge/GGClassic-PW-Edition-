@@ -44,3 +44,15 @@ Corrective changes on development branch: PWEngineDockspaceV2 docks the full Ent
 The PW Edition menu now offers Capture Load Diagnostics (CSV) and Open Load Diagnostics Folder. Begin-stage markers survive a stall and slow-stage markers flag completed operations >=10 seconds. The real-time editor shadows toggle defaults on across zoom levels; it can be disabled for performance.
 
 None of these UI, loading, or shadow fixes is runtime accepted until tested on the owner's Steam install. Do not claim that the 60+ second load is fixed until a trace identifies the bottleneck and a before/after test confirms improvement.
+
+## Original Classic artwork and integrated workspace repair (21 November 2026)
+
+Owner's second runtime screenshot shows PW blue/cyan circular toolbar pictograms and repeated generic thumbnail images in the full bottom Entity Library. The requested visual design is the **original GameGuru Classic toolbar artwork**, with the newer traditional workspace geometry preserved.
+
+The V4 ImGui workspace now splits hierarchy left and inspector right FIRST, then splits the remaining centre frame downward for the bottom Entities / Asset Library. The browser therefore shares splitters with the viewport, rather than spanning the whole desktop as a separate root-bottom strip. The bottom dock ID is recovered from saved ImGui layouts so opening the library later stays in the same frame.
+
+The updater reads the original 42x42 toolbar strips from the licensed local GameGuru.exe using Windows RT_BITMAP resource IDs 152, 178, 180, 182 and 186 as recorded in GameGuru IDE/Editor.rc. It converts the matching strips into local ImGui PNGs for New/Open/Save, entity/marker/builder, seven terrain tools, waypoint controls and test/multiplayer (where present); the original GameGuru executable is only read, never replaced or redistributed. The updater recognises both generations of PW-generated placeholders and replaces them, while preserving actual stock/custom PNG files. Icons with no matching Classic resource have neutral fallbacks; **do not call those original art**.
+
+The asset browser now checks the actual per-entity preview path with the Windows filesystem, looking for BMP, PNG, JPG and JPEG instead of trusting the older Dark Basic FileExist check alone. If no source thumbnail exists, the first five missing names are logged; it does not invent thumbnail artwork or overwrite purchased asset folders.
+
+Acceptance not established: owner must verify original resource extraction count in updater log, inspect the toolbar, test preview images in an asset pack known to contain thumbnails, resize all three shared splitters, save/reopen a map, and verify in-app updates. Windows CI compilation alone does not prove source bitmaps exist in this owner's Steam version.
