@@ -75,3 +75,11 @@ Actual editor runtime, Steam launcher routing, user account permissions and in-e
 - The original Steam `GameGuru.exe` is deliberately left untouched. To open PW Edition from the normal Steam **Play** button, set **Steam Library > GameGuru Classic > Properties > General > Launch Options** to `"D:\\SteamLibrary\\steamapps\\common\\Game Guru\\Guru-MapEditor.exe" %command%` (adjust the path to the installed editor). This is user-controlled and reversible by clearing that field. It has not yet been verified on the owner's machine. Steam app tracking/overlay behavior may differ from the original launcher.
 - The Steam alternative-executable launch option passes the original Steam command as an extra argument; Classic's documented command-line handling recognises named flags such as `-r` and ignores other unrecognised command text in this startup path. Validate ordinary editor open, Test Level, and Steam Play behavior manually.
 - Future integrated Steam launcher work should preserve and restore the stock launcher and must not overwrite Steam userdata/settings without explicit approval.
+
+## Visual toolbar fallback repair — 21 November 2026
+
+The earlier updater drew filename text instead of recognisable artwork on 64px icon tiles when Steam lacked ImGui toolbar resources. Owner testing confirmed this was a usability regression.
+
+The next source-building updater draws original icon pictograms locally rather than redistributing GameGuru proprietary artwork. It also recognises the preceding updater's distinct dark tile/blue frame and replaces these old PW-generated text tiles, while preserving non-matching existing user or stock image files.
+
+Actual installation, readability, and icon preservation require owner testing. Repeat build/install is required; compilation alone does not replace already-installed old icons.
