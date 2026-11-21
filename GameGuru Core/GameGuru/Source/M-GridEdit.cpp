@@ -16243,6 +16243,7 @@ void gridedit_mapediting ( void )
 				// Select widget controlled object
 				if (!bDisableWidgetSelection && (t.inputsys.mclick == 1|| iWidgetSelection > 0 ) && t.gridentity == 0)
 				{
+					const bool pwSelectionFromHierarchy = iWidgetSelection > 0;
 					if (iWidgetSelection > 0)
 					{
 						t.tentitytoselect = iWidgetSelection;
@@ -16260,9 +16261,11 @@ void gridedit_mapediting ( void )
 									#ifndef ALLOWSELECTINGLOCKEDOBJECTS
 									t.entityelement[t.widget.pickedEntityIndex].editorlock = 0;
 									#endif
-									t.widget.offsetx = g.glastpickedx_f - ObjectPositionX(t.widget.pickedObject);
-									t.widget.offsety = g.glastpickedy_f - ObjectPositionY(t.widget.pickedObject);
-									t.widget.offsetz = g.glastpickedz_f - ObjectPositionZ(t.widget.pickedObject);
+									// Scene hierarchy selection has no 3D hit point. Never
+									// reuse stale mouse-pick offsets or the gizmo can jump.
+									t.widget.offsetx = pwSelectionFromHierarchy ? 0.0f : g.glastpickedx_f - ObjectPositionX(t.widget.pickedObject);
+									t.widget.offsety = pwSelectionFromHierarchy ? 0.0f : g.glastpickedy_f - ObjectPositionY(t.widget.pickedObject);
+									t.widget.offsetz = pwSelectionFromHierarchy ? 0.0f : g.glastpickedz_f - ObjectPositionZ(t.widget.pickedObject);
 
 									// 271015 - this may not be required as it is duplicated later on..
 									if (g.entityrubberbandlist.size() > 0)
