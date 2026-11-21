@@ -39,6 +39,7 @@ if (-not $SkipBuild) {
  foreach ($project in @(
     "GameGuru Core\SDK\DirectXTex\DirectXTex\DirectXTex_Desktop_2022.vcxproj",
     "GameGuru Core\SDK\DirectX\Effect11\Effects11_2022.vcxproj",
+    "GameGuru Core\SDK\OGG\ogg_vorbis_static.sln",
     "GameGuru Core\GameGuru.sln",
     "GameGuru IDE\GameGuru IDE.sln")) {
    Write-Host "Compiling $project..."
