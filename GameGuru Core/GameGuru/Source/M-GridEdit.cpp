@@ -7824,6 +7824,14 @@ void mapeditorexecutable_loop(void)
 
 			//  Render terrain elements (shadowupdatepacer as shadow calc is expensive, time slice it)
 			t.terrain.gameplaycamera=0;
+			// Loading a saved level can restore shadowmode=0 from its visual settings
+			// after the editor's last zoom recalculation. Reinstate the user's
+			// PW real-time-shadow preference once; do not rebuild every frame.
+			if (g_pwEditorRealtimeShadows && t.visuals.shadowmode < 100)
+			{
+				t.visuals.shadowmode = 100;
+				visuals_justshaderupdate();
+			}
 			if ( Timer() > (int)t.editor.shadowupdatepacer ) 
 			{
 				t.editor.shadowupdatepacer=Timer()+20;
