@@ -11,7 +11,7 @@ class PWEditorUiRegressions(unittest.TestCase):
     def test_one_bottom_asset_dock(self):
         self.assertIn('PWEngineDockspaceV6', GRID)
         first = GRID.index("//#### Default dockspace setup")
-        last = GRID.index("// The hierarchy lists actual instances", first)
+        last = GRID.index('// Fully nested scene tree;', first)
         docking = GRID[first:last]
         self.assertEqual(
             docking.count('DockBuilderDockWindow("Asset Browser##PWAssetBrowser", dock_id_bottom);'), 1)
@@ -36,6 +36,27 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('if (!sImgName.empty())', body)
         self.assertIn('No preview##PWAsset', body)
         self.assertNotIn('sImgName = (g.mysystem.root_s + "files', body)
+
+    def test_hierarchy_and_lua_integration(self):
+        hierarchy = (ROOT / "GameGuru Core/GameGuru/Source/PW-SceneHierarchy.h").read_text(encoding="utf-8")
+        lua = (ROOT / "GameGuru Core/GameGuru/Include/PW-LuaStudio.h").read_text(encoding="utf-8")
+        self.assertIn('#include "PW-SceneHierarchy.h"', GRID)
+        self.assertIn("PWRenderSceneHierarchy();", GRID)
+        self.assertIn("iHasParentIndex = parent;", hierarchy)
+        self.assertIn('PW_SCENE_FOLDER', hierarchy)
+        self.assertIn('PW_SCENE_ENTITY', hierarchy)
+        self.assertIn("PWSaveSceneFolders()", hierarchy)
+        self.assertIn("editor_rec_addchildrentorubberband(e);", hierarchy)
+        self.assertIn('Edit Lua Script...', GRID)
+        self.assertIn('Edit Script##PWLuaMainAI', GRID)
+        self.assertIn('PWLuaStudio::OpenEntityScript', GRID)
+        self.assertIn('inline bool OpenEntityScript(HWND owner', lua)
+        self.assertIn('if (!CanDiscard()) return false;', lua)
+
+    def test_drag_path_bypasses_legacy_external_sync(self):
+        fn = GRID.split('void AddPayLoad(ImGuiPayload* payload, bool addtocursor)')[1].split('bool TutorialNextAction')[0]
+        self.assertIn('GetTickCount() - pwAssetStart', fn)
+        self.assertIn('#if !defined(ENABLEIMGUI) || defined(USEOLDIDE)', fn)
 
     def test_no_fake_toolbar_generation(self):
         self.assertNotIn('DrawPWIcon(', UPDATER)
