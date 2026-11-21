@@ -24,6 +24,14 @@ jobs:
         uses: microsoft/setup-msbuild@v2
       # Both static libraries are tracked as source projects rather than
       # prebuilt .lib files. The core solution does not build them automatically.
+      - name: Prepare official Microsoft D3DX import libraries
+        shell: pwsh
+        run: |
+          ./tools/pw-prepare-d3dx.ps1
+          foreach ($lib in @('d3dx9.lib','d3dx11.lib')) {
+            $path = Join-Path 'GameGuru Core/SDK/DirectX/Lib/x64' $lib
+            if (-not (Test-Path $path)) { throw "Missing x64 library $path" }
+          }
       - name: Build DirectXTex Release x64 dependency
         shell: cmd
         run: |
