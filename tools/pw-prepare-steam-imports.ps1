@@ -18,7 +18,8 @@ if (-not $libexe) {throw "No x64 MSVC lib.exe found"}
 $out=Join-Path $root "GameGuru Core\SDK\Steamworks SDK\redistributable_bin\win64"
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 foreach ($name in @("steam_api64","sdkencryptedappticket64")) {
- $definition=Join-Path $PSScriptRoot ("$name.def")
+ $manifest = if ($name -eq "steam_api64") { "steam-api64.def" } else { "$name.def" }
+ $definition=Join-Path $PSScriptRoot $manifest
  $target=Join-Path $out ("$name.lib")
  if (-not (Test-Path $definition)) {throw "Missing GameGuru Steam symbol manifest $definition"}
  Write-Host "Generating locally linked import records for $name (no DLL supplied)"
