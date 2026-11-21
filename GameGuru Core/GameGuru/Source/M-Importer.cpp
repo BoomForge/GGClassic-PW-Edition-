@@ -6,6 +6,7 @@
 #include "stdafx.h"
 #include "gameguru.h"
 #include "PW-ImportPaths.h" // PW Edition: safe Blender/Mixamo texture path handling
+#include "PW-AssetManifest.h" // Shared Model Importer 2 / Character Creator 2 preflight
 #include "PW-SkeletalAudit.h" // Non-destructive GameGuru skeleton/clip inspection
 #include "PW-SkeletalIntegrity.h" // Native skin weight/bind-pose/keyframe consistency verification
 
@@ -2401,6 +2402,93 @@ void imgui_importer_loop(void)
 
 			ImGui::Indent(-10);
 		}
+
+        // Model Importer 2 (M1): explicit, read-only preflight. No legacy
+        // importer save path, material slot or bone data is changed by this UI.
+        if (ImGui::CollapsingHeader("Model Importer 2 - Preflight"))
+        {
+            static PWAssetManifest::Manifest pwAssetReport;
+            static bool pwAssetReportReady = false;
+            static int pwAssetReportObject = -1;
+            static std::string pwAssetReportSource;
+            const int currentObject = t.importer.objectnumber;
+            const std::string currentSource = t.importer.objectFileOriginalPath.Get();
+            ImGui::TextWrapped("Inspect meshes, frame hierarchy, material paths and clips before export.");
+            if (ImGui::Button("Inspect loaded model##PWImporter2"))
+            {
+                const auto fileExists = [](const std::string& filename) -> bool {
+                    const DWORD attr = GetFileAttributesA(filename.c_str());
+                    return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) == 0;
+                };
+                pwAssetReport = PWAssetManifest::Inspect(
+                    GetObjectData(currentObject), currentSource,
+                    std::string(g.rootdir_s.Get()) + "importer\\temp\\", fileExists);
+                pwAssetReportObject = currentObject;
+                pwAssetReportSource = currentSource;
+                pwAssetReportReady = true;
+            }
+            if (pwAssetReportReady &&
+                pwAssetReportObject == currentObject &&
+                pwAssetReportSource == currentSource)
+            {
+                const PWAssetManifest::Manifest& report = pwAssetReport;
+                ImGui::Text("Meshes: %d | Frames: %d | Clips: %d",
+                    (int)report.meshes.size(), (int)report.frames.size(), (int)report.clips.size());
+                ImGui::Text("Material references: %d | Unresolved: %u",
+                    (int)report.textures.size(), report.unresolvedTextures);
+                ImGui::Text("Skin bone refs: %u", report.skinBoneReferences);
+                if (report.truncated)
+                    ImGui::TextWrapped("WARNING: Inspection was truncated by safety limits.");
+                if (ImGui::Button("Copy preflight manifest (JSON)"))
+                {
+                    const std::string json = PWAssetManifest::Json(report);
+                    ImGui::SetClipboardText(json.c_str());
+                }
+                if (ImGui::TreeNode("Meshes##PWImporter2"))
+                {
+                    for (const auto& mesh : report.meshes)
+                        ImGui::BulletText("Mesh %d | vertices %u | bones %u | material stages %u",
+                            mesh.index, mesh.vertices, mesh.bones, mesh.materialStages);
+                    ImGui::TreePop();
+                }
+                if (ImGui::TreeNode("Frame hierarchy##PWImporter2"))
+                {
+                    for (const auto& frame : report.frames)
+                        ImGui::BulletText("%s (parent: %s)", frame.name.c_str(),
+                            frame.parent.empty() ? "root" : frame.parent.c_str());
+                    ImGui::TreePop();
+                }
+                if (ImGui::TreeNode("Material references##PWImporter2"))
+                {
+                    for (const auto& texture : report.textures)
+                    {
+                        ImGui::BulletText("Mesh %d / stage %d: %s",
+                            texture.mesh, texture.stage,
+                            texture.reference.empty() ? "(unnamed)" : texture.reference.c_str());
+                        if (!texture.reference.empty())
+                            ImGui::TextWrapped("   %s",
+                                texture.found ? texture.resolved.c_str() : "Unresolved in source/converter folder");
+                    }
+                    ImGui::TreePop();
+                }
+                if (ImGui::TreeNode("Animation clips##PWImporter2"))
+                {
+                    for (const auto& clip : report.clips)
+                        ImGui::BulletText("%s | %llu ticks | %u tracks",
+                            clip.name.c_str(), clip.durationTicks, clip.tracks);
+                    ImGui::TreePop();
+                }
+                if (!report.warnings.empty() && ImGui::TreeNode("Preflight warnings##PWImporter2"))
+                {
+                    for (const auto& warning : report.warnings)
+                        ImGui::BulletText("%s", warning.c_str());
+                    ImGui::TreePop();
+                }
+                ImGui::TextWrapped("Read-only snapshot. Inspect again after edits/reload. UVs, units, axes, native playback and export are not yet validated.");
+            }
+            else
+                ImGui::TextDisabled("Click Inspect loaded model to collect a snapshot.");
+        }
 
         // PW Edition: inspect native skeletons without overwriting bone names,
         // bind poses or source animation clips.
