@@ -790,7 +790,7 @@ try {
             (178, new[] { "entity.png", "markers.png", "builder.png" }),
             (180, new[] { "shape.png", "level.png", "storedlevel.png", "blendmode.png", "rampmode.png", "painttexture.png", "paintgrass.png" }),
             (182, new[] { "newwaypoints.png", "waypoints.png" }),
-            (186, new[] { "testgame.png" })
+            (186, new[] { "testgame.png", "socialvr.png" })
         };
         int recovered = 0, missing = 0;
         try
