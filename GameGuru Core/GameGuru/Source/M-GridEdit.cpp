@@ -162,6 +162,61 @@ static char g_pwSceneHierarchySearch[128] = "";
 #include "PW-SceneHierarchy.h"
 #endif
 
+#ifdef ENABLEIMGUI
+// Match Windows Classic's neutral, flat editor treatment instead of the
+// rounded blue/cyan PW theme. GameGuru's original toolbar PNGs remain assets;
+// UI styling never replaces them with synthetic artwork.
+static ImVec4 PWClassicSystemColour(int colourId, float alpha = 1.0f)
+{
+    const COLORREF value = GetSysColor(colourId);
+    return ImVec4(GetRValue(value) / 255.0f, GetGValue(value) / 255.0f,
+                  GetBValue(value) / 255.0f, alpha);
+}
+static void PWApplyClassicEditorStyle()
+{
+    myLightStyle(NULL);
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.WindowRounding = 0.0f;
+    style.ChildRounding = 0.0f;
+    style.FrameRounding = 0.0f;
+    style.PopupRounding = 0.0f;
+    style.TabRounding = 0.0f;
+    style.ScrollbarRounding = 0.0f;
+    style.GrabRounding = 0.0f;
+    style.WindowBorderSize = 1.0f;
+    style.FrameBorderSize = 1.0f;
+    style.TabBorderSize = 1.0f;
+    style.WindowPadding = ImVec2(4.0f, 4.0f);
+    ImVec4* colors = style.Colors;
+    const ImVec4 face = PWClassicSystemColour(COLOR_BTNFACE);
+    const ImVec4 window = PWClassicSystemColour(COLOR_WINDOW);
+    const ImVec4 border = PWClassicSystemColour(COLOR_3DSHADOW);
+    const ImVec4 active = PWClassicSystemColour(COLOR_HIGHLIGHT);
+    colors[ImGuiCol_WindowBg] = face;
+    colors[ImGuiCol_ChildBg] = window;
+    colors[ImGuiCol_PopupBg] = face;
+    colors[ImGuiCol_MenuBarBg] = face;
+    colors[ImGuiCol_TitleBg] = face;
+    colors[ImGuiCol_TitleBgActive] = face;
+    colors[ImGuiCol_FrameBg] = window;
+    colors[ImGuiCol_Button] = face;
+    colors[ImGuiCol_Header] = face;
+    colors[ImGuiCol_Tab] = face;
+    colors[ImGuiCol_TabUnfocused] = face;
+    colors[ImGuiCol_TabActive] = window;
+    colors[ImGuiCol_TabUnfocusedActive] = window;
+    colors[ImGuiCol_Border] = border;
+    colors[ImGuiCol_Separator] = border;
+    colors[ImGuiCol_HeaderHovered] = PWClassicSystemColour(COLOR_HIGHLIGHT, 0.25f);
+    colors[ImGuiCol_HeaderActive] = PWClassicSystemColour(COLOR_HIGHLIGHT, 0.42f);
+    colors[ImGuiCol_ButtonHovered] = PWClassicSystemColour(COLOR_HIGHLIGHT, 0.22f);
+    colors[ImGuiCol_ButtonActive] = PWClassicSystemColour(COLOR_HIGHLIGHT, 0.42f);
+    colors[ImGuiCol_TabHovered] = PWClassicSystemColour(COLOR_HIGHLIGHT, 0.22f);
+    colors[ImGuiCol_CheckMark] = active;
+    colors[ImGuiCol_DockingEmptyBg] = face;
+}
+#endif
+
 static void PWShowInstalledBuildDetails()
 {
 	char executable[MAX_PATH] = { 0 };
@@ -2098,8 +2153,8 @@ void mapeditorexecutable_loop(void)
 				if (ImGui::BeginMenu("Change Color Scheme")) 
 				{
 					#ifdef ENABLEIMGUI
-					if (ImGui::MenuItem("Light Style")) { // VRQ/Classic = Light Style
-						myLightStyle(NULL);
+					if (ImGui::MenuItem("Classic Light Style")) { // VRQ/Classic = Light Style
+						PWApplyClassicEditorStyle();
 						pref.current_style = 3;
 					}
 					if (ImGui::MenuItem("Dark Style")) {
@@ -2775,7 +2830,7 @@ void mapeditorexecutable_loop(void)
 		{
 			// Restore Classic's light neutral UI instead of the PW dark/blue skin.
 			pref.current_style = 3;
-			myLightStyle(NULL);
+			PWApplyClassicEditorStyle();
 			ImGui::GetStyle().Colors[ImGuiCol_WindowBg].w = 1.0f;
 			bExternal_Entities_Window = true;
 			ImGuiID dockspace_id = ImGui::GetID(g_pwEngineDockspaceName);
