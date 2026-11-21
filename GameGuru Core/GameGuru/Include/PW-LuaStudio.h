@@ -149,7 +149,7 @@ inline void Highlight() {
             if (i+1 < text.size() && text[i] == L'[' && text[i+1] == L'[') {
                 i += 2;
                 while (i+1 < text.size() && !(text[i] == L']' && text[i+1] == L']')) ++i;
-                i = std::min(text.size(), i+2);
+                i = (std::min)(text.size(), i+2);
             } else {
                 while (i < text.size() && text[i] != L'\n' && text[i] != L'\r') ++i;
             }
@@ -164,7 +164,7 @@ inline void Highlight() {
         } else if (text[i] == L'[' && i+1 < text.size() && text[i+1] == L'[') {
             i += 2;
             while (i+1 < text.size() && !(text[i] == L']' && text[i+1] == L']')) ++i;
-            i = std::min(text.size(), i+2);
+            i = (std::min)(text.size(), i+2);
             ink = RGB(236, 175, 114);
         } else if (iswdigit(text[i]) && (i == 0 || !IsWord(text[i-1]))) {
             while (i < text.size() && (IsWord(text[i]) || text[i] == L'.')) ++i;
@@ -191,7 +191,7 @@ inline std::wstring Prefix() {
     SendMessageW(s.editor, EM_EXGETSEL, 0, reinterpret_cast<LPARAM>(&caret));
     if (caret.cpMin != caret.cpMax) return L"";
     std::wstring text = Text(s.editor);
-    size_t cursor = std::min(text.size(), static_cast<size_t>(caret.cpMin));
+    size_t cursor = (std::min)(text.size(), static_cast<size_t>(caret.cpMin));
     size_t first = cursor;
     while (first && (IsWord(text[first-1]) || text[first-1] == L'.')) --first;
     return text.substr(first, cursor-first);
@@ -367,15 +367,15 @@ inline void Layout(HWND hwnd) {
     State& s = Data();
     RECT rect = {};
     GetClientRect(hwnd, &rect);
-    int w = rect.right, h = rect.bottom, side = std::max(260, w / 3);
-    int editorW = std::max(180, w-side-28);
+    int w = rect.right, h = rect.bottom, side = (std::max)(260, w / 3);
+    int editorW = (std::max)(180, w-side-28);
     MoveWindow(GetDlgItem(hwnd, 101), 8, 7, 92, 28, TRUE);
     MoveWindow(GetDlgItem(hwnd, 102), 105, 7, 68, 28, TRUE);
     MoveWindow(GetDlgItem(hwnd, 103), 178, 7, 82, 28, TRUE);
     MoveWindow(GetDlgItem(hwnd, 104), 265, 7, 70, 28, TRUE);
-    MoveWindow(s.editor, 8, 44, editorW, std::max(100, h-52), TRUE);
+    MoveWindow(s.editor, 8, 44, editorW, (std::max)(100, h-52), TRUE);
     MoveWindow(s.search, editorW+17, 44, side-5, 27, TRUE);
-    MoveWindow(s.list, editorW+17, 78, side-5, std::max(80, h-198), TRUE);
+    MoveWindow(s.list, editorW+17, 78, side-5, (std::max)(80, h-198), TRUE);
     MoveWindow(s.detail, editorW+17, h-112, side-5, 100, TRUE);
 }
 inline LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM w, LPARAM l) {
