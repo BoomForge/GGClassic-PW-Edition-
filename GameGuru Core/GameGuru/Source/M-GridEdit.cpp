@@ -150,6 +150,58 @@ int refresh_gui_docking = 0;
 static const char* g_pwEngineDockspaceName = "PWEngineDockspaceV1";
 static bool g_pwSceneHierarchyOpen = true;
 static char g_pwSceneHierarchySearch[128] = "";
+
+static void PWShowInstalledBuildDetails()
+{
+	char executable[MAX_PATH] = { 0 };
+	DWORD n = GetModuleFileNameA(NULL, executable, MAX_PATH);
+	if (n == 0 || n >= MAX_PATH)
+	{
+		MessageBoxA(NULL, "Unable to read the active executable path.", "PW Edition - Verify Build", MB_OK | MB_ICONERROR);
+		return;
+	}
+	std::string details = "Running Pixelwolf PW Edition editor:\r\n";
+	details += executable;
+	details += "\r\n\r\nOpen this file directly if Steam still shows the old GameGuru Classic interface.";
+	MessageBoxA(NULL, details.c_str(), "Pixelwolf PW Edition - Active Editor", MB_OK | MB_ICONINFORMATION);
+}
+
+static void PWLaunchInstalledUpdater()
+{
+	char executable[MAX_PATH] = { 0 };
+	DWORD n = GetModuleFileNameA(NULL, executable, MAX_PATH);
+	if (n == 0 || n >= MAX_PATH) { PWShowInstalledBuildDetails(); return; }
+	std::string editorPath(executable);
+	size_t slash = editorPath.find_last_of("\\/");
+	if (slash == std::string::npos) { PWShowInstalledBuildDetails(); return; }
+	const std::string directory = editorPath.substr(0, slash);
+	const std::string updater = directory + "\\Pixelwolf-GGC-Updater.exe";
+	if (GetFileAttributesA(updater.c_str()) == INVALID_FILE_ATTRIBUTES)
+	{
+		MessageBoxA(NULL,
+			"The standalone PW Edition updater was not installed beside this editor.\r\n"
+			"Download and run the newest Pixelwolf-GGC-Updater.exe to repair this installation.",
+			"PW Edition Update", MB_OK | MB_ICONWARNING);
+		return;
+	}
+	if (MessageBoxA(NULL,
+		"PW Edition will start the source-build updater for this installation.\r\n"
+		"To replace the editor safely, your current level must be saved and the editor closed.\r\n\r\n"
+		"Save/close the editor and open the updater now?",
+		"Update Pixelwolf PW Edition", MB_YESNO | MB_ICONQUESTION) != IDYES) return;
+	// Existing editor save guard also handles Cancel. Only exit if the
+	// user's changes were handled, never force-close a modified level.
+	if (AskSaveBeforeNewAction() == 2) return;
+	const std::string arguments = "--install-dir=\"" + directory + "\"";
+	HINSTANCE launched = ShellExecuteA(NULL, "open", updater.c_str(), arguments.c_str(), directory.c_str(), SW_SHOWNORMAL);
+	if ((INT_PTR)launched <= 32)
+	{
+		MessageBoxA(NULL, "Windows could not launch the PW Edition updater.", "PW Edition Update", MB_OK | MB_ICONERROR);
+		return;
+	}
+	g_bCascadeQuitFlag = true;
+}
+
 ImGuiID dock_main_tabs, dock_tools_windows;
 cstr RedockNextWindow;
 ImGuiViewport* viewport;
@@ -2374,55 +2426,10 @@ void mapeditorexecutable_loop(void)
 					strcpy(cForceTutorialName, "01 - Getting started");
 				}
 				#endif
-				// Pixelwolf Edition: launch our trusted, locally installed update helper.
-				// Downloads are staged outside the running editor; it must close before binaries change.
+				// PW Edition source-building updater; the helper launched by this
+				// command is installed alongside the rebuilt editor.
 				if (ImGui::MenuItem("Check for PW Edition Updates..."))
-				{
-					char modulePath[MAX_PATH] = { 0 };
-					DWORD pathLength = GetModuleFileNameA(NULL, modulePath, MAX_PATH);
-					if (pathLength == 0 || pathLength >= MAX_PATH)
-					{
-						MessageBoxA(NULL, "Unable to locate this editor installation.", "PW Edition Updater", MB_OK | MB_ICONERROR);
-					}
-					else
-					{
-						std::string executablePath(modulePath);
-						size_t lastSlash = executablePath.find_last_of("\\/");
-						if (lastSlash == std::string::npos)
-						{
-							MessageBoxA(NULL, "Unable to locate the editor folder.", "PW Edition Updater", MB_OK | MB_ICONERROR);
-						}
-						else
-						{
-							std::string installationDir = executablePath.substr(0, lastSlash);
-							std::string updaterPath = installationDir + "\\pw-updater.ps1";
-							if (GetFileAttributesA(updaterPath.c_str()) == INVALID_FILE_ATTRIBUTES)
-							{
-								MessageBoxA(NULL, "The PW Edition updater is not installed. Build or install a PW Edition package that includes pw-updater.ps1.", "PW Edition Updater", MB_OK | MB_ICONWARNING);
-							}
-							else
-							{
-								char systemDir[MAX_PATH] = { 0 };
-								UINT systemLength = GetSystemDirectoryA(systemDir, MAX_PATH);
-								if (systemLength == 0 || systemLength >= MAX_PATH)
-								{
-									MessageBoxA(NULL, "Cannot locate Windows PowerShell.", "PW Edition Updater", MB_OK | MB_ICONERROR);
-								}
-								else
-								{
-									std::string powershellExe = std::string(systemDir) + "\\WindowsPowerShell\\v1.0\\powershell.exe";
-									std::string executableName = executablePath.substr(lastSlash + 1);
-									std::string parameters = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + updaterPath +
-										"\" -InstallDir \"" + installationDir + "\" -EditorPid " + std::to_string(GetCurrentProcessId()) +
-										" -ExeName \"" + executableName + "\"";
-									HINSTANCE result = ShellExecuteA(NULL, "open", powershellExe.c_str(), parameters.c_str(), installationDir.c_str(), SW_HIDE);
-									if ((INT_PTR)result <= 32)
-										MessageBoxA(NULL, "Unable to start the PW Edition updater.", "PW Edition Updater", MB_OK | MB_ICONERROR);
-								}
-							}
-						}
-					}
-				}
+					PWLaunchInstalledUpdater();
 
 				if (ImGui::MenuItem("About")) {
 					bAbout_Window = true;
@@ -2439,6 +2446,20 @@ void mapeditorexecutable_loop(void)
 						ImGui::OpenPopup("Help");
 			}
 
+			// Persistent product identity visible on every PW Edition editor build.
+			if (ImGui::BeginMenu("PW Edition"))
+			{
+				if (ImGui::MenuItem("Check for Updates..."))
+					PWLaunchInstalledUpdater();
+				if (ImGui::MenuItem("Restore PW Workspace Layout"))
+				{
+					g_pwSceneHierarchyOpen = true;
+					refresh_gui_docking = 2;
+				}
+				if (ImGui::MenuItem("Verify PW Edition Executable"))
+					PWShowInstalledBuildDetails();
+				ImGui::EndMenu();
+			}
 			ImGui::EndMenuBar();
 		}
 
@@ -3594,7 +3615,7 @@ void mapeditorexecutable_loop(void)
 			#endif
 
 			char pBuildText[1024];
-			sprintf(pBuildText, "Build: %s", g.version_s.Get());
+			sprintf(pBuildText, "Pixelwolf PW Edition (GameGuru Classic base) | Base build: %s", g.version_s.Get());
 			ImGui::TextCenter(pBuildText);
 			ImGui::TextCenter("");
 
@@ -11067,7 +11088,7 @@ void imgui_input_getcontrols(void)
 		NewTitle = NewTitle + WinTitle;
 		SetWindowTitle(NewTitle.Get());
 		#else
-		cstr NewTitle = "GameGuru - ";
+		cstr NewTitle = "GameGuru Classic - PW Edition | ";
 		if (strnicmp(WinTitle.Get(), "mapbank\\", 8) == 0)
 			WinTitle = WinTitle.Get() + 8;
 		NewTitle = NewTitle + WinTitle;
