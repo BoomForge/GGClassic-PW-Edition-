@@ -15,6 +15,37 @@ internal static class Program
     const string Owner = "BoomForge";
     const string Repo = "GGClassic-PW-Edition-";
     const string Branch = "work/pw-community-integration-20261121";
+    private static readonly object OutputLock = new();
+    private static readonly Queue<string> RecentBuildOutput = new();
+    private static StreamWriter? BuildLog;
+    private static string BuildLogPath = "";
+
+    private static void InitLog()
+    {
+        var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                                  "Pixelwolf", "GGC-Updater", "Logs");
+        Directory.CreateDirectory(folder);
+        BuildLogPath = Path.Combine(folder, "update-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".log");
+        BuildLog = new StreamWriter(BuildLogPath) { AutoFlush = true };
+    }
+
+    private static void LogOutput(string line, bool stderr = false)
+    {
+        lock (OutputLock)
+        {
+            if (stderr) Console.Error.WriteLine(line);
+            else Console.WriteLine(line);
+            BuildLog?.WriteLine(line);
+            if (RecentBuildOutput.Count >= 50) RecentBuildOutput.Dequeue();
+            RecentBuildOutput.Enqueue(line);
+        }
+    }
+
+    private static string BuildErrorSummary()
+    {
+        lock (OutputLock)
+            return string.Join(Environment.NewLine, RecentBuildOutput.TakeLast(18));
+    }
 
     static readonly string[] FilesToInstall =
     {
@@ -29,14 +60,24 @@ internal static class Program
     [STAThread]
     static int Main()
     {
-        try { return Run().GetAwaiter().GetResult(); }
+        try
+        {
+            InitLog();
+            return Run().GetAwaiter().GetResult();
+        }
         catch (Exception e)
         {
             Console.Error.WriteLine(e);
-            MessageBox.Show(e.Message, "PW Edition updater failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            Console.WriteLine("Press Enter to close.");
-            Console.ReadLine();
+            var message = e.Message;
+            if (message.Length > 1200) message = message[..1200] + "...";
+            if (BuildLogPath.Length > 0)
+                message += "\n\nFull log saved to:\n" + BuildLogPath;
+            MessageBox.Show(message, "PW Edition updater failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 1;
+        }
+        finally
+        {
+            BuildLog?.Dispose();
         }
     }
 
@@ -97,7 +138,11 @@ internal static class Program
         if (sha.Length != 40 || !sha.All(Uri.IsHexDigit))
             throw new InvalidDataException("Unexpected source commit ID.");
         Console.WriteLine("Pinned source: " + sha);
-        string temp = Path.Combine(Path.GetTempPath(), "PWEdition-" + Guid.NewGuid().ToString("N"));
+        // Keep GameGuru's deeply nested C++ and legacy DirectX SDK paths well
+        // below MAX_PATH; the previous GUID + long GitHub ZIP root caused
+        // PowerShell 5.1 Expand-Archive failures on some Windows machines.
+        string temp = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                                   "PW", "b-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(temp);
         try
         {
@@ -114,14 +159,16 @@ internal static class Program
             ZipFile.ExtractToDirectory(sourceZip, extracted);
             string[] roots = Directory.GetDirectories(extracted);
             if (roots.Length != 1) throw new InvalidDataException("Unexpected GitHub ZIP layout.");
-            string root = roots[0];
+            string root = Path.Combine(temp, "src");
+            Directory.Move(roots[0], root);
+            Directory.Delete(extracted);
             if (!File.Exists(Path.Combine(root, @"GameGuru Core\GameGuru.sln")) ||
                 !File.Exists(Path.Combine(root, @"tools\pw-prepare-d3dx.ps1")))
                 throw new InvalidDataException("GitHub archive is missing the expected build scripts.");
 
             Console.WriteLine("Preparing Microsoft DirectX and Steamworks import libraries...");
-            await Execute("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -File " + Q(Path.Combine(root, @"tools\pw-prepare-d3dx.ps1")), root);
-            await Execute("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -File " + Q(Path.Combine(root, @"tools\pw-prepare-steam-imports.ps1")), root);
+            await Execute("powershell.exe", "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File " + Q(Path.Combine(root, @"tools\pw-prepare-d3dx.ps1")), root);
+            await Execute("powershell.exe", "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File " + Q(Path.Combine(root, @"tools\pw-prepare-steam-imports.ps1")), root);
             foreach (string project in new []
             {
                 @"GameGuru Core\SDK\DirectXTex\DirectXTex\DirectXTex_Desktop_2022.vcxproj",
@@ -338,12 +385,16 @@ internal static class Program
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true,
             RedirectStandardError = true, WorkingDirectory = dir
         }};
-        p.OutputDataReceived += (_, e) => { if (e.Data is not null) Console.WriteLine(e.Data); };
-        p.ErrorDataReceived += (_, e) => { if (e.Data is not null) Console.Error.WriteLine(e.Data); };
+        LogOutput("RUN: " + command + " " + args);
+        p.OutputDataReceived += (_, e) => { if (e.Data is not null) LogOutput(e.Data); };
+        p.ErrorDataReceived += (_, e) => { if (e.Data is not null) LogOutput(e.Data, true); };
         p.Start();
         p.BeginOutputReadLine();
         p.BeginErrorReadLine();
         await p.WaitForExitAsync();
-        if (p.ExitCode != 0) throw new IOException("Build failed (exit " + p.ExitCode + ") before installing any files: " + command + " " + args);
+        if (p.ExitCode != 0)
+            throw new IOException("Build failed (exit " + p.ExitCode + ") before installing any files.\n" +
+                                  "Command: " + Path.GetFileName(command) + "\n" +
+                                  "Last output:\n" + BuildErrorSummary());
     }
 }
