@@ -26,6 +26,9 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('ImGui::SetNextWindowDockID(g_pwBottomAssetDockId, ImGuiCond_Always);', GRID)
 
     def test_classic_style_and_opaque_browser(self):
+        self.assertIn('PWApplyClassicEditorStyle();', GRID)
+        self.assertIn('const ImVec4 face = PWClassicSystemColour(COLOR_BTNFACE);', GRID)
+        self.assertIn('style.WindowRounding = 0.0f;', GRID)
         self.assertIn('myLightStyle(NULL);', GRID)
         self.assertIn('ImGui::SetNextWindowBgAlpha(1.0f);', GRID)
         self.assertIn('Colors[ImGuiCol_WindowBg].w = 1.0f;', GRID)
