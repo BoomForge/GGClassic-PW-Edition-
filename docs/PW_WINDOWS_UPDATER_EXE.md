@@ -83,3 +83,9 @@ The earlier updater drew filename text instead of recognisable artwork on 64px i
 The next source-building updater draws original icon pictograms locally rather than redistributing GameGuru proprietary artwork. It also recognises the preceding updater's distinct dark tile/blue frame and replaces these old PW-generated text tiles, while preserving non-matching existing user or stock image files.
 
 Actual installation, readability, and icon preservation require owner testing. Repeat build/install is required; compilation alone does not replace already-installed old icons.
+
+## Restoring licensed Classic toolbar art from the user's own game (21 November 2026)
+
+The updater no longer treats PW's turquoise 64px circles as a design goal. During a local install it reads the **installed stock GameGuru.exe** as a resource-only data file, extracts original Classic 42x42 BMP toolbar strips by RT_BITMAP ID, and writes the matching icons under Files/editors/uiv3 in the user's own GameGuru installation. This does not include GameGuru toolbar images in the public update binary, GitHub release or source package. The source contains only C# extraction logic and icon-to-command mapping informed by GameGuru IDE/Editor.rc.
+
+Both earlier filename text tiles and blue/cyan PW vector tiles are recognised for replacement, but other installed/custom resource files are preserved. If the exact Classic bitmap is absent in a user's version, the updater logs this; the remaining unmatched buttons receive neutral fallback graphics, and a runtime screenshot check is still required.
