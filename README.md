@@ -109,6 +109,9 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 
 ### Model Importer 2 and Character Creator 2 — approved direction
 
+- [ ] **Weapon sockets and attachment binding (explicitly requested 22 Nov):** Attach imported weapons/props to named character hand bones (and optional back/hip sockets), configure local grip transforms, preview while animating, preserve editable attachment profiles and verify in GameGuru save/reopen and game exports. Share the binding system between Importer 2 and Character Creator 2; handle Mixamo/Bip01 naming and missing bones. This is **not** the already implemented cross-level weapon/ammo state work. See [weapon-binding acceptance gate](docs/PW_MODEL_IMPORTER_CHARACTER_CREATOR_REBUILD.md#weapon-binding-acceptance-gate-not-yet-implemented).
+
+
 - [x] Native skeletal import inspection UI, non-destructive Mixamo/Bip01 mapping preview, and opt-in DBO save/reload check. [Implementation notes](docs/PW_SKELETAL_IMPORT_AUDIT.md). Runtime animation retargeting and character-creator rebuilding remain outstanding.
 - [x] Shared native deep skeletal DBO audit now checks bone bind matrices, per-vertex indices/weights, frame rest matrices and animation key payloads in both the importer and Character Creator exports, opt-in only. Standalone Windows integrity tests pass. Full game export/playback and retargeting remain unverified.
 - [ ] Rebuild both tools around shared asset material, rig, animation and export contracts, preserving legacy GameGuru features during migration. [Rebuild and Model Bridge research](docs/PW_MODEL_IMPORTER_CHARACTER_CREATOR_REBUILD.md).
