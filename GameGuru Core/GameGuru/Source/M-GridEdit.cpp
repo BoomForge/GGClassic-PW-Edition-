@@ -145,6 +145,11 @@ bool bEntityGotFocus = false;
 char cDirectOpen[260];
 bool imgui_is_running = false;
 int refresh_gui_docking = 0;
+// New dockspace identity migrates the default layout once without continually
+// overwriting user adjustments saved in uiv3.layout.
+static const char* g_pwEngineDockspaceName = "PWEngineDockspaceV1";
+static bool g_pwSceneHierarchyOpen = true;
+static char g_pwSceneHierarchySearch[128] = "";
 ImGuiID dock_main_tabs, dock_tools_windows;
 cstr RedockNextWindow;
 ImGuiViewport* viewport;
@@ -2048,6 +2053,12 @@ void mapeditorexecutable_loop(void)
 
 				if (ImGui::BeginMenu("Reset Layout")) 
 				{
+					if (ImGui::MenuItem("PW Engine Layout (Scene / Assets / Inspector)"))
+					{
+						g_pwSceneHierarchyOpen = true;
+						refresh_gui_docking = 2;
+					}
+					ImGui::Separator();
 					//Full Desktop Size
 					if (ImGui::MenuItem("Full Desktop Size")) 
 					{
@@ -2701,88 +2712,56 @@ void mapeditorexecutable_loop(void)
 		ImGui::PopStyleVar(2);
 
 
+
 		static ImGuiID dock_id_bottom;
-		//We cant make all windows dock if all windows is NOT undocked first (.ini setup problem ), so refresh_gui_docking == 2
-		if (ImGui::DockBuilderGetNode(ImGui::GetID("MyDockspace")) == NULL || refresh_gui_docking == 2)
+		// PW Edition workspace: scene instances left, asset browser bottom,
+		// familiar editing viewport central, existing properties/tools right.
+		// Users can resize tabs and save the arrangement in uiv3.layout.
+		if (ImGui::DockBuilderGetNode(ImGui::GetID(g_pwEngineDockspaceName)) == NULL || refresh_gui_docking == 2)
 		{
-			//Default docking setup.
-			ImGuiID dockspace_id = ImGui::GetID("MyDockspace");
-			ImGui::DockBuilderRemoveNode(dockspace_id); // Clear out existing layout
-			//int ImGuiDockNodeFlags_Dockspace = 1 << 10;
-			ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace); // Add empty node
+			ImGuiID dockspace_id = ImGui::GetID(g_pwEngineDockspaceName);
+			ImGui::DockBuilderRemoveNode(dockspace_id);
+			ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
 			ImGui::DockBuilderSetNodePos(dockspace_id, viewport->Pos + ImVec2(0, toolbar_size));
-			ImGui::DockBuilderSetNodeSize(dockspace_id, viewport->Size - ImVec2(0, toolbar_size+ ImGuiStatusBar_Size));
+			ImGui::DockBuilderSetNodeSize(dockspace_id, viewport->Size - ImVec2(0, toolbar_size + ImGuiStatusBar_Size));
 
 			ImGuiID dock_main_id = dockspace_id;
-			ImGuiID dock_id_top = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Up, 0.12f, NULL, &dock_main_id); //Toolbar
-
-
-			ImGuiID dock_id_right;
-			if(viewport->Size.x > 1300)
-				dock_id_right = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, 0.14f, NULL, &dock_main_id); //0.20f
-			else if (viewport->Size.x < 1100)
-				dock_id_right = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, 0.23f, NULL, &dock_main_id); //0.20f
-			else
-				dock_id_right = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, 0.21f, NULL, &dock_main_id); //0.20f
-
-
-			ImGuiID dock_id_right2out;
-			ImGuiID dock_id_right2 = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, 0.2f, &dock_id_right2out, &dock_main_id); //0.20f
-
-			// create dock ID for above Tutorial Help Window (for Tutorial Video area)
-			ImGuiID dock_id_right2below = ImGui::DockBuilderSplitNode(dock_id_right2out, ImGuiDir_Down, 0.26f, NULL, NULL); //0.18
-
-			// leelee, technically not allowed by IMGUI but I fudged the IMGUI code to allow it - seems to work fine!
-			ImGuiID dock_id_right3below = ImGui::DockBuilderSplitNode(dock_id_right2out, ImGuiDir_Down, 0.60f, NULL, NULL); //(0.65) PE: Video area must have room for a normal mp4.
-
-
-			ImGuiID dock_id_left = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.15f, NULL, &dock_main_id); //0.15f
-			ImGuiID dock_id_left_down = ImGui::DockBuilderSplitNode(dock_id_left, ImGuiDir_Down, 0.15f, NULL, &dock_id_left); //0.15f
-			ImGuiID dock_id_left_down_large = ImGui::DockBuilderSplitNode(dock_id_left, ImGuiDir_Down, 0.30f, NULL, &dock_id_left); //0.15f
-
-			ImGuiID dock_id_left2out;
-			ImGuiID dock_id_left2 = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.30f, &dock_id_left2out, &dock_main_id); //0.20f
-			ImGuiID dock_id_left2below = ImGui::DockBuilderSplitNode(dock_id_left2out, ImGuiDir_Down, 0.26f, NULL, NULL); //0.18
-			ImGuiID dock_id_left3below = ImGui::DockBuilderSplitNode(dock_id_left2out, ImGuiDir_Down, 0.60f, NULL, NULL); //(0.65) PE: Video area must have room for a normal mp4.
-
-			// Disable tab bar for custom toolbar and statusbar
-			ImGuiDockNode* node = ImGui::DockBuilderGetNode(dock_id_top);
-			node->LocalFlags |= ImGuiDockNodeFlags_NoTabBar;
+			dock_id_bottom = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Down, 0.27f, NULL, &dock_main_id);
+			ImGuiID dock_id_left = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.20f, NULL, &dock_main_id);
+			const float inspectorRatio = viewport->Size.x < 1100.0f ? 0.30f : 0.24f;
+			ImGuiID dock_id_right = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, inspectorRatio, NULL, &dock_main_id);
 
 			ImGui::DockBuilderDockWindow(TABEDITORNAME, dock_main_id);
-			ImGui::DockBuilderDockWindow(TABENTITYNAME, dock_id_left);
-
+			ImGui::DockBuilderDockWindow("Scene Hierarchy##PWSceneHierarchy", dock_id_left);
+			ImGui::DockBuilderDockWindow(TABENTITYNAME, dock_id_bottom);
 #ifdef USELEFTPANELSTRUCTUREEDITOR
 			ImGui::DockBuilderDockWindow("Structure Editor##LeftPanel", dock_id_left);
 #endif
-			ImGui::DockBuilderDockWindow("Tutorial Video##HelpVideoWindow", dock_id_right2below);
-			ImGui::DockBuilderDockWindow("Tutorial Steps##HelpWindow", dock_id_right3below);
-
-			ImGui::DockBuilderDockWindow("Tutorial Video##LeftHelpVideoWindow", dock_id_left2below);
-			ImGui::DockBuilderDockWindow("Tutorial Steps##LeftHelpWindow", dock_id_left3below);
+			// Help panels remain accessible as tabs rather than occupying an
+			// additional full-height column and shrinking the main viewport.
+			ImGui::DockBuilderDockWindow("Tutorial Video##HelpVideoWindow", dock_id_right);
+			ImGui::DockBuilderDockWindow("Tutorial Steps##HelpWindow", dock_id_right);
+			ImGui::DockBuilderDockWindow("Tutorial Video##LeftHelpVideoWindow", dock_id_right);
+			ImGui::DockBuilderDockWindow("Tutorial Steps##LeftHelpWindow", dock_id_right);
 
 			ImGui::DockBuilderDockWindow("Entity Properties##PropertiesWindow", dock_id_right);
 			ImGui::DockBuilderDockWindow("Character Creator##PropertiesWindow", dock_id_right);
 			ImGui::DockBuilderDockWindow("Structure Properties##BuilderPropertiesWindow", dock_id_right);
 			ImGui::DockBuilderDockWindow("Importer##ImporterWindow", dock_id_right);
-
 			ImGui::DockBuilderDockWindow("Terrain Tools##TerrainToolsWindow", dock_id_right);
 			ImGui::DockBuilderDockWindow("Sculpt Terrain##TerrainToolsWindow", dock_id_right);
 			ImGui::DockBuilderDockWindow("Paint Terrain##TerrainToolsWindow", dock_id_right);
 			ImGui::DockBuilderDockWindow("Add Vegetation##TerrainToolsWindow", dock_id_right);
-
 			ImGui::DockBuilderDockWindow("Waypoints##WaypointsToolsWindow", dock_id_right);
-
 #ifdef USE_ENTITY_TOOL_WINDOW
 			ImGui::DockBuilderDockWindow("Object Tools##EntityToolsWindow", dock_id_right);
 #endif
-			//ImGuiDockNodeFlags_AutoHideTabBar
 			dock_main_tabs = dock_main_id;
 			dock_tools_windows = dock_id_right;
 			ImGui::DockBuilderFinish(dockspace_id);
 		}
 
-		ImGuiID dockspace_id = ImGui::GetID("MyDockspace");
+		ImGuiID dockspace_id = ImGui::GetID(g_pwEngineDockspaceName);
 		
 		ImGuiStyle& style = ImGui::GetStyle();
 		ImVec2 vOldWindowMinSize = style.WindowMinSize;
@@ -2797,6 +2776,53 @@ void mapeditorexecutable_loop(void)
 
 		if (dock_main_tabs == 0)
 			dock_main_tabs = dockspace_id;
+
+		// The hierarchy lists actual instances in this loaded level, not
+		// source assets. Selection is fed through the editor's existing
+		// iWidgetSelection path so the gizmo and inspector keep working.
+		if (ImGui::Begin("Scene Hierarchy##PWSceneHierarchy", &g_pwSceneHierarchyOpen, iGenralWindowsFlags))
+		{
+			ImGui::PushItemWidth(-1.0f);
+			ImGui::InputText("##PWSceneSearch", g_pwSceneHierarchySearch, sizeof(g_pwSceneHierarchySearch));
+			ImGui::PopItemWidth();
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Filter level objects by name");
+			ImGui::Separator();
+			const char* levelName = g.projectfilename_s.Get();
+			ImGui::TextDisabled("Level: %s", levelName && *levelName ? levelName : "Untitled");
+			ImGui::BeginChild("##PWSceneEntries", ImVec2(0, 0), false);
+			int visibleEntries = 0;
+			for (int e = 1; e <= g.entityelementlist; ++e)
+			{
+				if (t.entityelement[e].bankindex <= 0 || t.entityelement[e].obj <= 0)
+					continue;
+				const char* name = t.entityelement[e].eleprof.name_s.Get();
+				if (!name || !*name) name = "Unnamed entity";
+				if (*g_pwSceneHierarchySearch && !pestrcasestr(name, g_pwSceneHierarchySearch))
+					continue;
+				++visibleEntries;
+				const bool locked = t.entityelement[e].editorlock != 0;
+				ImGui::PushID(e);
+				char label[384];
+				sprintf_s(label, sizeof(label), "%s%s", name, locked ? " [locked]" : "");
+				if (ImGui::Selectable(label, t.widget.pickedEntityIndex == e) && !locked)
+				{
+					// Clear a previous gizmo selection before requesting a new
+					// one; the downstream picking code only selects when empty.
+					widget_switchoff();
+					t.widget.pickedEntityIndex = 0;
+					t.gridentity = 0;
+					t.grideditselect = 5;
+					t.inputsys.domodeentity = 1;
+					iWidgetSelection = e;
+				}
+				ImGui::PopID();
+			}
+			if (visibleEntries == 0)
+				ImGui::TextDisabled("No matching objects in this level");
+			ImGui::EndChild();
+		}
+		ImGui::End();
 
 		//#######################
 		//#### Tutorial Help ####
@@ -22215,7 +22241,7 @@ void RedockWindow(char *name)
 
 		//dock it.
 		int winNodeId = ImGui::GetWindowDockID();
-		dockspace_id = ImGui::GetID("MyDockspace");
+		dockspace_id = ImGui::GetID(g_pwEngineDockspaceName);
 		ImGui::DockBuilderDockWindow(name, dock_tools_windows);
 		int winNodeId2 = ImGui::GetWindowDockID();
 		if (winNodeId != 0 && winNodeId2 != 0 && winNodeId != winNodeId2) {
