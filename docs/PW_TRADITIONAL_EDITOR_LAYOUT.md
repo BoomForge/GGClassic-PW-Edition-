@@ -82,3 +82,20 @@ The owner's latest screenshot still showed an overlapping `Entity Library` AND `
 - The local Windows updater now detects antialiased blue-circle generated icons by scanning the known cyan rim, tries verified owner's backed-up originals and local Steam GameGuru.exe resources, and logs an explicit list of still-unrecoverable original toolbar images. **It cannot manufacture missing copyrighted stock artwork.**
 
 **Acceptance:** Build success only verifies compilation. The owner must run the actual Windows editor and confirm one docked bottom browser, visible grouped folders, diverse correct previews, no viewport bleed-through, Classic-style palette, and original icon restoration. The draft PR remains unmerged and any items not visually verified remain outstanding.
+
+## V7 corrective source and CI gate — 22 November 2026
+
+The owner's six required acceptance items remain: **authentic toolbar artwork, original-style palette, docked asset browser, low-latency placement, parent/child scene hierarchy and built-in Lua script editing**. These are separate acceptance criteria; passing a synthetic test is not evidence that the installed editor looks or performs correctly.
+
+Latest development source changes:
+
+- **Asset Browser:** Keep the existing browser permanently visible, remove remaining legacy floating-popup auto-close paths, and never substitute `TOOL_ENTITY` for a failed asset thumbnail. Preserve each asset's genuine BMP/PNG/JPG/JPEG preview or show an explicit `No preview` placeholder.
+- **Insertion latency:** The modern ImGui click and multiselect paths no longer call `editor_filllibrary()`, a synchronous hand-off to the retired external IDE. The drag path already bypasses it. Limit first-time thumbnail decoding to 24 assets per GUI frame to avoid huge stalls. The instrumented `PW ASSET INSERT` bank-load and `PW ASSET PLACEMENT` 3D cursor timings remain available to identify any residual delay.
+- **Visual theme:** Use a dedicated flat, neutral Windows-system-color Classic-style ImGui palette instead of the rounded, generic blue-tinted light theme. The preserved traditional docking geometry is still ImGui, not a pixel-for-pixel reincarnation of the original MFC interface.
+- **Toolbar artwork:** The licensed-local recovery pipeline remains responsible for originals. The updater searches prior Steam backups, locally available MFC Editor.exe/GameGuru.exe resource strips, and original BMP files. It must log every unrecoverable icon; no generated blue/cyan substitutes or unsupported claims of complete restoration.
+- **Scene hierarchy:** Native FPM parent indices, recursive grouped-transform highlights, nested folder sidecars and drag/drop are in source. Verify moving a parent in the 3D viewport moves its descendants and survives save/reopen; do not mistake the source or unit tests for a user-visible proof.
+- **Lua Studio:** Edit-menu, selected-entity inspector, AI-property and hierarchy context-menu entry points remain present. Native RichEdit syntax highlighting, completion, UTF-8 save and installed-script command lookup are compiled in the existing editor process, but Windows editor interactions still need testing.
+
+CI now also runs the full Windows x64 compile probe on development-branch source pushes. The UI regression guards check the permanent browser, real-thumbnail fallback, Classic-style hook, non-blocking ImGui paths, hierarchy hooks and script-editing entry points. The bootstrapper workflow is unchanged: the independently authored updater builds proprietary GameGuru binaries **locally** using the owner's licensed Steam installation, rather than publishing them.
+
+**Acceptance still pending:** full CI build for the latest revision; updated local PW installer run; visual toolbar comparison against original Classic; folder and thumbnail screenshot; dock resize/save/reopen; parent-child moving/rotating with nested children; Lua script open, syntax colour, completion, save/reopen; first-load and repeat-placement timing logged and compared before/after. Only report the 1–3 second delay resolved after measurements, and do not merge draft PR #1 before runtime acceptance.
