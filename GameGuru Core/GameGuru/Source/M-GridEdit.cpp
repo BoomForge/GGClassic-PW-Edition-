@@ -23903,17 +23903,20 @@ void process_entity_library(void)
 																sprintf_s(warning, sizeof(warning), "PW ASSET THUMBNAIL MISSING: %.870s", previewBase.c_str());
 																timestampactivity(0, warning);
 															}
-															sImgName = (g.mysystem.root_s + "files\\editors\\gfx\\missing.bmp").Get();
+															// No arbitrary fallback image: it made every missing asset
+														// look identical. A missing thumbnail is labelled below.
+														sImgName.clear();
 														}
 														myfiles->iPreview = uniqueId;
 														SetMipmapNum(1);
 														image_setlegacyimageloading(true);
 													
-														LoadImage((char *)sImgName.c_str(), myfiles->iPreview);
+														if (!sImgName.empty())
+															LoadImage((char *)sImgName.c_str(), myfiles->iPreview);
 														image_setlegacyimageloading(false);
 														SetMipmapNum(-1);
 
-														if (!GetImageExistEx(myfiles->iPreview))
+														if (sImgName.empty() || !GetImageExistEx(myfiles->iPreview))
 														{
 															myfiles->iPreview = -2; // Stable missing-preview sentinel; never use a toolbar icon as an asset preview.
 															textureId = 0; // Missing previews use a clearly labelled clickable placeholder.
@@ -24047,7 +24050,7 @@ void process_entity_library(void)
 
 												if (textureId > 0 && GetImageExistEx(textureId)
 												? ImGui::ImgBtn(textureId, ImVec2(media_icon_size, media_icon_size), drawCol_back, drawCol_normal, drawCol_hover, drawCol_Down, -1, 0, 0, 0, true)
-												: ImGui::Button("No preview", ImVec2(media_icon_size, media_icon_size)))
+												: ImGui::Button("No preview##PWAsset", ImVec2(media_icon_size, media_icon_size)))
 												{
 
 													if (bTutorialCheckAction) TutorialNextAction(); //Clicked get next tutorial action.
