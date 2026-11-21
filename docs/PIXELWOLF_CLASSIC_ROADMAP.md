@@ -70,6 +70,56 @@ The next performance phase is **measure before changing behaviour**, especially 
 | P2 | Shadow and lighting quality | [Upstream #1192](https://github.com/Dark-Basic-Software-Limited/GameGuruRepo/issues/1192) | Lighting settings predictable; acceptable defaults for PS2/early-2000s look. |
 | P2 | Independent shader contribution | [Upstream PR #6261](https://github.com/Dark-Basic-Software-Limited/GameGuruRepo/pull/6261) | Compile shader, render animated transparent/emissive entity, ensure no regression on non-animated models. |
 
+## General-purpose game-system requests — 22 November 2026
+
+**Provenance:** Suggestions supplied by the user from another GameGuru Classic creator's off-the-cuff feedback. These are cross-genre engine improvement requests, not features of any particular Pixelwolf game. **Status: requested / not implemented.** Design specifics below are proposed engineering acceptance criteria, not a claim of existing Classic behavior.
+
+### P0 — Reliable player-profile save/load system (new persistent save subsystem)
+
+**User request:** An older-console-style profile created by the player, where autosave, checkpoint and manual save record all relevant character/world progress in one save file associated with that profile; subsequent sessions read that state when the player loads the profile.
+
+**Important scope distinction:** Current `GGCPW_KEEP_LEVEL_STATS=1` and `PWSetTransitionValue` / `PWGetTransitionValue` support **limited in-process level transitions** and explicitly registered values. They are not full restart-safe per-player save files. Do not present the existing work as completing this request.
+
+Acceptance criteria:
+- [ ] Create, select, list, rename and delete player profiles with safe filesystem names and a clearly documented location; avoid using arbitrary user-entered paths directly.
+- [ ] Support manual, checkpoint and autosave entry points for the active profile, with game-developer choices for when each fires. Keep the user's **single logical profile file** design simple; if internal checkpoints or recovery snapshots are needed, explain exactly how they coexist with this model.
+- [ ] Store a versioned, schema-validated state snapshot: current/target level and player location/orientation; health/lives, weapon slots/ammunition; developer-registered typed Lua variables (such as quests, inventory or counters); and any other gameplay state **only where an explicit save/restore adapter exists**. Unknown arbitrary engine or Lua variables cannot safely be promised as automatically serialisable.
+- [ ] Write transactionally (temp file, flush, atomic replacement where supported), detect corruption/incompatible versions, and retain a bounded recovery copy. Avoid partial writes and never apply a corrupt file over the active game's valid state.
+- [ ] Restore state in a defined sequence before scripts/entities depend on it; support standalone builds, game restarts, level travel and migrated save versions while preserving old-game behavior when the new system is unused.
+- [ ] Test save/quit/restart/load, missing/corrupt saves, interrupted writes, different profiles, autosave/checkpoint/manual flows, and two- or three-level projects.
+
+### P0 — Non-explosive projectile collision and direct damage
+
+**User report:** Non-explosive arrows/bolts and other projectiles allegedly fail to lower the health of the player or active targets; explosive projectiles appear more reliable. This is a **reported bug, not yet reproduced in this fork**. The desired effect enables boomer shooters, dodgeable projectiles and bow-and-arrow combat.
+
+Acceptance criteria:
+- [ ] Reproduce with a controlled non-explosive projectile fired at the player and an AI/active entity, then compare equivalent explosive and hitscan damage paths.
+- [ ] Trace projectile movement, collision flags, hit ownership/faction, entity damage handling, Lua notification and health updates. Identify exactly where direct collision damage is lost before changing code.
+- [ ] On a valid impact, apply configured **direct-hit damage** to damageable targets regardless of whether explosion visuals/area damage are enabled. Do not accidentally double-apply damage for explosive projectiles, hit multiple times on one collision, or damage non-damageable objects.
+- [ ] Preserve projectile travel, dodging, collision filtering, impact/disposal, optional friendly-fire and physics behavior. Verify bows/arrows, ballistic energy projectiles and gameplay script callbacks across editor Test Level and standalone builds.
+- [ ] Cover player vs NPC/active object, collision vs near miss, obstruction/terrain hits, multiple fire rates, lethal hits and damage/armor scaling with deterministic tests.
+
+### P1 — Player-configurable controls / key rebinding
+
+**User request:** A normal game's Options > Controls interface for player-defined controls, despite many existing GameGuru Lua scripts hard-coding their input keys. This affects general keyboard/mouse/controller gameplay, not just weapon binding.
+
+Acceptance criteria:
+- [ ] Introduce a central **gameplay action mapping** layer (move, jump, crouch, interact, fire, aim, reload, sprint, etc.) and a usable Controls menu with editable bindings, reset to defaults, conflict warnings and persisted settings per appropriate game/player scope.
+- [ ] Keep game projects running when they still use legacy raw-key Lua queries; avoid silently remapping unrelated arbitrary keys or breaking typing/UI input.
+- [ ] Offer documented Lua action-query APIs for new scripts and a staged compatibility/migration path for common stock scripts with hard-coded key codes; inventory and interaction scripts may require explicit updates.
+- [ ] Test keyboard/mouse inputs first and investigate controller support separately where feasible. Validate pause/menu focus, alternate layouts, duplicate bindings, input after reloading and standalone export.
+- [ ] Distinguish **input-key binding** from **weapon-to-character-bone/socket binding** already specified under Importer 2 / Character Creator 2. Neither is implemented by the existing cross-level weapon persistence code.
+
+### Relative priority
+
+1. Stabilise the current importer/editor integration and its existing regression gates.
+2. Reproduce the non-explosive projectile damage bug before altering projectile internals.
+3. Design the profile-save state schema and persistence adapters around existing transition values, then test crash-safe restart recovery.
+4. Introduce configurable gameplay-action controls with explicit Lua compatibility safeguards.
+5. Keep weapon bone/socket binding in the separate rigging roadmap and prevent it being confused with gameplay keybinding.
+
+All three requests require source implementation, standalone tests and actual Windows gameplay acceptance. Their presence on the roadmap is not proof of a fix.
+
 ## Implementation rules
 
 1. Protect the upstream-compatible `master` branch. Use separate branches and PRs for improvements.
