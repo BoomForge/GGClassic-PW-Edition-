@@ -147,7 +147,7 @@ bool imgui_is_running = false;
 int refresh_gui_docking = 0;
 // New dockspace identity migrates the default layout once without continually
 // overwriting user adjustments saved in uiv3.layout.
-static const char* g_pwEngineDockspaceName = "PWEngineDockspaceV1";
+static const char* g_pwEngineDockspaceName = "PWEngineDockspaceV2";
 static bool g_pwSceneHierarchyOpen = true;
 static char g_pwSceneHierarchySearch[128] = "";
 
@@ -2755,6 +2755,9 @@ void mapeditorexecutable_loop(void)
 			ImGui::DockBuilderDockWindow(TABEDITORNAME, dock_main_id);
 			ImGui::DockBuilderDockWindow("Scene Hierarchy##PWSceneHierarchy", dock_id_left);
 			ImGui::DockBuilderDockWindow(TABENTITYNAME, dock_id_bottom);
+			// Full asset library opens as a tab in the bottom dock instead of floating
+			// on top of the main viewport.
+			ImGui::DockBuilderDockWindow("Entity Library##ExternalWindow", dock_id_bottom);
 #ifdef USELEFTPANELSTRUCTUREEDITOR
 			ImGui::DockBuilderDockWindow("Structure Editor##LeftPanel", dock_id_left);
 #endif
@@ -2908,7 +2911,8 @@ void mapeditorexecutable_loop(void)
 			//use first entry.
 			std::map<std::string, std::string>::iterator it = tutorial_files.begin();
 				
-			if (it->first.length() > 0) {
+			// Empty/absent optional tutorialbank is a valid Steam configuration.
+			if (it != tutorial_files.end() && it->first.length() > 0) {
 				strcpy(cTutorialName, it->first.c_str());
 			}
 
@@ -5978,8 +5982,7 @@ void mapeditorexecutable_loop(void)
 		//###########################
 
 		static std::map<std::string, std::int32_t> entity_folders;
-		if (refresh_gui_docking == 0) ImGui::SetNextWindowPos(viewPortPos + ImVec2(180, 140), ImGuiCond_Always); //ImGuiCond_FirstUseEver
-		if (refresh_gui_docking == 0) ImGui::SetNextWindowSize(ImVec2(54 * ImGui::GetFontSize(), 33 * ImGui::GetFontSize()), ImGuiCond_Always); //ImGuiCond_FirstUseEver
+		// The library is docked along the bottom, not a separately sized popup.
 		ImGuiWindowFlags ex_window_flags = 0;
 		if (refresh_gui_docking == 0 && !bExternal_Entities_Window)
 		{
