@@ -1,6 +1,6 @@
 # PW Edition — Model Importer and Character Creator rebuild
 
-**Decision date:** 21 November 2026. **Status:** approved direction, engineering design. Neither module has been rebuilt yet; existing tools remain intact pending compatibility testing.
+**Decision date:** 21 November 2026. **Status:** staged implementation begun. Native skeleton/animation export auditing is in source; replacement importer, actual retargeting and Character Creator 2 authoring UI remain unimplemented. Legacy tools are retained.
 
 ## Recovered Model Bridge v1.0.7 source — VERIFIED 21 November 2026
 
@@ -67,3 +67,7 @@ C3 — **Shared animation and export:** reuse Importer 2's bones/retarget/clip p
 6. Validate every milestone with save/reopen, level playback, standalone export, original asset compatibility and performance measurements. Replace legacy UI only after evidence of equivalent functionality.
 
 No unverified claim of working Mixamo retargeting or a functioning new character creator is authorized by this planning document.
+
+## 21 November milestone — shared native skeletal integrity audit (M3.1)
+
+GameGuru's existing sBone/sFrame/sAnimationSet data is now inspected without modifying the loaded object. The new `PW-SkeletalIntegrity.h` compares affected vertex indices and weights, bone and frame rest matrices, and per-key animation payloads. The current importer offers an optional on-demand deep scan in its ImGui pathway, while `GGCPW_VERIFY_SKELETON_SAVE=1` enables separate scratch-object export/reimport validation in both importer variants and Character Creator Plus. Two isolated MSVC tests pass. The previous missing `DirectXTex.lib` and `Effects11.lib` build dependencies are now built by CI before linking. See `docs/PW_SKELETAL_IMPORT_AUDIT.md` for test scope, conditional UI limitations and remaining proof requirements. This is an audit milestone **not** working skeletal retargeting or a rebuilt character creator.
