@@ -149,6 +149,9 @@ int refresh_gui_docking = 0;
 // overwriting user adjustments saved in uiv3.layout.
 static const char* g_pwEngineDockspaceName = "PWEngineDockspaceV2";
 static bool g_pwSceneHierarchyOpen = true;
+// Classic disables shadow rendering when the editor camera zooms out too far.
+// Keep cascaded realtime editor shadows available at all distances by default.
+static bool g_pwEditorRealtimeShadows = true;
 static char g_pwSceneHierarchySearch[128] = "";
 
 static void PWShowInstalledBuildDetails()
@@ -2466,6 +2469,13 @@ void mapeditorexecutable_loop(void)
 					SetEnvironmentVariableA("GGCPW_PROFILE_LOAD", tracingNow ? "0" : "1");
 				if (ImGui::IsItemHovered())
 					ImGui::SetTooltip("Log each future project/Test Level phase to %%TEMP%%\\GGCPW-loadtrace-<pid>.csv");
+				if (ImGui::MenuItem("Real-time Editor Shadows (all zoom levels)", NULL, g_pwEditorRealtimeShadows))
+				{
+					g_pwEditorRealtimeShadows = !g_pwEditorRealtimeShadows;
+					t.updatezoom = 1;
+				}
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Preserve cascaded editor shadows when zoomed out; higher GPU cost.");
 				if (ImGui::MenuItem("Open Load Diagnostics Folder"))
 				{
 					char tempPath[MAX_PATH] = { 0 };
@@ -13051,7 +13061,8 @@ void editor_overallfunctionality ( void )
 			}
 		}
 
-		//  modulate shadow strength based on distance
+		// Preserve real-time cascaded shadows across the editor camera range
+		// (stock Classic fades them to zero on distant zooms).
 		t.tcamrange_f=((600.0*t.gridzoom_f)+1000);
 		t.toldvisualsshadowmode=t.visuals.shadowmode;
 		if (  t.tcamrange_f<4000 ) 
@@ -13069,6 +13080,8 @@ void editor_overallfunctionality ( void )
 				t.visuals.shadowmode=0;
 			}
 		}
+		if (g_pwEditorRealtimeShadows)
+			t.visuals.shadowmode = 100;
 		if (  t.toldvisualsshadowmode != t.visuals.shadowmode ) 
 		{
 			visuals_justshaderupdate ( );
