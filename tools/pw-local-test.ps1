@@ -40,8 +40,7 @@ if (-not $SkipBuild) {
     "GameGuru Core\SDK\DirectXTex\DirectXTex\DirectXTex_Desktop_2022.vcxproj",
     "GameGuru Core\SDK\DirectX\Effect11\Effects11_2022.vcxproj",
     "GameGuru Core\SDK\OGG\ogg_vorbis_static.sln",
-    "GameGuru Core\GameGuru.sln",
-    "GameGuru IDE\GameGuru IDE.sln")) {
+    "GameGuru Core\GameGuru.sln")) {
    Write-Host "Compiling $project..."
    & $msbuild (Join-Path $root $project) /t:Build /p:Configuration=Release /p:Platform=x64 /m:2 /nologo /v:minimal
    if ($LASTEXITCODE -ne 0) {throw "Compilation failed: $project (nothing installed)"}
@@ -66,7 +65,8 @@ Source: $source
 Test folder: $dest
 Generated: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")
 
-Run Guru-MapEditor.exe FROM THIS TEST FOLDER, not from Steam.
+Run the GameGuru.exe launcher copied FROM YOUR STEAM folder, or
+Guru-MapEditor.exe directly FROM THIS TEST FOLDER. Do not run from Steam.
 Use a new or backed-up project. This is an experimental build.
 Never run the in-engine updater to install this branch.
 
@@ -86,4 +86,5 @@ The new ImGui rig panel may not appear on non-VRTECH Classic builds.
 Do not redistribute this installation or proprietary binaries.
 "@ | Set-Content -Path (Join-Path $dest "PW-TESTING-README.txt") -Encoding UTF8
 Write-Host "Done. Test editor: $(Join-Path $dest 'Guru-MapEditor.exe')"
+Write-Host "If present, try the Steam GameGuru.exe launcher copied to the TEST directory."
 Write-Host "Steam installation was not changed."

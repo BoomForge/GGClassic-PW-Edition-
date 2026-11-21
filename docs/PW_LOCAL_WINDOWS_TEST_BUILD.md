@@ -18,13 +18,13 @@ Open PowerShell **in the cloned repository** and run:
 Substitute the actual path containing your Steam GameGuru Classic Files directory. No Steam file or installer is modified. The script:
 
 1. Downloads official Microsoft.DXSDK.D3DX import libraries into a local ignored SDK folder.
-2. Compiles DirectXTex, Effects11, the GameGuru x64 solution, and the IDE launcher.
+2. Compiles DirectXTex, Effects11, Ogg/Vorbis, and the GameGuru x64 solution. The old GameGuru IDE launcher is Win32-only, so the script reuses the launcher from your owned Steam installation in the separate test copy.
 3. Verifies the compiled editor exists.
 4. Copies the owned Steam installation into a **separate** PW-TestInstall directory (this can require substantial storage and copy time).
 5. Overlays locally compiled PW-Build/Release files.
 6. Writes a PW-TESTING-README.txt with a basic manual smoke-test sequence.
 
-Run PW-TestInstall\Guru-MapEditor.exe (not the one in Steam). The script stops on compilation errors rather than mixing an outdated build with new source. It does not automatically start the editor.
+Run PW-TestInstall\GameGuru.exe (the Steam launcher copied to the test folder) or PW-TestInstall\Guru-MapEditor.exe directly, not the binaries in Steam. The script stops on compilation errors rather than mixing an outdated build with new source. It does not automatically start the editor.
 
 ## Smoke testing
 

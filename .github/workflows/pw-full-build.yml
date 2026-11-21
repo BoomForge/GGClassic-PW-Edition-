@@ -61,10 +61,8 @@ jobs:
         shell: cmd
         run: |
           msbuild "GameGuru Core\GameGuru.sln" /t:Build /p:Configuration=Release /p:Platform=x64 /m:2 /nologo /v:minimal /fl /flp:logfile=pw-core-build.log;verbosity=normal
-      - name: Build GameGuru IDE launcher Release x64
-        shell: cmd
-        run: |
-          msbuild "GameGuru IDE\GameGuru IDE.sln" /t:Build /p:Configuration=Release /p:Platform=x64 /m:2 /nologo /v:minimal /fl /flp:logfile=pw-ide-build.log;verbosity=normal
+      # The original MFC GameGuru launcher has only Win32 configurations.
+      # Use the user's installed Steam launcher alongside the newly built x64 editor.
       - name: Verify staged PW editor files
         shell: pwsh
         run: |
@@ -77,7 +75,7 @@ jobs:
         if: failure()
         shell: pwsh
         run: |
-          foreach ($file in @('pw-directxtex-build.log','pw-effects11-build.log','pw-ogg-build.log','pw-core-build.log','pw-ide-build.log')) {
+          foreach ($file in @('pw-directxtex-build.log','pw-effects11-build.log','pw-ogg-build.log','pw-core-build.log')) {
             if (Test-Path $file) {
               Get-Content $file | Select-String -Pattern 'error (C[0-9]+|LNK[0-9]+|MSB[0-9]+)|fatal error|error :' | Select-Object -Last 40 | ForEach-Object { Write-Host $_.Line }
             }
