@@ -23860,22 +23860,31 @@ void process_entity_library(void)
 													myfiles->last_used = (long)tCurrentTimeSec;
 													if (max_load_persync-- >= 0)
 													{
-														//Load preview.
-														std::string sImgName = myfiles->m_sPath.Get();
-														sImgName = sImgName + "\\" + Left(myfiles->m_sName.Get(), Len(myfiles->m_sName.Get()) - 4);
-														sImgName += ".bmp";
-														myfiles->iPreview = uniqueId; //TOOL_ENTITY; //Just for testing.
-														SetMipmapNum(1); //PE: mipmaps not needed.
-														image_setlegacyimageloading(true);
-														
-														//cyb
-														char *fp = new char[sImgName.length() + 1];
-														strcpy(fp, sImgName.c_str());
-														if (FileExist(fp) == 0)
+														// Preserve the asset's OWN thumbnail, not one generic
+														// icon for every entity. Classic assets normally use BMP,
+														// while imported/community packs may ship PNG/JPG.
+														// Dark Basic FileExist can reject absolute paths: check
+														// the Windows filesystem directly before falling back.
+														std::string previewBase = myfiles->m_sPath.Get();
+														previewBase += "\\";
+														previewBase += Left(myfiles->m_sName.Get(), Len(myfiles->m_sName.Get()) - 4);
+														std::string sImgName;
+														const char* previewExtensions[] = { ".bmp", ".png", ".jpg", ".jpeg" };
+														for (const char* extension : previewExtensions)
 														{
-															sImgName = (g.mysystem.root_s + "files\\editors\\gfx\\missing.bmp").Get();
+															const std::string candidate = previewBase + extension;
+															const DWORD attributes = GetFileAttributesA(candidate.c_str());
+															if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+															{
+																sImgName = candidate;
+																break;
+															}
 														}
-														delete[] fp;
+														if (sImgName.empty())
+															sImgName = (g.mysystem.root_s + "files\\editors\\gfx\\missing.bmp").Get();
+														myfiles->iPreview = uniqueId;
+														SetMipmapNum(1);
+														image_setlegacyimageloading(true);
 													
 														LoadImage((char *)sImgName.c_str(), myfiles->iPreview);
 														image_setlegacyimageloading(false);
