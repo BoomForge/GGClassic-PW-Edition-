@@ -103,7 +103,7 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 ### Model Importer 2 and Character Creator 2 — approved direction
 
 - [ ] Rebuild both tools around shared asset material, rig, animation and export contracts, preserving legacy GameGuru features during migration. [Rebuild and Model Bridge research](docs/PW_MODEL_IMPORTER_CHARACTER_CREATOR_REBUILD.md).
-- [ ] Recover full EFPSE Model Bridge converter source; the EFPSE Studio GitHub repo currently contains only its external executable launcher and output review. A historical source ZIP checksum exists in Library, not recovered code.
+- [x] **Recover v1.0.7 embedded Model Bridge frontend sources from the owner-provided Go EXE:** 33 files, including FBX/GLTF/GLB preview, skinned DirectX X handling, mesh sampling and original tests; 30 JavaScript files passed syntax-only checks. Source packaged for owner; technical inventory in [rebuild research](docs/PW_MODEL_IMPORTER_CHARACTER_CREATOR_REBUILD.md). Not yet imported into C++/GameGuru.\n- [ ] **Rebuild missing Go backend functionality and implement GameGuru native skeletal retarget/export:** web source recovered, but HTTP backend remains compiled, MD3 final format loses skeletal data, and the older v1.0.4 source ZIP is still unavailable.
 - [ ] Evaluate the separate M.I.L.O retro-character-creator-foundation branch for canonical low-poly body/rig, morph, hair/clothing and export design.
 
 ### To do — future upgrades
