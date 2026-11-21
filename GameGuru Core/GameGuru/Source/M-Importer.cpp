@@ -6107,7 +6107,6 @@ void ConvertWorldToRelative ( sFrame* pFrame, GGMATRIX* pStoreNewPoseFrames, GGM
 	}
 }
 
-#ifdef ENABLEIMGUI
 // PW Edition: verify the normal DBO save/reload path only when explicitly
 // enabled, using an isolated scratch object that is immediately removed.
 static void PW_VerifySavedSkeleton(const char* path,
@@ -6115,7 +6114,13 @@ static void PW_VerifySavedSkeleton(const char* path,
     const PWSkeletalIntegrity::Audit& deepBefore)
 {
     if (!PWSkeletalAudit::VerifyEnabled() || !before.HasSkinOrAnimation()) return;
-    if (!path || !*path || FileExist((LPSTR)path)==0) return;
+    if (!path || !*path) return;
+    if (FileExist((LPSTR)path)==0)
+    {
+        OutputDebugStringA("PW Skeletal DBO WARNING: export file missing; validation not possible.\n");
+        popup_text("Skeletal DBO export missing - integrity not verified");
+        return;
+    }
     const int scratch=findFreeObject();
     LoadObject((LPSTR)path,scratch);
     std::string problem;
@@ -6139,6 +6144,7 @@ static void PW_VerifySavedSkeleton(const char* path,
     else OutputDebugStringA("PW Skeletal DBO PASS: skin weights, bind transforms and animation payloads retained.\n");
 }
 
+#ifdef ENABLEIMGUI
 void importer_save_entity ( char *filename )
 {
 	//  Check if user folder exists, if not create it
