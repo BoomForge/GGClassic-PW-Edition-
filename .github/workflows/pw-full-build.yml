@@ -57,6 +57,14 @@ jobs:
             $path = Join-Path 'GameGuru Core/SDK/OGG/lib64/Release' $lib
             if (-not (Test-Path $path)) { throw "Missing Ogg static library $path" }
           }
+      - name: Produce Steamworks x64 import libraries (symbols only)
+        shell: pwsh
+        run: |
+          ./tools/pw-prepare-steam-imports.ps1
+          foreach ($name in @('steam_api64.lib','sdkencryptedappticket64.lib')) {
+            $lib = Join-Path 'GameGuru Core/SDK/Steamworks SDK/redistributable_bin/win64' $name
+            if (-not (Test-Path $lib)) { throw "Missing generated linker metadata $lib" }
+          }
       - name: Build complete GameGuru Core Release x64 solution
         shell: cmd
         run: |

@@ -35,6 +35,7 @@ if (-not $SkipBuild) {
  if (-not $vs) {throw "MSBuild not found"}
  $msbuild=Join-Path $vs "MSBuild\Current\Bin\MSBuild.exe"
  & (Join-Path $PSScriptRoot "pw-prepare-d3dx.ps1")
+ & (Join-Path $PSScriptRoot "pw-prepare-steam-imports.ps1")
  if (-not (Test-Path (Join-Path $root "GameGuru Core\SDK\DirectX\Lib\x64\d3dx11.lib"))) {throw "D3DX11 was not staged"}
  foreach ($project in @(
     "GameGuru Core\SDK\DirectXTex\DirectXTex\DirectXTex_Desktop_2022.vcxproj",
@@ -85,6 +86,11 @@ slower DBO round-trip auditing and debugger output.
 The new ImGui rig panel may not appear on non-VRTECH Classic builds.
 Do not redistribute this installation or proprietary binaries.
 "@ | Set-Content -Path (Join-Path $dest "PW-TESTING-README.txt") -Encoding UTF8
+foreach ($dll in @("steam_api64.dll","sdkencryptedappticket64.dll")) {
+ if (-not (Test-Path (Join-Path $dest $dll))) {
+  Write-Warning "Missing $dll at test root. Confirm your licensed Steam GameGuru installation supplies the matching x64 runtime before launching."
+ }
+}
 Write-Host "Done. Test editor: $(Join-Path $dest 'Guru-MapEditor.exe')"
 Write-Host "If present, try the Steam GameGuru.exe launcher copied to the TEST directory."
 Write-Host "Steam installation was not changed."
