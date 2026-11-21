@@ -23891,8 +23891,9 @@ void process_entity_library(void)
 															static int pwMissingThumbnailSamples = 0;
 															if (pwMissingThumbnailSamples++ < 5)
 															{
-																const std::string warning = "PW ASSET THUMBNAIL MISSING: " + previewBase;
-																timestampactivity(0, warning.c_str());
+																char warning[1024] = { 0 };
+																sprintf_s(warning, sizeof(warning), "PW ASSET THUMBNAIL MISSING: %.870s", previewBase.c_str());
+																timestampactivity(0, warning);
 															}
 															sImgName = (g.mysystem.root_s + "files\\editors\\gfx\\missing.bmp").Get();
 														}
