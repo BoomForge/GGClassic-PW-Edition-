@@ -1,5 +1,6 @@
 #include "PW-AssetManifest.h"
 #include <cassert>
+#include <fstream>
 #include <iostream>
 #include <set>
 #include <string>
@@ -70,6 +71,13 @@ int main() {
     assert(json.find("Head\\\\\\\"Bone") != std::string::npos);
     assert(json.find("\"found\":false") != std::string::npos);
     assert(json.find("\"unresolvedTextures\": 1") != std::string::npos);
+    // Emit a real fixture so CI validates the versioned JSON with a parser,
+    // not only fragile substring assertions.
+    std::ofstream out("pw-asset-preflight-test.json", std::ios::binary);
+    assert(out.good());
+    out << json;
+    out.close();
+    assert(out.good());
 
     const auto empty = PWAssetManifest::Inspect(
         (Object*)nullptr, "", "", exists);
