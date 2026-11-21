@@ -6,6 +6,7 @@
 #include "stdafx.h"
 #include "gameguru.h"
 #include "PW-ImportPaths.h" // PW Edition: safe Blender/Mixamo texture path handling
+#include "PW-SkeletalAudit.h" // Non-destructive GameGuru skeleton/clip inspection
 
 #if defined(_WIN64) && !defined(ENABLEIMGUI)
 //PE: for 64 bits file dialogs.
@@ -2399,6 +2400,47 @@ void imgui_importer_loop(void)
 
 			ImGui::Indent(-10);
 		}
+
+        // PW Edition: inspect native skeletons without overwriting bone names,
+        // bind poses or source animation clips.
+        if (ImGui::CollapsingHeader("Skeleton & Animation"))
+        {
+            const PWSkeletalAudit::Snapshot rig=PWSkeletalAudit::Inspect(GetObjectData(t.importer.objectnumber));
+            ImGui::Text("Meshes: %d  Skinned: %d",rig.meshes,rig.skinnedMeshes);
+            ImGui::Text("Frames: %d  Skin bone refs: %d",rig.frames,rig.boneRefs);
+            ImGui::Text("Animation sets: %d  Bone tracks: %d",rig.animSets,rig.animTracks);
+            ImGui::Text("Animation keys: %llu",rig.animKeys);
+            if (rig.hasMixamo)
+            {
+                ImGui::Text("Mixamo -> Bip01 preview: %d mapped",rig.mappedMixamo);
+                if (!rig.collisions.empty())
+                    ImGui::TextWrapped("Warning: multiple source names map to the same Bip01 target.");
+                if (!rig.unmapped.empty())
+                    ImGui::TextWrapped("Some bones have no Bip01 mapping. Original animation is left intact.");
+            }
+            else if (rig.hasBip01)
+                ImGui::TextUnformatted("Rig naming: GameGuru Bip01");
+            else
+                ImGui::TextUnformatted("Rig naming: static or custom");
+            if (ImGui::TreeNode("Skin bones"))
+            {
+                for (size_t n=0;n<rig.boneNames.size();++n)
+                {
+                    const char* mapped=PWSkeletalAudit::MapMixamo(rig.boneNames[n].c_str());
+                    if (mapped) ImGui::BulletText("%s -> %s",rig.boneNames[n].c_str(),mapped);
+                    else ImGui::BulletText("%s",rig.boneNames[n].c_str());
+                }
+                ImGui::TreePop();
+            }
+            if (!rig.unmapped.empty() && ImGui::TreeNode("Unmapped source bones"))
+            {
+                for (size_t n=0;n<rig.unmapped.size();++n)
+                    ImGui::BulletText("%s",rig.unmapped[n].c_str());
+                ImGui::TreePop();
+            }
+            ImGui::TextWrapped("The old 'Use Uber Animations' option replaces source animation keys; it is not general retargeting.");
+            ImGui::TextWrapped("Optional DBO verification: set GGCPW_VERIFY_SKELETON_SAVE=1 before starting the editor.");
+        }
 
 		if (ImGui::StyleCollapsingHeader("Materials", ImGuiTreeNodeFlags_DefaultOpen))
 		{
@@ -6026,6 +6068,31 @@ void ConvertWorldToRelative ( sFrame* pFrame, GGMATRIX* pStoreNewPoseFrames, GGM
 }
 
 #ifdef ENABLEIMGUI
+// PW Edition: verify the normal DBO save/reload path only when explicitly
+// enabled, using an isolated scratch object that is immediately removed.
+static void PW_VerifySavedSkeleton(const char* path,const PWSkeletalAudit::Snapshot& before)
+{
+    if (!PWSkeletalAudit::VerifyEnabled() || !before.HasSkinOrAnimation()) return;
+    if (!path || !*path || FileExist((LPSTR)path)==0) return;
+    const int scratch=findFreeObject();
+    LoadObject((LPSTR)path,scratch);
+    std::string problem;
+    if (ObjectExist(scratch)==1)
+    {
+        const PWSkeletalAudit::Snapshot after=PWSkeletalAudit::Inspect(GetObjectData(scratch));
+        problem=PWSkeletalAudit::Compare(before,after);
+        DeleteObject(scratch);
+    }
+    else problem="Could not reload saved DBO for skeletal verification";
+    if (!problem.empty())
+    {
+        const std::string output="PW Skeletal DBO WARNING: "+problem+" ("+path+")\n";
+        OutputDebugStringA(output.c_str());
+        popup_text("Skeletal DBO verification warning - see debug output");
+    }
+    else OutputDebugStringA("PW Skeletal DBO PASS: bone and animation counts retained.\n");
+}
+
 void importer_save_entity ( char *filename )
 {
 	//  Check if user folder exists, if not create it
@@ -6637,7 +6704,9 @@ void importer_save_entity ( char *filename )
 	{
 		if ( FileExist (t.tSaveFile_s.Get()) == 1 ) DeleteAFile ( t.tSaveFile_s.Get() ) ;
 		ScaleObject (  t.importer.objectnumber,100,100,100 );
+		const PWSkeletalAudit::Snapshot pwSkeletonBefore=PWSkeletalAudit::Inspect(GetObjectData(t.importer.objectnumber));
 		SaveObject (  t.tSaveFile_s.Get(),t.importer.objectnumber );
+		PW_VerifySavedSkeleton(t.tSaveFile_s.Get(),pwSkeletonBefore);
 		ScaleObject (  t.importer.objectnumber,t.importer.objectScaleForEditing,t.importer.objectScaleForEditing,t.importer.objectScaleForEditing );
 	}
 	else
@@ -7746,7 +7815,9 @@ void importer_save_entity ( char *filename )
 	{
 		if ( FileExist (t.tSaveFile_s.Get()) == 1 ) DeleteAFile ( t.tSaveFile_s.Get() ) ;
 		ScaleObject (  t.importer.objectnumber,100,100,100 );
+		const PWSkeletalAudit::Snapshot pwSkeletonBefore=PWSkeletalAudit::Inspect(GetObjectData(t.importer.objectnumber));
 		SaveObject (  t.tSaveFile_s.Get(),t.importer.objectnumber );
+		PW_VerifySavedSkeleton(t.tSaveFile_s.Get(),pwSkeletonBefore);
 		ScaleObject (  t.importer.objectnumber,t.importer.objectScaleForEditing,t.importer.objectScaleForEditing,t.importer.objectScaleForEditing );
 	}
 	else
