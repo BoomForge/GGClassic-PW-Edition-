@@ -56,3 +56,17 @@ The updater reads the original 42x42 toolbar strips from the licensed local Game
 The asset browser now checks the actual per-entity preview path with the Windows filesystem, looking for BMP, PNG, JPG and JPEG instead of trusting the older Dark Basic FileExist check alone. If no source thumbnail exists, the first five missing names are logged; it does not invent thumbnail artwork or overwrite purchased asset folders.
 
 Acceptance not established: owner must verify original resource extraction count in updater log, inspect the toolbar, test preview images in an asset pack known to contain thumbnails, resize all three shared splitters, save/reopen a map, and verify in-app updates. Windows CI compilation alone does not prove source bitmaps exist in this owner's Steam version.
+
+## Runtime regression from owner's screenshots — corrective update (21 November 2026)
+
+The owner's 21 November Windows screenshots **disproved** the prior claim that the bottom asset browser and Classic appearance had been fully restored. The dock displayed the current-level `TABENTITYNAME` list (empty in an untitled map), while the actual `Entity Library##ExternalWindow` asset/folder browser defaulted to closed. The blue/cyan circular toolbar icons were local PW-generated replacements. An alpha-blended library surface could show rendered terrain behind the panel.
+
+**Implemented in development source, awaiting Windows acceptance:**
+
+- `PWEngineDockspaceV5`: initialise the actual `Entity Library##ExternalWindow` as open, dock it first in the lower central frame, keep the current-level entity list as a secondary tab, and rebuild the default layout once. Use the original editor's neutral `myStyle2` (not the newer blue theme), applying the style preference before calculating its colours.
+- Force the docked asset-library window's background opaque so viewport imagery does not bleed through; preserve the hierarchy and inspector side docks.
+- Stop the independently authored updater from generating blue/cyan pictogram PNGs. Recover unmodified, identifiable originals from the owner's verified `PW-Edition-Backups` folders where available, then attempt extraction from the locally licensed original `GameGuru.exe` toolbar bitmap resources; preserve other existing art. **Not every missing Classic icon is guaranteed recoverable.**
+- Asset previews continue to probe their own BMP/PNG/JPG/JPEG files. Missing/failed images no longer silently use `TOOL_ENTITY` (the circular toolbar asset image). The grid shows a clickable **No preview** placeholder for unrecoverable items instead.
+- The owner's existing inventory includes real FPE/BMP pairs; the earlier completely empty panel is therefore not evidence that their GameGuru assets were absent.
+
+**Acceptance still required** on the owner's Windows machine: full source build, `Entity Library` visible on launch, folder sections populated, at least three distinct real asset thumbnails loading, lower/side panel splitters resizing without overlap, original icons recovered and reported accurately in updater log, and neutral Classic style. Keep PR #1 in draft until accepted. Do not call a successful CI compile a visual test.
