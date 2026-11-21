@@ -11,8 +11,11 @@ on:
       - "tools/PWBootstrapper/**"
       - ".github/workflows/pw-bootstrapper-exe.yml"
   workflow_dispatch:
+# This workflow publishes ONLY our own updater executable, never GameGuru engine
+# binaries/media. Its public release provides a stable, unauthenticated channel
+# so the in-editor updater can safely bootstrap future updater versions.
 permissions:
-  contents: read
+  contents: write
 jobs:
   bootstrapper:
     runs-on: windows-2022
@@ -37,3 +40,25 @@ jobs:
           path: PWBootstrapper-dist/Pixelwolf-GGC-Updater.exe
           if-no-files-found: error
           retention-days: 30
+
+      - name: Prepare SHA-256 checksum for independent updater release
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          $exe = 'PWBootstrapper-dist/Pixelwolf-GGC-Updater.exe'
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -LiteralPath 'PWBootstrapper-dist/Pixelwolf-GGC-Updater.sha256' -Value "$hash  Pixelwolf-GGC-Updater.exe" -Encoding Ascii
+      - name: Publish publicly downloadable updater-only channel
+        if: github.event_name == 'push'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = 'pw-updater-dev'
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --title 'PW Edition development updater (no GameGuru binaries)' --notes 'Self-contained open-source updater only. Licensed owners compile their own GameGuru editor from source.'
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to create updater-only release' }
+          }
+          gh release upload $tag 'PWBootstrapper-dist/Pixelwolf-GGC-Updater.exe' 'PWBootstrapper-dist/Pixelwolf-GGC-Updater.sha256' --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to publish updater/checksum release assets' }
