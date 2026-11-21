@@ -714,16 +714,19 @@ try {
             bool wide = filename.StartsWith("ABOUT-", StringComparison.OrdinalIgnoreCase) ||
                         filename.Equals("theader.png", StringComparison.OrdinalIgnoreCase);
             bool hadOldTextTile = File.Exists(installed) && IsLegacyPWTextTile(installed, wide);
-            if (File.Exists(installed) && !hadOldTextTile) continue;
+            bool hadPWVectorTile = File.Exists(installed) && IsGeneratedPWIcon(installed);
+            // Upgrade both generations of PW-made icons; do not overwrite
+            // GameGuru's genuine artwork, custom artwork or paid resources.
+            if (File.Exists(installed) && !hadOldTextTile && !hadPWVectorTile) continue;
             string target = Path.Combine(build, relative);
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             DrawPWIcon(filename, target, wide);
             installFiles.Add(relative);
-            if (hadOldTextTile) upgraded++; else generated++;
+            if (hadOldTextTile || hadPWVectorTile) upgraded++; else generated++;
         }
         if (generated + upgraded > 0)
-            LogOutput("Restored " + generated + " missing pictographic editor icons and upgraded " +
-                      upgraded + " prior PW text-only placeholders. Existing stock/custom art preserved.");
+            LogOutput("Generated " + generated + " neutral fallback icons and replaced " +
+                      upgraded + " prior PW-generated tiles. Original Classic resources are restored separately.");
     }
 
 
