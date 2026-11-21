@@ -1,12 +1,21 @@
 # Pixelwolf GG Classic: compile locally and stage an ISOLATED test installation.
 # Run: powershell -ExecutionPolicy Bypass -File .\tools\pw-local-test.ps1 -SteamGameDir "D:\SteamLibrary\steamapps\common\Game Guru"
 param(
- [Parameter(Mandatory=$true)][string]$SteamGameDir,
+ [string]$SteamGameDir = "",
  [string]$TestDir = "",
  [switch]$SkipBuild
 )
 $ErrorActionPreference="Stop"
 $root=(Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+if ([string]::IsNullOrWhiteSpace($SteamGameDir)) {
+  Add-Type -AssemblyName System.Windows.Forms
+  $dialog=New-Object System.Windows.Forms.FolderBrowserDialog
+  $dialog.Description="Select your Steam GameGuru Classic folder (contains Files)"
+  if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+    throw "No GameGuru Classic install folder selected"
+  }
+  $SteamGameDir=$dialog.SelectedPath
+}
 $source=(Resolve-Path $SteamGameDir).Path.TrimEnd('\','/')
 if (-not (Test-Path (Join-Path $source "Files") -PathType Container)) {
  throw "SteamGameDir must point to your owned GameGuru directory containing Files"
