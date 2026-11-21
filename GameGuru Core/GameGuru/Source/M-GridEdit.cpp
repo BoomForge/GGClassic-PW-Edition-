@@ -23885,7 +23885,17 @@ void process_entity_library(void)
 															}
 														}
 														if (sImgName.empty())
+														{
+															// Record only a few samples so missing DLC/model
+															// thumbnail packs do not flood the runtime log.
+															static int pwMissingThumbnailSamples = 0;
+															if (pwMissingThumbnailSamples++ < 5)
+															{
+																const std::string warning = "PW ASSET THUMBNAIL MISSING: " + previewBase;
+																timestampactivity(0, warning.c_str());
+															}
 															sImgName = (g.mysystem.root_s + "files\\editors\\gfx\\missing.bmp").Get();
+														}
 														myfiles->iPreview = uniqueId;
 														SetMipmapNum(1);
 														image_setlegacyimageloading(true);
