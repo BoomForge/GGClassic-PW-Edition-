@@ -34,3 +34,13 @@ This is a **flat hierarchy** of placed objects for the first iteration, not yet 
 8. Test resizing down to 1024x768 and capture screenshots for usability review.
 
 **No claims of completed editor runtime testing until someone launches this build.**
+
+## Owner runtime feedback and corrective UI pass — 21 November 2026
+
+The first PW Edition build started and its in-app updater works, but owner testing failed usability acceptance: text-only icons, floating entity library, overlapping independently moved panes, a >60-second test-project load, and absent visible real-time shadows.
+
+Corrective changes on development branch: PWEngineDockspaceV2 docks the full Entity Library and Current Objects along the bottom, with scene hierarchy left and inspector right; core workspace windows use NoMove with split-resize still available. New update-generated icons are locally drawn visual pictograms, not filename tiles; old PW-generated text placeholders are recognized for replacement while non-matching stock/custom icons are preserved.
+
+The PW Edition menu now offers Capture Load Diagnostics (CSV) and Open Load Diagnostics Folder. Begin-stage markers survive a stall and slow-stage markers flag completed operations >=10 seconds. The real-time editor shadows toggle defaults on across zoom levels; it can be disabled for performance.
+
+None of these UI, loading, or shadow fixes is runtime accepted until tested on the owner's Steam install. Do not claim that the 60+ second load is fixed until a trace identifies the bottleneck and a before/after test confirms improvement.
