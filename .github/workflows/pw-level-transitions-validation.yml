@@ -1,0 +1,33 @@
+name: PW Edition level transitions validation
+
+on:
+  pull_request:
+    paths:
+      - "GameGuru Core/GameGuru/Include/PW-LevelFlow.h"
+      - "GameGuru Core/GameGuru/Include/PW-FPMCache.h"
+      - "GameGuru Core/GameGuru/Source/M-Game.cpp"
+      - "GameGuru Core/GameGuru/Source/M-MapFile.cpp"
+      - "tools/test_pw_level_flow_win.cpp"
+      - ".github/workflows/pw-level-transitions-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  area-transition-contract:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Compile standalone Win32 transition and cache tests
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do set "VS_PATH=%%i"
+          if not defined VS_PATH exit /b 1
+          call "%VS_PATH%\Common7\Tools\VsDevCmd.bat" -arch=x64 >nul
+          cl.exe /nologo /std:c++14 /EHsc /W4 /WX /I "GameGuru Core\GameGuru\Include" "tools\test_pw_level_flow_win.cpp" /Fe:pw-level-flow-test.exe
+          if errorlevel 1 exit /b 1
+      - name: Test level preflight, cache invalidation and archive prefetch
+        shell: pwsh
+        run: ./pw-level-flow-test.exe

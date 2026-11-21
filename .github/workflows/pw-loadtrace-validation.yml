@@ -1,0 +1,47 @@
+name: PW Edition load profiler validation
+
+on:
+  pull_request:
+    paths:
+      - "GameGuru Core/GameGuru/Include/PW-LoadTrace.h"
+      - "GameGuru Core/GameGuru/Source/M-GridEdit.cpp"
+      - "GameGuru Core/GameGuru/Source/M-Game.cpp"
+      - "tools/analyse_pw_loadtrace.py"
+      - "tools/test_pw_loadtrace_*"
+      - ".github/workflows/pw-loadtrace-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  load-profiler-smoke:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run CSV report tests
+        shell: pwsh
+        run: python -m unittest discover -s tools -p "test_pw_loadtrace_report.py" -v
+      - name: Compile isolated x64 profiler using Visual Studio C++
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do set "VS_PATH=%%i"
+          if not defined VS_PATH exit /b 1
+          call "%VS_PATH%\Common7\Tools\VsDevCmd.bat" -arch=x64 >nul
+          cl.exe /nologo /std:c++14 /EHsc /W4 /WX /I "GameGuru Core\GameGuru\Include" "tools\test_pw_loadtrace_win.cpp" /Fe:pw-loadtrace-smoke.exe
+          if errorlevel 1 exit /b 1
+      - name: Verify opt-in profiler creates readable timing CSV
+        shell: pwsh
+        run: |
+          $env:GGCPW_PROFILE_LOAD = '1'
+          ./pw-loadtrace-smoke.exe
+          $logs = Get-ChildItem -Path $env:TEMP -Filter 'GGCPW-loadtrace-*.csv' -File | Sort-Object LastWriteTime -Descending
+          if (-not $logs) { throw 'No timing log was written by the smoke test.' }
+          $match = $logs | Where-Object { (Get-Content -LiteralPath $_.FullName -Raw) -match 'test.synthetic_load' } | Select-Object -First 1
+          if (-not $match) { throw 'Trace did not contain the synthetic stage.' }
+          python tools/analyse_pw_loadtrace.py $match.FullName

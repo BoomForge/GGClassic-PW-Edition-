@@ -1,0 +1,42 @@
+# Pixelwolf GameGuru Classic — local Windows test build
+
+GameGuru Classic's original engine is proprietary. This public GitHub repository does not distribute any compiled GameGuru executables or Steam media. Build and test only with your own licensed GameGuru Classic installation.
+
+## Requirements
+
+- Windows 10/11 x64, GameGuru Classic installed through Steam
+- Git checkout of BoomForge/GGClassic-PW-Edition- branch work/pw-community-integration-20261121
+- Visual Studio 2022 with Desktop Development with C++ / MSBuild and Windows SDK installed
+- Internet connection once to retrieve the official Microsoft D3DX 9.29.952.8 NuGet SDK
+
+## Build and stage in one command
+
+Open PowerShell **in the cloned repository** and run:
+
+    powershell -ExecutionPolicy Bypass -File .\tools\pw-local-test.ps1 -SteamGameDir "D:\SteamLibrary\steamapps\common\Game Guru"
+
+Substitute the actual path containing your Steam GameGuru Classic Files directory. No Steam file or installer is modified. The script:
+
+1. Downloads official Microsoft.DXSDK.D3DX import libraries into a local ignored SDK folder.
+2. Compiles DirectXTex, Effects11, Ogg/Vorbis, and the GameGuru x64 solution. The old GameGuru IDE launcher is Win32-only, so the script reuses the launcher from your owned Steam installation in the separate test copy.
+3. Verifies the compiled editor exists.
+4. Copies the owned Steam installation into a **separate** PW-TestInstall directory (this can require substantial storage and copy time).
+5. Overlays locally compiled PW-Build/Release files.
+6. Writes a PW-TESTING-README.txt with a basic manual smoke-test sequence.
+
+Run PW-TestInstall\GameGuru.exe (the Steam launcher copied to the test folder) or PW-TestInstall\Guru-MapEditor.exe directly, not the binaries in Steam. The script stops on compilation errors rather than mixing an outdated build with new source. It does not automatically start the editor.
+
+## Smoke testing
+
+1. Start with a fresh or backed-up project and test editor launch/save/reopen.
+2. Import a simple FBX with PNG textures, save entity and reopen it.
+3. Import an animated FBX or X model, keep original animations, save/reload DBO.
+4. Save a disposable Character Creator model.
+5. Run a level, switch between levels, return to editor, and restart. Note load times/crashes.
+6. Optional: set environment flag GGCPW_VERIFY_SKELETON_SAVE=1 before launching to enable the slower skeletal export/reload audit. It logs warnings through OutputDebugStringA. The experimental ImGui panel is guarded and may be unavailable in non-VRTECH Classic builds.
+
+This is experimental engine software; full runtime testing, skeletal retargeting, and updated Character Creator UI are still outstanding. No public binaries are provided. Do not use the in-engine updater to install this development branch into Steam.
+
+## Steamworks runtime dependency
+
+The GameGuru engine links to 27 Steam API and encrypted-ticket symbols from its original SteamMultiplayer library. The public source fork cannot ship Valve's import libraries. `tools/pw-prepare-steam-imports.ps1` generates **local link metadata** (`steam_api64.lib`, `sdkencryptedappticket64.lib`) from tracked DEF symbol names using MSVC, without bundling Valve DLLs. It does not replace Steamworks functionality. The resulting test folder must have the **compatible original x64 Steamworks runtime DLLs from your licensed GameGuru installation**. If absent, you will see a warning and the rebuilt engine may not launch until compatible licensed runtime DLLs are available. This is not a no-Steam build. Test Steam features separately from core editor functionality.

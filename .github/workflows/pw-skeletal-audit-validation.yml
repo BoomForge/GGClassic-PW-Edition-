@@ -1,0 +1,29 @@
+name: PW Edition skeletal importer audit
+on:
+  pull_request:
+    paths:
+      - "GameGuru Core/GameGuru/Include/PW-SkeletalAudit.h"
+      - "GameGuru Core/GameGuru/Source/M-Importer.cpp"
+      - "tools/test_pw_skeletal_audit.cpp"
+      - "tools/test_pw_skeletal_integrity.cpp"
+      - "GameGuru Core/GameGuru/Include/PW-SkeletalIntegrity.h"
+      - ".github/workflows/pw-skeletal-audit-validation.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  skeletal-audit:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run Windows skeletal audit test
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = & $vswhere -latest -products '*' -property installationPath
+          if (-not $vs) { throw 'VS2022 installation not found' }
+          $vcvars = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = 'call "' + $vcvars + '" -arch=x64 >nul && cl.exe /nologo /EHsc /W4 /std:c++14 /I "GameGuru Core\GameGuru\Include" tools\test_pw_skeletal_audit.cpp /Fe:pw-skeletal-audit.exe && pw-skeletal-audit.exe && cl.exe /nologo /EHsc /W4 /std:c++14 /I "GameGuru Core\GameGuru\Include" tools\test_pw_skeletal_integrity.cpp /Fe:pw-skeletal-integrity.exe && pw-skeletal-integrity.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw 'Skeletal import audit test failed' }

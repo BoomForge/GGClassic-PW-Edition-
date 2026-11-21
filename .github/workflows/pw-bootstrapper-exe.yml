@@ -1,0 +1,93 @@
+name: PW Edition Windows updater EXE (no engine binaries)
+on:
+  pull_request:
+    paths:
+      - "tools/PWBootstrapper/**"
+      - ".github/workflows/pw-bootstrapper-exe.yml"
+  push:
+    branches:
+      - work/pw-community-integration-20261121
+    paths:
+      - "tools/PWBootstrapper/**"
+      - ".github/workflows/pw-bootstrapper-exe.yml"
+  workflow_dispatch:
+# This workflow publishes ONLY our own updater executable, never GameGuru engine
+# binaries/media. Its public release provides a stable, unauthenticated channel
+# so the in-editor updater can safely bootstrap future updater versions.
+permissions:
+  contents: write
+jobs:
+  bootstrapper:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Compile standalone Windows updater
+        shell: pwsh
+        run: |
+          dotnet publish tools/PWBootstrapper/PWBootstrapper.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:DebugType=none -o PWBootstrapper-dist
+          if ($LASTEXITCODE -ne 0) { throw "Updater compilation failed" }
+          if (-not (Test-Path 'PWBootstrapper-dist/Pixelwolf-GGC-Updater.exe')) { throw "EXE missing" }
+          Get-FileHash 'PWBootstrapper-dist/Pixelwolf-GGC-Updater.exe' -Algorithm SHA256 | Format-List
+      - name: Smoke-test real Windows GDI toolbar resource cleanup
+        shell: pwsh
+        run: |
+          # The last updater crashed only at runtime because a DllImport method
+          # name was not an exported Win32 entry point. Invoke the compiled EXE.
+          & ./PWBootstrapper-dist/Pixelwolf-GGC-Updater.exe --self-test-native-icons
+          if ($LASTEXITCODE -ne 0) { throw "Native GDI toolbar cleanup failed with exit $LASTEXITCODE" }
+      - name: Smoke-test self-replacement helper on Windows PowerShell 5.1
+        shell: pwsh
+        run: |
+          # Test the EXACT helper embedded in the compiled updater's C# source.
+          # Uses two harmless Microsoft binaries as stand-ins for old/new EXEs.
+          $source = Get-Content 'tools/PWBootstrapper/Program.cs' -Raw
+          $pattern = '(?s)File\.WriteAllText\(script, """\r?\n(?<body>.*?)\r?\n""", Encoding\.UTF8\);'
+          $match = [regex]::Match($source, $pattern)
+          if (-not $match.Success) { throw 'Cannot extract updater self-replacement helper' }
+          $folder = Join-Path $env:RUNNER_TEMP ('pw-selftest-' + [Guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $folder -Force | Out-Null
+          $helper = Join-Path $folder 'replace.ps1'
+          Set-Content -LiteralPath $helper -Value $match.Groups['body'].Value -Encoding UTF8
+          $target = Join-Path $folder 'Pixelwolf-GGC-Updater.exe'
+          $staged = Join-Path $folder 'staged.exe'
+          Copy-Item (Join-Path $env:WINDIR 'System32\where.exe') $target
+          Copy-Item (Join-Path $env:WINDIR 'System32\whoami.exe') $staged
+          $expected = (Get-FileHash $staged -Algorithm SHA256).Hash
+          & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper -OldProcessId 2147483647 -Target $target -Staged $staged -Expected $expected -InstallRoot $folder
+          if ($LASTEXITCODE -ne 0) { throw 'Updater replacement helper reported a failure' }
+          if ((Get-FileHash $target -Algorithm SHA256).Hash -ne $expected) { throw 'Self-replacement did not install expected EXE' }
+          Write-Host 'Self-replacement helper passed checksum and replacement tests.'
+      - name: Publish updater EXE as workflow artifact (no GameGuru executables)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pixelwolf-GGC-Updater-Win64
+          path: PWBootstrapper-dist/Pixelwolf-GGC-Updater.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Prepare SHA-256 checksum for independent updater release
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          $exe = 'PWBootstrapper-dist/Pixelwolf-GGC-Updater.exe'
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -LiteralPath 'PWBootstrapper-dist/Pixelwolf-GGC-Updater.sha256' -Value "$hash  Pixelwolf-GGC-Updater.exe" -Encoding Ascii
+      - name: Publish publicly downloadable updater-only channel
+        if: github.event_name == 'push'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = 'pw-updater-dev'
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --title 'PW Edition development updater (no GameGuru binaries)' --notes 'Self-contained open-source updater only. Licensed owners compile their own GameGuru editor from source.'
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to create updater-only release' }
+          }
+          gh release upload $tag 'PWBootstrapper-dist/Pixelwolf-GGC-Updater.exe' 'PWBootstrapper-dist/Pixelwolf-GGC-Updater.sha256' --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to publish updater/checksum release assets' }

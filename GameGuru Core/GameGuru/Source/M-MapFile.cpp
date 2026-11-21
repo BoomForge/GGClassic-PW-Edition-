@@ -6,6 +6,8 @@
 #include "stdafx.h"
 #include "gameguru.h"
 #include "Common-Keys.h"
+#include "PW-LoadTrace.h" // PW Edition: loading measurements
+#include "PW-FPMCache.h" // PW Edition: optional verified per-session FPM cache
 
 #ifdef ENABLEIMGUI
 #include "..\Imgui\imgui.h"
@@ -681,7 +683,8 @@ void mapfile_saveproject_fpm ( void )
 			#ifdef VRTECH
 			if ( strcmp ( strEnt.Get(), "_d.jpg" ) == NULL )
 			#else
-			if ( strcmp ( strEnt.Get(), "_d.dds" ) == NULL || strcmp ( strEnt.Get(), "_n.dds" ) == NULL || strcmp ( strEnt.Get(), "_s.dds" ) == NULL )
+			if ( strcmp ( strEnt.Get(), "_d.dds" ) == NULL || strcmp ( strEnt.Get(), "_n.dds" ) == NULL || strcmp ( strEnt.Get(), "_s.dds" ) == NULL
+				|| strcmp ( strEnt.Get(), "_d.png" ) == NULL || strcmp ( strEnt.Get(), "_n.png" ) == NULL || strcmp ( strEnt.Get(), "_s.png" ) == NULL )
 			#endif
 			{
 				AddFileToBlock ( 1, t.tfile_s.Get() );
@@ -795,6 +798,7 @@ void mapfile_emptyterrainfilesfromtestmapfolder ( void )
 
 void mapfile_loadproject_fpm ( void )
 {
+	PWLoadTraceScope pwTraceFPMTotal("game.transition.fpm_load.total");
 	//  Ensure FPM exists
 	t.trerfeshvisualsassets=0;
 	timestampactivity(0, cstr(cstr("_mapfile_loadproject_fpm: ")+g.projectfilename_s+" "+GetDir()).Get() );
@@ -806,6 +810,20 @@ void mapfile_loadproject_fpm ( void )
 
 		// empty any terrain node files
 		mapfile_emptyterrainfilesfromtestmapfolder();
+
+		// Resolve the archive to an absolute filename before Classic switches folders.
+		// Only standalone single-player opts into safe reuse of already extracted FPM data.
+		bool pwCanReuseFPM = (t.game.gameisexe == 1 && t.game.runasmultiplayer == 0 && PWFPMCache::Enabled());
+		std::string pwSourceArchive;
+		if (pwCanReuseFPM)
+		{
+			char pwAbsoluteArchive[MAX_PATH] = { 0 };
+			DWORD pwLength = GetFullPathNameA(g.projectfilename_s.Get(), MAX_PATH, pwAbsoluteArchive, NULL);
+			if (pwLength > 0 && pwLength < MAX_PATH)
+				pwSourceArchive = pwAbsoluteArchive;
+			else
+				pwCanReuseFPM = false;
+		}
 
 		//  Store and switch folders
 		t.tdirst_s=GetDir() ; SetDir ( g.mysystem.levelBankTestMap_s.Get() ); // "levelbank\\testmap\\" );
@@ -839,16 +857,38 @@ void mapfile_loadproject_fpm ( void )
 		//  Restore folder to Files (for extraction)
 		SetDir ( t.tdirst_s.Get() );
 
-		//  Read FPM into testmap area
-		timestampactivity(0,"LOADMAP: read FPM block");
-		OpenFileBlock (  g.projectfilename_s.Get(),1,"mypassword" );
-		PerformCheckListForFileBlockData (  1 );
+		//  Read FPM into testmap area, reusing a verified, unmodified snapshot
+		//  only in standalone single player when GGCPW_FPM_CACHE=1 is set.
 		t.tpath_s=g.mysystem.levelBankTestMap_s.Get(); //"levelbank\\testmap\\";
-		for ( t.i = 1 ; t.i<=  ChecklistQuantity( ); t.i++ )
+		bool pwFPMRestored = false;
+		if (pwCanReuseFPM)
 		{
-			ExtractFileFromBlock (  1, ChecklistString( t.i ), t.tpath_s.Get() );
+			PWLoadTraceScope pwTraceFPMRestore("game.transition.fpm_cache.restore");
+			pwFPMRestored = PWFPMCache::Restore(pwSourceArchive, g.mysystem.levelBankTestMapAbs_s.Get());
 		}
-		CloseFileBlock (  1 );
+		if (pwFPMRestored)
+		{
+			timestampactivity(0, "PW Edition: reusing verified FPM extraction cache");
+		}
+		else
+		{
+			PWLoadTraceScope pwTraceFPMExtract("game.transition.fpm_extract.original");
+			timestampactivity(0,"LOADMAP: read FPM block");
+			OpenFileBlock (  g.projectfilename_s.Get(),1,"mypassword" );
+			PerformCheckListForFileBlockData (  1 );
+			std::vector<std::string> pwFPMFiles;
+			for ( t.i = 1 ; t.i<=  ChecklistQuantity( ); t.i++ )
+			{
+				const char* pwEntryName = ChecklistString(t.i);
+				if (pwCanReuseFPM && pwEntryName)
+					pwFPMFiles.push_back(pwEntryName);
+				ExtractFileFromBlock (  1, ChecklistString( t.i ), t.tpath_s.Get() );
+			}
+			CloseFileBlock (  1 );
+			// A corrupt/incomplete extraction must not be remembered.
+			if (pwCanReuseFPM && FileExist(cstr(g.mysystem.levelBankTestMapAbs_s + "header.dat").Get()) == 1)
+				PWFPMCache::Remember(pwSourceArchive, g.mysystem.levelBankTestMapAbs_s.Get(), pwFPMFiles);
+		}
 
 		SetDir ( g.mysystem.levelBankTestMapAbs_s.Get() );
 
@@ -1170,6 +1210,8 @@ void mapfile_collectfoldersandfiles ( cstr levelpathfolder )
 	addtocollection("scriptbank\\gameloop.lua");
 	addtocollection("scriptbank\\gameplayercontrol.lua");
 	addtocollection("scriptbank\\global.lua");
+	// PW Edition: standalone projects using connected-area state need the companion module.
+	if (FileExist("scriptbank\\pw_transition_state.lua") == 1) addtocollection("scriptbank\\pw_transition_state.lua");
 	addtocollection("scriptbank\\music.lua");
 	addfoldertocollection(cstr(cstr("languagebank\\")+g.language_s+"\\artwork\\watermark").Get() );
 	addfoldertocollection("scriptbank\\people\\ai");
@@ -3273,6 +3315,8 @@ void mapfile_savestandalone_start ( void )
 	addtocollection("scriptbank\\gameloop.lua");
 	addtocollection("scriptbank\\gameplayercontrol.lua");
 	addtocollection("scriptbank\\global.lua");
+	// PW Edition: standalone projects using connected-area state need the companion module.
+	if (FileExist("scriptbank\\pw_transition_state.lua") == 1) addtocollection("scriptbank\\pw_transition_state.lua");
 	addtocollection("scriptbank\\music.lua");
 
 	// ensure key scripts are part of standalone export
@@ -5108,7 +5152,7 @@ void CreateItineraryFile ( void )
 		{
 			LPSTR pString = g_sDefaultAssetFiles[n].Get();
 			for ( int c = 0; c < strlen(pString); c++ )
-				WriteMemblockByte ( 1, pos++, (unsigned char) pString[c] ); //PE: chars like 'ö' will set -10 and generate errors.
+				WriteMemblockByte ( 1, pos++, (unsigned char) pString[c] ); //PE: chars like 'Ã¶' will set -10 and generate errors.
 			WriteMemblockByte ( 1, pos++, 0 );
 		}
 		SetDir ( g.fpscrootdir_s.Get() );

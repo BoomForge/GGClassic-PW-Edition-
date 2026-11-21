@@ -4,6 +4,8 @@
 
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-LoadTrace.h" // Pixelwolf Edition: opt-in load profiler
+#include "PW-LevelFlow.h" // Pixelwolf Edition: safe area transitions
 #include "cOccluderThread.h"
 #include "CGfxC.h"
 #include "DarkLUA.h"
@@ -36,6 +38,21 @@ extern bool g_bInTutorialMode;
 bool g_bInEditor = true;
 int g_iMasterRootState = 0;
 int g_iActivelyUsingVRNow = 0;
+
+// PW Edition: level-to-level player continuity without forcing an EXE restart.
+// Opt-in pending full GameGuru standalone validation. Process-restart mode retains
+// its original GameLoopSaveStats/GameLoopLoadStats behaviour unchanged.
+static bool g_pwInProcessStatsPending = false;
+static bool g_pwInProcessLuaStatsAvailable = false;
+static int g_pwHealthAcrossLevels = 0;
+static int g_pwLivesAcrossLevels = 0;
+static bool pw_keep_player_stats_between_levels()
+{
+    char setting[8] = { 0 };
+    const DWORD length = GetEnvironmentVariableA("GGCPW_KEEP_LEVEL_STATS", setting, sizeof(setting));
+    return length == 1 && setting[0] == '1';
+}
+
 
 // 
 //  Game Module to manage all game flow
@@ -184,6 +201,7 @@ std::vector<std::string> preload_setup;
 
 void game_masterroot_gameloop_initcode(int iUseVRTest)
 {
+	PWLoadTraceScope pwTraceGameLevelInit("game.transition.next_level_init");
 	//PE: For this to work we need to support decrypting files.
 	#ifdef WIP_PROLOADLEVELTEXTURES
 	//PE: START level proloader here.
@@ -329,6 +347,15 @@ void game_masterroot_gameloop_initcode(int iUseVRTest)
 			{
 				t.game.jumplevel_s = t.game.pAdvanceWarningOfLevelFilename;
 				strcpy ( t.game.pAdvanceWarningOfLevelFilename, "" );
+			}
+
+			// PW Edition: avoid repeating a mapbank folder scan for known connected areas.
+			// Invalid/missing destinations still use the original Classic fallback path.
+			if (t.game.gameisexe == 1)
+			{
+				PWLevelFlow::Destination pwKnownDestination;
+				if (PWLevelFlow::Resolve(g.mysystem.mapbankAbs_s.Get(), t.game.jumplevel_s.Get(), pwKnownDestination))
+					t.game.jumplevel_s = pwKnownDestination.relative.c_str();
 			}
 
 			// work out first level from exe name (copied to jumplevel_s)
@@ -1723,16 +1750,28 @@ void game_masterroot_gameloop_initcode(int iUseVRTest)
 	// resort texture list to ignore objects set to be ignored
 	DoTextureListSort ( );
 
-	// if reloading standalone level, need to restore basic stats from LUA save file
-	if ( g.iStandaloneIsReloading == 2 )
+	// Restore player stats after the new level has created its player and weapon systems.
+	// Restart mode uses the original on-disk Lua mechanism. For normal transitions,
+	// we also keep a process-local health/lives snapshot if the Lua file is missing.
+	if ( g.iStandaloneIsReloading == 2 || g_pwInProcessStatsPending )
 	{
-		// call LUA function from game which updates stats via LUA script
-		char pLUACustomLoadCall[256];
-		strcpy ( pLUACustomLoadCall, "GameLoopLoadStats" );
-		LuaSetFunction ( pLUACustomLoadCall, 0, 0 ); 
-		LuaCall ( );
-
-		physics_player_refreshcount(); //PE: Update weapon count.
+		if (g.iStandaloneIsReloading == 2 || g_pwInProcessLuaStatsAvailable)
+		{
+			char pLUACustomLoadCall[256];
+			strcpy ( pLUACustomLoadCall, "GameLoopLoadStats" );
+			LuaSetFunction ( pLUACustomLoadCall, 0, 0 );
+			LuaCall ( );
+			physics_player_refreshcount(); // Recount restored weapon slots.
+		}
+		if (g_pwInProcessStatsPending && t.game.gameisexe == 1 && t.game.runasmultiplayer == 0)
+		{
+			// C++ fallback ensures that health/lives still cross a connected-area jump
+			// even when the optional Lua weapon-state save is unavailable.
+			t.player[t.plrid].health = g_pwHealthAcrossLevels;
+			t.player[t.plrid].lives = g_pwLivesAcrossLevels;
+		}
+		g_pwInProcessStatsPending = false;
+		g_pwInProcessLuaStatsAvailable = false;
 	}
 
 	// one final command to improve static physics performance
@@ -2036,13 +2075,51 @@ bool game_masterroot_gameloop_loopcode(int iUseVRTest)
 
 void game_masterroot_gameloop_afterloopcode(int iUseVRTest)
 {
-	// first save current level stats before reset LUA
-	if ( t.game.allowfragmentation == 2 )
+	// Keep Classic's original process-restart state transfer. For ordinary
+	// standalone level jumps, PW Edition can opt into the very same Lua format.
+	// Never carry over stats on quit, multiplayer, or returning to the main menu.
+	const bool pwInProcessJump = t.game.allowfragmentation == 1
+		&& t.game.gameisexe == 1
+		&& t.game.runasmultiplayer == 0
+		&& t.game.quitflag == 0
+		&& Len(t.game.jumplevel_s.Get()) > 0
+		&& pw_keep_player_stats_between_levels();
+	bool pwCanWriteFreshStatsFile = false;
+	if (pwInProcessJump)
+	{
+		g_pwHealthAcrossLevels = t.player[t.plrid].health;
+		g_pwLivesAcrossLevels = t.player[t.plrid].lives;
+		g_pwInProcessStatsPending = true;
+		g_pwInProcessLuaStatsAvailable = false;
+		// Prevent an older save file from being mistaken for this transition.
+		const char* pwStatsPath = "savegames\\standalonelevelstats.dat";
+		DWORD oldAttrs = GetFileAttributesA(pwStatsPath);
+		pwCanWriteFreshStatsFile = oldAttrs == INVALID_FILE_ATTRIBUTES || DeleteFileA(pwStatsPath) != 0;
+		if (pwCanWriteFreshStatsFile)
+		{
+			LuaSetInt("g_PlayerHealth", g_pwHealthAcrossLevels);
+			LuaSetInt("g_PlayerLives", g_pwLivesAcrossLevels);
+			// GameLoopSaveStats writes health/lives and the 10 weapon/ammo slots.
+		}
+		else
+		{
+			timestampactivity(0, "PW Edition: old level-stats file could not be cleared");
+		}
+	}
+	if (t.game.allowfragmentation == 2 || (pwInProcessJump && pwCanWriteFreshStatsFile))
 	{
 		char pLUACustomSaveCall[256];
 		strcpy ( pLUACustomSaveCall, "GameLoopSaveStats" );
-		LuaSetFunction ( pLUACustomSaveCall, 0, 0 ); 
+		LuaSetFunction ( pLUACustomSaveCall, 0, 0 );
 		LuaCall ( );
+		if (pwInProcessJump)
+		{
+			// Only read back the Lua weapon snapshot if a fresh one was created.
+			// Health/lives remain protected by the in-process fallback above.
+			const char* pwStatsPath = "savegames\\standalonelevelstats.dat";
+			g_pwInProcessLuaStatsAvailable = pwCanWriteFreshStatsFile &&
+				GetFileAttributesA(pwStatsPath) != INVALID_FILE_ATTRIBUTES;
+		}
 	}
 
 	// free any lua activity (restore FOV if ingame activity there)
@@ -2539,15 +2616,22 @@ void game_oneoff_nongraphics ( void )
 
 void game_loadinentitiesdatainlevel ( void )
 {
+	PWLoadTraceScope pwTraceEntitiesTotal("game.entities.total");
 	// Load player settings
 	timestampactivity(0,"Load player config");
-	mapfile_loadplayerconfig ( );
+	{
+		PWLoadTraceScope pwTracePlayerConfig("game.entities.player_config");
+		mapfile_loadplayerconfig ( );
+	}
 
 	// Load entity bank
 	t.screenprompt_s="LOADING ENTITY BANK";
 	if ( t.game.gameisexe == 0 ) printscreenprompt(t.screenprompt_s.Get()); else loadingpageprogress(5);
 	timestampactivity(0,t.screenprompt_s.Get());
-	entity_loadbank ( );
+	{
+		PWLoadTraceScope pwTraceEntityBank("game.entities.bank");
+		entity_loadbank ( );
+	}
 
 	#ifdef VRTECH
 	// Load entity elements
@@ -2555,16 +2639,23 @@ void game_loadinentitiesdatainlevel ( void )
 	if ( t.game.gameisexe == 0 ) printscreenprompt(t.screenprompt_s.Get()); else loadingpageprogress(5);
 	timestampactivity(0,t.screenprompt_s.Get());
 	#endif
-	entity_loadelementsdata ( );
+	{
+		PWLoadTraceScope pwTraceEntityElements("game.entities.elements");
+		entity_loadelementsdata ( );
+	}
 }
 
 void game_loadinleveldata ( void )
 {
+	PWLoadTraceScope pwTraceLevelDataTotal("game.level_data.total");
 	//  Load waypoints
 	t.screenprompt_s="LOADING WAYPOINTS DATA";
 	if (  t.game.gameisexe == 0  )  printscreenprompt(t.screenprompt_s.Get()); else loadingpageprogress(5);
 	timestampactivity(0,t.screenprompt_s.Get());
-	waypoint_loaddata ( );
+	{
+		PWLoadTraceScope pwTraceWaypoints("game.level_data.waypoints");
+		waypoint_loaddata ( );
+	}
 	if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
 	waypoint_recreateobjs ( );
 	if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
@@ -2573,7 +2664,10 @@ void game_loadinleveldata ( void )
 	t.screenprompt_s="LOADING TERRAIN DATA";
 	if (  t.game.gameisexe == 0  )  printscreenprompt(t.screenprompt_s.Get()); else loadingpageprogress(5);
 	timestampactivity(0,t.screenprompt_s.Get());
-	terrain_loaddata ( );
+	{
+		PWLoadTraceScope pwTraceTerrainLoad("game.level_data.terrain");
+		terrain_loaddata ( );
+	}
 	if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
 
 	//  Recreate all entities in level
@@ -2581,10 +2675,13 @@ void game_loadinleveldata ( void )
 	if (  t.game.gameisexe == 0  )  printscreenprompt(t.screenprompt_s.Get()); else loadingpageprogress(5);
 	timestampactivity(0,t.screenprompt_s.Get());
 
-	for ( t.tupdatee = 1 ; t.tupdatee<=  g.entityelementlist; t.tupdatee++ )
 	{
-		entity_updateentityobj ( );
-		if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
+		PWLoadTraceScope pwTraceSpawnEntities("game.level_data.create_entities");
+		for ( t.tupdatee = 1 ; t.tupdatee<=  g.entityelementlist; t.tupdatee++ )
+		{
+			entity_updateentityobj ( );
+			if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
+		}
 	}
 	t.terrain.terrainpainteroneshot=0;
 
@@ -2632,6 +2729,7 @@ float GetWAVtoLIPProgress(void);
 
 void game_preparelevel ( void )
 {
+	PWLoadTraceScope pwTracePrepareTotal("game.prepare.total");
 	//Dave Performance - ensure sound volume is 0
 	// 271115 - Dave, you just wiped out all dynamic music volume!
 	//g.musicsystem.percentageVolume = 0;
@@ -2673,7 +2771,10 @@ void game_preparelevel ( void )
 	t.screenprompt_s="LOADING HUD GRAPHICS";
 	if (  t.game.gameisexe == 0  )  printscreenprompt(t.screenprompt_s.Get()); else loadingpageprogress(5);
 	timestampactivity(0,t.screenprompt_s.Get());
-	hud_init ( );
+	{
+		PWLoadTraceScope pwTraceHUD("game.prepare.hud");
+		hud_init ( );
+	}
 
 	//  Load sky spec (for any shaders later that require sun-pos)
 	t.screenprompt_s="LOADING SKY";
@@ -2706,9 +2807,12 @@ void game_preparelevel ( void )
 	#endif	
 	if (  t.game.gameisexe == 0  )  printscreenprompt(t.screenprompt_s.Get()); else loadingpageprogress(5);
 	timestampactivity(0,t.screenprompt_s.Get());
-	gun_activategunsfromentities ( );
-	gun_setup ( );
-	gun_loadonlypresent ( );
+	{
+		PWLoadTraceScope pwTraceWeapons("game.prepare.weapons");
+		gun_activategunsfromentities ( );
+		gun_setup ( );
+		gun_loadonlypresent ( );
+	}
 
 	if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
 
@@ -2747,7 +2851,10 @@ void game_preparelevel ( void )
 	t.screenprompt_s="PREPARING A.I SYSTEM";
 	if (  t.game.gameisexe == 0  )  printscreenprompt(t.screenprompt_s.Get()); else loadingpageprogress(5);
 	timestampactivity(0,t.screenprompt_s.Get());
-	darkai_preparedata ( );
+	{
+		PWLoadTraceScope pwTraceAIPathData("game.prepare.ai_path_data");
+		darkai_preparedata ( );
+	}
 
 	//  Reset waypoint for game activity
 	t.screenprompt_s="RESETTING WAYPOINTS A.I";
@@ -2766,7 +2873,10 @@ void game_preparelevel ( void )
 	t.screenprompt_s="CREATING CHARACTERS";
 	if (  t.game.gameisexe == 0  )  printscreenprompt(t.screenprompt_s.Get()); else loadingpageprogress(5);
 	timestampactivity(0,t.screenprompt_s.Get());
-	darkai_setup_characters ( );
+	{
+		PWLoadTraceScope pwTraceAICharacters("game.prepare.ai_characters");
+		darkai_setup_characters ( );
+	}
 	if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
 
 	//  When all static entities added, complete obstacle map
@@ -2777,7 +2887,10 @@ void game_preparelevel ( void )
 		timestampactivity(0,t.screenprompt_s.Get());
 	}
 	if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
-	darkai_completeobstacles ( );
+	{
+		PWLoadTraceScope pwTraceAIObstacles("game.prepare.ai_obstacles");
+		darkai_completeobstacles ( );
+	}
 	if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
 
 	//  setup infinilights
@@ -2795,8 +2908,11 @@ void game_preparelevel ( void )
 	if ( t.game.runasmultiplayer == 1 ) mp_refresh ( );
 
 	//  load required scripts
-	lua_init ( );
-	lua_scanandloadactivescripts ( );
+	{
+		PWLoadTraceScope pwTraceScripts("game.prepare.scripts");
+		lua_init ( );
+		lua_scanandloadactivescripts ( );
+	}
 
 	#ifdef VRTECH
 	// if still generating LIP file, wait here
@@ -2813,7 +2929,10 @@ void game_preparelevel ( void )
 	#endif
 
 	// load entity sounds and video
-	entity_loadactivesoundsandvideo ( );
+	{
+		PWLoadTraceScope pwTraceMedia("game.prepare.entity_media");
+		entity_loadactivesoundsandvideo ( );
+	}
 }
 
 void game_preparelevel_forplayer ( void )
@@ -3248,25 +3367,37 @@ void game_stopallsounds ( void )
 
 void game_freelevel ( void )
 {
+	PWLoadTraceScope pwTraceLevelCleanup("game.transition.cleanup");
 	//  hide any jetpacks, etc
 	hud_free ( );
 
 	//  stop ALL sounds
 	game_stopallsounds();
 
-	// Delete occluder thread and close event handles (moved from free game which is too late for multi-level games)
-	if ( g_pOccluderThread )
+	// PW Edition: the original code waited for an occlusion pass but never
+	// stopped or released its worker or events. Terminate it before touching
+	// the previous level's entities, physics or graphics resources.
 	{
-		//Let the occluder know its time to finish
-		g_occluderOn = false;
-
-		//Dave Performance - let the occluder thread know it is okay to begin
-		if ( g_hOccluderBegin ) SetEvent ( g_hOccluderBegin );
-
-		//Dave Performance - wait for occluder to finish first
-		if ( g_hOccluderEnd ) WaitForSingleObject ( g_hOccluderEnd, INFINITE );
+		PWLoadTraceScope pwTraceOccluderShutdown("game.transition.occluder_shutdown");
+		if ( g_pOccluderThread )
+		{
+			g_occluderOn = false;
+			g_pOccluderThread->Stop();
+			if ( g_hOccluderBegin ) SetEvent(g_hOccluderBegin);
+			// Do not free any level objects while the occluder can still read them.
+			g_pOccluderThread->Join();
+			if ( g_pOccluderThread->pThread )
+			{
+				CloseHandle((HANDLE)g_pOccluderThread->pThread);
+				g_pOccluderThread->pThread = NULL;
+			}
+			delete g_pOccluderThread;
+			g_pOccluderThread = NULL;
+		}
+		if ( g_hOccluderBegin ) { CloseHandle(g_hOccluderBegin); g_hOccluderBegin = NULL; }
+		if ( g_hOccluderEnd ) { CloseHandle(g_hOccluderEnd); g_hOccluderEnd = NULL; }
 	}
-	
+
 	//  free any character AI related stuff
 	darkai_release_characters ( );
 	darkai_destroy_all_characterdata ( );
@@ -4491,9 +4622,22 @@ void game_jump_to_level_from_lua ( void )
 {
 	if (  t.game.gameisexe == 1 ) 
 	{
-		if (  t.game.gameloop == 1 && t.game.levelendingcycle  ==  0 ) 
+		if (  t.game.gameloop == 1 && t.game.levelendingcycle  ==  0 )
 		{
-			t.game.jumplevel_s = t.tleveltojump_s;
+			PWLevelFlow::Destination pwDestination;
+			if (!PWLevelFlow::Resolve(g.mysystem.mapbankAbs_s.Get(), t.tleveltojump_s.Get(), pwDestination))
+			{
+				// Reject bad or missing FPM before the game tears down this level.
+				// Preserve existing player, scripts and resources on error.
+				t.s_s = cstr("PW Edition: Cannot enter level '") + t.tleveltojump_s + "'.";
+				timestampactivity(0, t.s_s.Get());
+				lua_prompt();
+				return;
+			}
+			// While Classic's fade plays, optionally warm the next FPM in Windows' cache.
+			// No GameGuru state is accessed from this background worker.
+			PWLevelFlow::Prefetch(pwDestination);
+			t.game.jumplevel_s = pwDestination.relative.c_str();
 			t.game.levelendingcycle = 4000;
 		}
 	}

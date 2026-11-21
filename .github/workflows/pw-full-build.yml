@@ -1,0 +1,106 @@
+name: PW Edition full Windows build probe
+
+on:
+  push:
+    branches:
+      - work/pw-community-integration-20261121
+    paths:
+      - "GameGuru Core/**"
+      - "GameGuru IDE/**"
+      - ".github/workflows/pw-full-build.yml"
+  pull_request:
+    paths:
+      - "GameGuru Core/**"
+      - "GameGuru IDE/**"
+      - ".github/workflows/pw-full-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-x64-compile:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout source only
+        uses: actions/checkout@v4
+        with:
+          lfs: false
+      - name: Set up VS2022 MSBuild
+        uses: microsoft/setup-msbuild@v2
+      # Both static libraries are tracked as source projects rather than
+      # prebuilt .lib files. The core solution does not build them automatically.
+      - name: Prepare official Microsoft D3DX import libraries
+        shell: pwsh
+        run: |
+          ./tools/pw-prepare-d3dx.ps1
+          foreach ($lib in @('d3dx9.lib','d3dx11.lib')) {
+            $path = Join-Path 'GameGuru Core/SDK/DirectX/Lib/x64' $lib
+            if (-not (Test-Path $path)) { throw "Missing x64 library $path" }
+          }
+      - name: Build DirectXTex Release x64 dependency
+        shell: cmd
+        run: |
+          msbuild "GameGuru Core\SDK\DirectXTex\DirectXTex\DirectXTex_Desktop_2022.vcxproj" /t:Build /p:Configuration=Release /p:Platform=x64 /m:2 /nologo /v:minimal /fl /flp:logfile=pw-directxtex-build.log;verbosity=normal
+      - name: Build Effects11 Release x64 dependency
+        shell: cmd
+        run: |
+          msbuild "GameGuru Core\SDK\DirectX\Effect11\Effects11_2022.vcxproj" /t:Build /p:Configuration=Release /p:Platform=x64 /m:2 /nologo /v:minimal /fl /flp:logfile=pw-effects11-build.log;verbosity=normal
+      - name: Verify DirectX SDK libraries
+        shell: pwsh
+        run: |
+          foreach ($lib in @('GameGuru Core/SDK/DirectXTex/DirectXTex/Bin/Desktop_2022/x64/Release/DirectXTex.lib','GameGuru Core/SDK/DirectX/Effect11/Bin/Desktop_2022/x64/Release/Effects11.lib')) {
+            if (-not (Test-Path $lib)) { throw "Missing built library: $lib" }
+          }
+      - name: Build Ogg Vorbis static x64 dependencies
+        shell: cmd
+        run: |
+          msbuild "GameGuru Core\SDK\OGG\ogg_vorbis_static.sln" /t:Build /p:Configuration=Release /p:Platform=x64 /m:2 /nologo /v:minimal /fl /flp:logfile=pw-ogg-build.log;verbosity=normal
+      - name: Verify Ogg/Vorbis static libraries
+        shell: pwsh
+        run: |
+          foreach ($lib in @('ogg_static.lib','vorbis_static.lib','vorbisfile_static.lib')) {
+            $path = Join-Path 'GameGuru Core/SDK/OGG/lib64/Release' $lib
+            if (-not (Test-Path $path)) { throw "Missing Ogg static library $path" }
+          }
+      - name: Produce Steamworks x64 import libraries (symbols only)
+        shell: pwsh
+        run: |
+          ./tools/pw-prepare-steam-imports.ps1
+          foreach ($name in @('steam_api64.lib','sdkencryptedappticket64.lib')) {
+            $lib = Join-Path 'GameGuru Core/SDK/Steamworks SDK/redistributable_bin/win64' $name
+            if (-not (Test-Path $lib)) { throw "Missing generated linker metadata $lib" }
+          }
+      - name: Build complete GameGuru Core Release x64 solution
+        shell: cmd
+        run: |
+          msbuild "GameGuru Core\GameGuru.sln" /t:Build /p:Configuration=Release /p:Platform=x64 /m:2 /nologo /v:minimal /fl /flp:logfile=pw-core-build.log;verbosity=normal
+      # The original MFC GameGuru launcher has only Win32 configurations.
+      # Use the user's installed Steam launcher alongside the newly built x64 editor.
+      - name: Verify staged PW editor files
+        shell: pwsh
+        run: |
+          $root = 'PW-Build/Release'
+          foreach ($name in @('Guru-MapEditor.exe','pw-updater.ps1','pw-edition-version.txt','Files/scriptbank/global.lua','Files/scriptbank/pw_transition_state.lua','Files/effectbank/reloaded/apbr_animwithtran_emissive.fx')) {
+            if (-not (Test-Path (Join-Path $root $name))) { throw "Missing output: $name" }
+          }
+          # Distinguish the actual rebuilt editor from a stock executable that
+          # might have been staged by an outdated solution/output mapping.
+          $editor = Join-Path $root 'Guru-MapEditor.exe'
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $editor))
+          $imageText = [System.Text.Encoding]::Latin1.GetString($bytes)
+          if (-not $imageText.Contains('GameGuru Classic - PW Edition | ')) {
+            throw 'Editor output does not contain the PW Edition window-title marker'
+          }
+          Write-Host 'Verified: compiled PW branding is present in Guru-MapEditor.exe. Runtime tests still required.'
+      - name: Print build errors
+        if: failure()
+        shell: pwsh
+        run: |
+          foreach ($file in @('pw-directxtex-build.log','pw-effects11-build.log','pw-ogg-build.log','pw-core-build.log')) {
+            if (Test-Path $file) {
+              Get-Content $file | Select-String -Pattern 'error (C[0-9]+|LNK[0-9]+|MSB[0-9]+)|fatal error|error :' | Select-Object -Last 40 | ForEach-Object { Write-Host $_.Line }
+            }
+          }
+      # No public executable artifact, pending license verification.

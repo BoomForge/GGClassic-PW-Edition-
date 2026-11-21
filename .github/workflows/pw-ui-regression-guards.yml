@@ -1,0 +1,29 @@
+name: PW editor UI regression guards
+on:
+  push:
+    branches:
+      - work/pw-community-integration-20261121
+    paths:
+      - "GameGuru Core/GameGuru/Source/M-GridEdit.cpp"
+      - "tools/PWBootstrapper/Program.cs"
+      - "tools/test_pw_editor_ui_regression.py"
+      - ".github/workflows/pw-ui-regression-guards.yml"
+  pull_request:
+    paths:
+      - "GameGuru Core/GameGuru/Source/M-GridEdit.cpp"
+      - "tools/PWBootstrapper/Program.cs"
+      - "tools/test_pw_editor_ui_regression.py"
+      - ".github/workflows/pw-ui-regression-guards.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Guard against duplicate browser, fake icons, and missing-preview regressions
+        run: python -m unittest discover -s tools -p "test_pw_editor_ui_regression.py" -v

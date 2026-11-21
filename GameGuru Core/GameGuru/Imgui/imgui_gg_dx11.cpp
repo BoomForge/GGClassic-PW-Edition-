@@ -3724,8 +3724,8 @@ void ChangeGGFont(const char *cpcustomfont, int iIDEFontSize)
 	static const ImWchar Generic_ranges_all[] =
 	{
 		0x0020, 0x00FF, // Basic Latin + Latin Supplement
-		0x0100, 0x017F,	//0100 — 017F  	Latin Extended-A
-		0x0180, 0x024F,	//0180 — 024F  	Latin Extended-B
+		0x0100, 0x017F,	//0100 Â— 017F  	Latin Extended-A
+		0x0180, 0x024F,	//0180 Â— 024F  	Latin Extended-B
 		0,
 	};
 
@@ -3778,7 +3778,7 @@ void ChangeGGFont(const char *cpcustomfont, int iIDEFontSize)
 
 }
 
-struct case_insensitive_less : public std::binary_function< char, char, bool >
+struct case_insensitive_less
 {
 	bool operator () (char x, char y) const
 	{
@@ -5324,7 +5324,7 @@ void coreResetIMGUIFunctionalityPrefs(void)
 {
 	// this is called when MAXVERSION incremented
 	// and restores/resets all flags so that each NEW build
-	// provides users with a view of the STANDARD USER MOD£
+	// provides users with a view of the STANDARD USER MODÂ£
 	// not advanced or developer tools modes
 }
 

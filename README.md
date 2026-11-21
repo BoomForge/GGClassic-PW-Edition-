@@ -70,6 +70,21 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 - [x] **Blender/Mixamo FBX import hardening (source):** safe, case-insensitive FBX detection; find missing textures by basename alongside the model; retain DDS with additional PNG/TGA/JPEG fallback; guard null meshes, short filenames, full texture lists and legacy fixed-buffer path handling. This **does not yet fix bone/clip retargeting**.
 - [x] Added isolated VS2022 Windows x64 importer path and repeated worker-start/stop checks. [CI run #44838327649](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44838327649) passed those synthetic tests. The isolated checks pass at the latest development source commit; full GameGuru compilation and actual FBX/level behaviour remain unverified.
 
+### Windows build and local Steam overlay preparation (21 November 2026)
+
+- [x] Removed the machine-specific D-drive editor output paths, staging PW binaries in the repository-relative PW-Build/Release directory.
+- [x] Staged the new optional shader alongside the updater and Lua companion files.
+- [x] Added an opt-in, source-only Windows x64 full-solution compile probe. Until this passes, the fork is **not** a proven working binary.
+- [x] Added local overlay packaging, checksum verification, preview-first installation with backups, and a Windows compile-and-package command. The new checks are awaiting CI execution.
+- [ ] Verify a complete build and overlay against a licensed Steam install; no public binary is distributed.
+
+### PW Lua Studio (source implemented; Windows validation pending)
+
+- [x] Added Edit > Lua Script Editor... as a native modeless window inside Guru-MapEditor.exe (Windows RichEdit, not an external IDE). Open/New/Save/Save As and dirty-change confirmation included.
+- [x] Added syntax colouring for Lua keywords, comments, strings, numbers and known GameGuru functions, a searchable built-in command browser based on installed global.lua and PW state functions, and Ctrl+Space prefix completion.
+- [x] Scripts save as UTF-8 with a timestamped backup of the prior file; editing never executes or hot-reloads gameplay code.
+- [ ] Confirm full VS2022 compilation, editor focus, file I/O and coloured text on Windows. The editor is a separate native tool window (not yet ImGui dockable); autocomplete is symbol-based, not a language-server engine. See [Lua Studio notes](docs/PW_LUA_STUDIO.md).
+
 ### In progress — verification needed
 
 - [ ] **Level cleanup regression:** in a compiled editor and standalone game, inspect thread and event-handle counts over 25+ transitions, plus stalled occlusion and return-to-editor cases. The isolated C++ thread test is not a full game test.
@@ -84,6 +99,21 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 - [ ] **Shader validation:** compile and run the community animated alpha/emissive PBR shader; compare unchanged default shaders for regressions.
 - [ ] **Build and stability baseline:** compile the fork using Visual Studio 2022 x64 with the original legally owned GameGuru media and required dependencies; test editor launch, tiny FPS level, play/stop, save/reopen and standalone game.
 - [ ] **Loading-time investigation:** profiling hooks are committed and individually Windows-tested, but the full PW Edition engine has not been benchmarked. Measure cold startup, first test, repeat test, return to editor, and standalone load for an empty world and a populated small town. Then optimise the measured bottleneck and verify before/after results.
+
+### Model Importer 2 and Character Creator 2 — approved direction
+
+- [x] Native skeletal import inspection UI, non-destructive Mixamo/Bip01 mapping preview, and opt-in DBO save/reload check. [Implementation notes](docs/PW_SKELETAL_IMPORT_AUDIT.md). Runtime animation retargeting and character-creator rebuilding remain outstanding.
+- [x] Shared native deep skeletal DBO audit now checks bone bind matrices, per-vertex indices/weights, frame rest matrices and animation key payloads in both the importer and Character Creator exports, opt-in only. Standalone Windows integrity tests pass. Full game export/playback and retargeting remain unverified.
+- [ ] Rebuild both tools around shared asset material, rig, animation and export contracts, preserving legacy GameGuru features during migration. [Rebuild and Model Bridge research](docs/PW_MODEL_IMPORTER_CHARACTER_CREATOR_REBUILD.md).
+- [x] **Recover v1.0.7 embedded Model Bridge frontend sources from the owner-provided Go EXE:** 33 files, including FBX/GLTF/GLB preview, skinned DirectX X handling, mesh sampling and original tests; 30 JavaScript files passed syntax-only checks. Source packaged for owner; technical inventory in [rebuild research](docs/PW_MODEL_IMPORTER_CHARACTER_CREATOR_REBUILD.md). Not yet ported wholesale into the GameGuru native importer.
+- [ ] **Rebuild missing Go backend functionality and implement GameGuru native skeletal retarget/export:** web source recovered, but HTTP backend remains compiled, MD3 final format loses skeletal data, and the older v1.0.4 source ZIP is still unavailable.
+- [ ] Evaluate the separate M.I.L.O retro-character-creator-foundation branch for canonical low-poly body/rig, morph, hair/clothing and export design.
+
+### Local Windows test builds
+
+- [x] Safe local build-and-stage script for owned GameGuru Classic Steam files: [tools/pw-local-test.ps1](tools/pw-local-test.ps1). Compiles x64 in VS2022, stages into a separate `PW-TestInstall` folder, and does **not** overwrite Steam or publish proprietary EXEs.
+- [x] CI now restores the pinned official Microsoft D3DX import libraries (`d3dx11.lib`, `d3dx9.lib`) locally and builds vendored DirectXTex/Effects11 dependencies before full engine linking. [Build instructions](docs/PW_LOCAL_WINDOWS_TEST_BUILD.md).
+- [ ] Confirm full x64 CI engine + launcher build success and verify gameplay in a local Windows test install.
 
 ### To do — future upgrades
 
