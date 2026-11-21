@@ -394,6 +394,10 @@ try {
             // This supersedes our temporary, blue PW pictograms wherever an
             // authentic matching Classic resource is present.
             RestoreNativeClassicToolbar(built, steam, installFiles);
+            // Verify the actual graphics that will be visible after installation.
+            // A successful C++ compile is NOT evidence that stock Classic icon
+            // resources were present in the user's particular Steam build.
+            ReportUnrecoveredClassicArtwork(built, steam);
             foreach (var relative in installFiles)
                 if (!File.Exists(Path.Combine(built, relative)))
                     throw new FileNotFoundException("Required PW build output missing; nothing installed: " + relative);
@@ -722,6 +726,43 @@ try {
         }
         finally { FreeLibrary(module); }
         LogOutput("Recovered " + recovered + " authentic Classic toolbar icons from licensed GameGuru.exe; missing/unsupported: " + missing + ".");
+    }
+
+
+    static void ReportUnrecoveredClassicArtwork(string build, string steam)
+    {
+        string[] classicToolbarNames =
+        {
+            "newlevel.png", "loadlevel.png", "savelevel.png",
+            "entity.png", "markers.png", "builder.png",
+            "shape.png", "level.png", "storedlevel.png",
+            "blendmode.png", "rampmode.png", "painttexture.png",
+            "paintgrass.png", "newwaypoints.png", "waypoints.png",
+            "testgame.png", "socialvr.png"
+        };
+        var unresolved = new List<string>();
+        foreach (string name in classicToolbarNames)
+        {
+            string relative = Path.Combine("Files", "editors", "uiv3", name);
+            string staged = Path.Combine(build, relative);
+            string existing = Path.Combine(steam, relative);
+            bool stockStaged = File.Exists(staged) && !IsGeneratedPWIcon(staged);
+            bool stockExisting = File.Exists(existing) && !IsGeneratedPWIcon(existing) &&
+                                 !IsLegacyPWTextTile(existing, false);
+            if (!stockStaged && !stockExisting) unresolved.Add(name);
+        }
+        if (unresolved.Count > 0)
+        {
+            LogOutput("PW UI ARTWORK WARNING: " + unresolved.Count +
+                " genuine Classic toolbar bitmaps were not recoverable from this machine.");
+            LogOutput("Not restored: " + string.Join(", ", unresolved));
+            LogOutput("These were NOT regenerated or represented as genuine Classic artwork. " +
+                "Original source graphics must be present in a licensed local build, " +
+                "its backups or the original stock GameGuru.exe resources.");
+        }
+        else
+            LogOutput("All " + classicToolbarNames.Length +
+                " target Classic toolbar graphics found in installed or staged local files.");
     }
 
     static bool HasCompiledPWBrand(string exe)
