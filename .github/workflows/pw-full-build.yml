@@ -78,7 +78,15 @@ jobs:
           foreach ($name in @('Guru-MapEditor.exe','pw-updater.ps1','pw-edition-version.txt','Files/scriptbank/global.lua','Files/scriptbank/pw_transition_state.lua','Files/effectbank/reloaded/apbr_animwithtran_emissive.fx')) {
             if (-not (Test-Path (Join-Path $root $name))) { throw "Missing output: $name" }
           }
-          Write-Host 'Build files exist; runtime tests still required.'
+          # Distinguish the actual rebuilt editor from a stock executable that
+          # might have been staged by an outdated solution/output mapping.
+          $editor = Join-Path $root 'Guru-MapEditor.exe'
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $editor))
+          $imageText = [System.Text.Encoding]::Latin1.GetString($bytes)
+          if (-not $imageText.Contains('GameGuru Classic - PW Edition | ')) {
+            throw 'Editor output does not contain the PW Edition window-title marker'
+          }
+          Write-Host 'Verified: compiled PW branding is present in Guru-MapEditor.exe. Runtime tests still required.'
       - name: Print build errors
         if: failure()
         shell: pwsh
