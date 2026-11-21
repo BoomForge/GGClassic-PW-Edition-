@@ -22,7 +22,7 @@ jobs:
       - name: Find Visual Studio 2022
         shell: cmd
         run: |
-          for /f "usebackq tokens=*" %%i in ("%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath) do set "VS_PATH=%%i"
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do set "VS_PATH=%%i"
           if not defined VS_PATH exit /b 1
           echo VS_PATH=%VS_PATH%>> "%GITHUB_ENV%"
       - name: Compile the native Lua editor code
