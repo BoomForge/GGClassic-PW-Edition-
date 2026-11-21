@@ -49,3 +49,21 @@ Remediation committed:
 - `.github/workflows/pw-d3dx-ps51.yml` tests the dependency script using the actual `powershell.exe` 5.1 runtime on Windows Server 2022, rather than only GitHub runner `pwsh` 7. The first Windows PowerShell 5.1 tests passed at GitHub Actions runs 44871381726 and 44871385121.
 
 This does not imply a completed local build or successful Steam installation. The new executable must be tested on the owner's PC, and later missing SDK/link/runtime problems remain possible. The no-write-before-full-build and backup/rollback safeguards remain intact.
+
+
+## PW Edition identity, launch and installation verification (21 November)
+
+A successful locally compiled install originally copied a new \`Guru-MapEditor.exe\` into the chosen Steam directory but intentionally left Steam's \`GameGuru.exe\` unchanged. Steam's Play action may invoke a stock launcher, and the original editor title was still hardcoded to \`GameGuru - \`. That combination made the upgraded editor appear absent even if a built EXE was present. Source inspection identified this as a delivery/identity oversight; we have no machine access to confirm what the owner actually launched.
+
+The repaired installation now:
+- Requires a distinctive compiled \`GameGuru Classic - PW Edition | \` string inside the freshly produced \`Guru-MapEditor.exe\` before **any install**. If missing, refuse to install rather than claim success.
+- Gives the editor a PW Edition window title, clearly visible \`PW Edition\` top-level menu, and a labelled About section. The menu can display the currently running executable path.
+- Includes a named \`Launch-PW-Edition.cmd\` alongside the rebuilt editor so users can launch the right EXE, not \`GameGuru.exe\`.
+- Includes the independently authored \`Pixelwolf-GGC-Updater.exe\` beside \`Guru-MapEditor.exe\`. The editor's update command launches this tool on the same installation (not the old release-only PowerShell helper) after running the existing save/exit guard. The script remains staged for a future supported GitHub release channel.
+- Installs \`pw-installed-commit.txt\`, containing the source SHA from the actual checkout, and retains the existing \`pw-edition-version.txt\` version marker.
+- Verifies the installed editor's SHA-256 equals the compiled output, then **offers to launch the newly installed editor directly** with its Steam root as working directory.
+- Leaves licensed Steam \`GameGuru.exe\`, media, saved levels and user project files unchanged. Original replaced files are still backed up; failed installation attempts roll back.
+
+If the Steam launcher still looks stock, use Steam > Manage > Browse local files and run \`Guru-MapEditor.exe\` or \`Launch-PW-Edition.cmd\`. The PW version has a \`PW Edition\` menu and an \`Edit > Lua Script Editor\` entry. The new internal update command opens the standalone source-building updater; it does not promise instant binary patching or public release availability yet.
+
+Actual editor runtime, Steam launcher routing, user account permissions and in-engine auto-update UX must still be tested locally. CI separately verifies that the compiled editor contains the distinctive PW title string.
