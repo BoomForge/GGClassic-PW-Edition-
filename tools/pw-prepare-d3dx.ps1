@@ -13,7 +13,7 @@ New-Item -ItemType Directory -Force -Path $cache,$libraryDir | Out-Null
 if (-not (Test-Path $unpacked)) {
     $url = "https://api.nuget.org/v3-flatcontainer/microsoft.dxsdk.d3dx/$PackageVersion/microsoft.dxsdk.d3dx.$PackageVersion.nupkg"
     Write-Host "Retrieving Microsoft.DXSDK.D3DX $PackageVersion from NuGet.org"
-    Invoke-WebRequest -Uri $url -OutFile $archive -MaximumRedirection 5
+    Invoke-WebRequest -Uri $url -OutFile $archive -MaximumRedirection 5 -UseBasicParsing
     New-Item -ItemType Directory -Force -Path $unpacked | Out-Null
     Expand-Archive -LiteralPath $archive -DestinationPath $unpacked -Force
 }
