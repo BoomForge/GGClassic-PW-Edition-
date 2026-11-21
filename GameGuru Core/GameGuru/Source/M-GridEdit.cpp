@@ -3079,13 +3079,13 @@ void mapeditorexecutable_loop(void)
 		if (refresh_gui_docking == 0)
 		{
 			//Make sure window is setup in docking space.
-			ImGui::Begin("Tutorial Video##HelpVideoWindow", &bHelpVideo_Window, iGenralWindowsFlags);
+			ImGui::Begin("Tutorial Video##HelpVideoWindow", &bHelpVideo_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
-			ImGui::Begin("Tutorial Steps##HelpWindow", &bHelp_Window, iGenralWindowsFlags);
+			ImGui::Begin("Tutorial Steps##HelpWindow", &bHelp_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
-			ImGui::Begin("Tutorial Video##LeftHelpVideoWindow", &bHelpVideo_Window, iGenralWindowsFlags);
+			ImGui::Begin("Tutorial Video##LeftHelpVideoWindow", &bHelpVideo_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
-			ImGui::Begin("Tutorial Steps##LeftHelpWindow", &bHelp_Window, iGenralWindowsFlags);
+			ImGui::Begin("Tutorial Steps##LeftHelpWindow", &bHelp_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
 		}
 		else if (bHelp_Window && tutorial_files.size() > 0)
@@ -3153,7 +3153,7 @@ void mapeditorexecutable_loop(void)
 			}
 			else 
 			{
-				ImGui::Begin(cTutWindowVideoName, &bHelpVideo_Window, iGenralWindowsFlags);
+				ImGui::Begin(cTutWindowVideoName, &bHelpVideo_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			}
 			ImGui::Indent(10);
 			ImGui::PushItemWidth(-10);
@@ -3396,7 +3396,7 @@ void mapeditorexecutable_loop(void)
 
 			///
 
-			ImGui::Begin(cTutWindowStepsName, &bHelp_Window, iGenralWindowsFlags);
+			ImGui::Begin(cTutWindowStepsName, &bHelp_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 
 			ImGui::PushItemWidth(-10);
 			if (ImGui::StyleButton(tut.cStartText, ImVec2(ImGui::GetContentRegionAvail().x - 10.0f, 0.0f))) {
@@ -3732,7 +3732,7 @@ void mapeditorexecutable_loop(void)
 		if (refresh_gui_docking == 0 && !bImporter_Window) 
 		{
 			//Make sure window is setup in docking space.
-			ImGui::Begin("Importer##ImporterWindow", &bImporter_Window, iGenralWindowsFlags);
+			ImGui::Begin("Importer##ImporterWindow", &bImporter_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
 		}
 		imgui_importer_loop();
@@ -4398,7 +4398,7 @@ void mapeditorexecutable_loop(void)
 		if (refresh_gui_docking == 0 && !bWaypoint_Window) 
 		{
 			//Make sure window is setup in docking space.
-			ImGui::Begin("Waypoints##WaypointsToolsWindow", &bWaypoint_Window, iGenralWindowsFlags);
+			ImGui::Begin("Waypoints##WaypointsToolsWindow", &bWaypoint_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
 		}
 		waypoint_imgui_loop();
@@ -4412,7 +4412,7 @@ void mapeditorexecutable_loop(void)
 		{
 			//Make sure window is setup in docking space.
 			bool bTrue = true;
-			ImGui::Begin("Terrain Tools##TerrainToolsWindow", &bTerrain_Tools_Window, iGenralWindowsFlags);
+			ImGui::Begin("Terrain Tools##TerrainToolsWindow", &bTerrain_Tools_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
 			bTerrainToolsDocked = true;
 		}
@@ -4428,7 +4428,7 @@ void mapeditorexecutable_loop(void)
 		if (refresh_gui_docking == 0 && !bBuilder_Properties_Window) 
 		{
 			//Make sure window is setup in docking space.
-			ImGui::Begin("Structure Properties##BuilderPropertiesWindow", &bBuilder_Properties_Window, iGenralWindowsFlags);
+			ImGui::Begin("Structure Properties##BuilderPropertiesWindow", &bBuilder_Properties_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
 		}
 		else {
@@ -4446,7 +4446,7 @@ void mapeditorexecutable_loop(void)
 		if (refresh_gui_docking == 0 && !g_bCharacterCreatorPlusActivated) 
 		{
 			//Make sure window is setup in docking space.
-			ImGui::Begin("Character Creator##PropertiesWindow", &g_bCharacterCreatorPlusActivated, iGenralWindowsFlags);  //cyb
+			ImGui::Begin("Character Creator##PropertiesWindow", &g_bCharacterCreatorPlusActivated, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);  //cyb
 			ImGui::End();
 		}
 		charactercreatorplus_imgui();
@@ -4464,7 +4464,7 @@ void mapeditorexecutable_loop(void)
 		if (refresh_gui_docking == 0) 
 		{
 			//Need to be here while first time docking.
-			ImGui::Begin("Entity Properties##PropertiesWindow", &bEntity_Properties_Window, iGenralWindowsFlags);
+			ImGui::Begin("Entity Properties##PropertiesWindow", &bEntity_Properties_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
 		}
 		else if (bEntity_Properties_Window) {
@@ -4540,7 +4540,7 @@ void mapeditorexecutable_loop(void)
 				}
 
 
-				ImGui::Begin("Entity Properties##PropertiesWindow", &bEntity_Properties_Window, iGenralWindowsFlags);
+				ImGui::Begin("Entity Properties##PropertiesWindow", &bEntity_Properties_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 
 				int media_icon_size = 64;
 				ImGui::BeginChild("##cEntitiesPropertiesHeader", ImVec2(0, 0),false, iGenralWindowsFlags);
@@ -6104,9 +6104,9 @@ void mapeditorexecutable_loop(void)
 		if (refresh_gui_docking == 0) 
 		{
 			bool bOpen = true;
-			ImGui::Begin(TABENTITYNAME, &bOpen, iGenralWindowsFlags);
+			ImGui::Begin(TABENTITYNAME, &bOpen, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
-			ImGui::Begin("Current Objects##AdditionalIconsWindow", &bOpen, iGenralWindowsFlags);
+			ImGui::Begin("Current Objects##AdditionalIconsWindow", &bOpen, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
 		}
 		if (refresh_gui_docking > 0) 
