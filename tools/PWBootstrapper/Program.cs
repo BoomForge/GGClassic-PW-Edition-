@@ -75,7 +75,7 @@ internal static class Program
 
         using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
         http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("Pixelwolf-GGC-Updater", "0.1"));
-        string api = $"https://api.github.com/repos/{Owner}/{Repo}/commits/{Uri.EscapeDataString(Branch)}";
+        string api = $"https://api.github.com/repos/{Owner}/{Repo}/commits/{Branch}";
         Console.WriteLine("Looking up branch HEAD...");
         using var data = JsonDocument.Parse(await http.GetStringAsync(api));
         string sha = data.RootElement.GetProperty("sha").GetString()!;
