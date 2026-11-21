@@ -46,6 +46,8 @@ M2 — **Preview and edit:** orbit/pan/zoom, reference-scale grid, transform ori
 
 M3 — **Skeleton and animation:** preserve original skeleton, bind pose, vertex weights and clip ranges; interactive bone mapping and clip preview. Add an explicit, versioned GameGuru/Pixelwolf humanoid retarget profile for Mixamo and Blender. Correct axes, bind poses, scale, root motion and frames. Do not pretend arbitrary skeletons retarget automatically. Offer baked animation only as a clearly labeled fallback with limitations.
 
+M3.5 — **Weapon binding and attachment (approved requirement, pending implementation):** Provide a reusable socket/attachment workflow for imported and Character Creator 2 humanoids. Bind a weapon or held prop to a selected skeleton bone (typically right or left hand) with adjustable local position, rotation and scale; preserve grip orientation as the character moves and plays idle, walk, attack and reload animations. Support weapon/prop swapping and optional additional holster/back/hip attachment points without altering the underlying source skeleton. Store socket name, target bone, local transform and weapon asset reference in a versioned, editable profile that survives model save/reopen and native GameGuru entity/game export. Resolve Mixamo and Bip01 bone naming through an explicit mapping with missing-bone warnings; never silently attach to the wrong bone. Validate both preview attachment and actual in-game weapon alignment, including animation transitions, and guard against dropped/skinned/unbound weapons. **This is weapon-to-character skeleton attachment, not cross-level weapon/ammo persistence or input-key binding.**
+
 M4 — **Safe native export:** stage generated DBO/FPE/textures in a temporary directory, validate, back up existing files before overwrite and commit only after successful checks. End-to-end test Blender static FBX, mixed materials, Mixamo rigs, missing textures, long paths, map save/reopen, Test Level, standalone export and animation playback.
 
 ### Character Creator 2
@@ -54,7 +56,18 @@ C1 — **Canonical, versioned body + rig:** deliberately low-poly base topology,
 
 C2 — **Practical creation UI:** choose a base, change stature/build/head/face/skin, add swappable hair/clothes/accessories, preview animation, save and reopen editable presets. Clothing uses anchored bones and optional region masks to reduce clipping. Keep comfortable PS1–PS2 era defaults.
 
+C2.5 — **Equipment / weapon sockets:** Use the same shared M3.5 attachment profile from Importer 2 rather than maintaining a second, incompatible Character Creator weapon-binding system. Allow left/right-hand grip selection and offset adjustment in character preview, optionally back/hip stow points, and preserve the chosen binding when exporting/reopening a character.
+
 C3 — **Shared animation and export:** reuse Importer 2's bones/retarget/clip preview and native GameGuru entity exporter. Characters remain editable via a separate preset, while game assets save to normal GameGuru-compatible FPE/DBO/texture files. Validate idle/walk/run/attack and any supported facial/eye systems.
+
+### Weapon-binding acceptance gate (not yet implemented)
+
+- [ ] Import a weapon model (existing X/DBO and an FBX example) and attach it to a chosen hand bone on an imported humanoid.
+- [ ] Adjust local grip position/rotation/scale, save an editable socket profile, reopen it and retain exact weapon alignment.
+- [ ] Switch between left/right-hand or alternative named sockets; clearly warn on a missing or ambiguous target bone, including Mixamo/Bip01 mappings.
+- [ ] Preview idle/walk/attack/reload motions with the weapon following the chosen bone without sliding or separate animation desynchronisation.
+- [ ] Test weapon swapping and optional sheathed attachment on back/hip; never modify mesh skin weights or destructive animation keys just to bind the prop.
+- [ ] Verify exported GameGuru FPE/DBO and standalone game behaviour; distinguish native GameGuru gun logic and projectile/hit detection from visual skeleton attachment.
 
 ## Engineering order and compatibility gates
 
