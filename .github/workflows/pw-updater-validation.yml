@@ -24,8 +24,11 @@ jobs:
           python-version: "3.11"
       - name: Test release package allowlist and hashes
         shell: pwsh
-        run: python -m unittest discover -s tools -p "test_make_pw_release.py" -v
+        run: |
+          python -m unittest discover -s tools -p "test_make_pw_release.py" -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m unittest discover -s tools -p "test_pw_steam_overlay.py" -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Check Windows PowerShell updater syntax
         shell: powershell
         run: |
