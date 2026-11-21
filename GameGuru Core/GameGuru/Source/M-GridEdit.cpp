@@ -21350,7 +21350,17 @@ void get_tutorials(void)
 	cStr tOldDir = GetDir();
 
 	tutorial_files.clear();
-	
+
+	// PW Edition: Steam installations may not include the optional tutorialbank.
+	// Dark Basic SetDir displays a blocking "Path Cannot Be Found" dialog
+	// if the directory is absent; simply leave the tutorial list empty instead.
+	const DWORD tutorialAttributes = GetFileAttributesA("tutorialbank");
+	if (tutorialAttributes == INVALID_FILE_ATTRIBUTES ||
+		(tutorialAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+	{
+		return;
+	}
+
 	SetDir("tutorialbank");
 
 	ChecklistForFiles();
