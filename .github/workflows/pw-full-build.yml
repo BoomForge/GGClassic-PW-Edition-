@@ -1,6 +1,13 @@
 name: PW Edition full Windows build probe
 
 on:
+  push:
+    branches:
+      - work/pw-community-integration-20261121
+    paths:
+      - "GameGuru Core/**"
+      - "GameGuru IDE/**"
+      - ".github/workflows/pw-full-build.yml"
   pull_request:
     paths:
       - "GameGuru Core/**"
