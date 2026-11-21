@@ -75,7 +75,8 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 - [x] Removed the machine-specific D-drive editor output paths, staging PW binaries in the repository-relative PW-Build/Release directory.
 - [x] Staged the new optional shader alongside the updater and Lua companion files.
 - [x] Added an opt-in, source-only Windows x64 full-solution compile probe. Until this passes, the fork is **not** a proven working binary.
-- [ ] Create and verify a PW Edition drop-in overlay for a legitimately owned Steam install. No binaries are published without confirming the distribution licence.
+- [x] Added local overlay packaging, checksum verification, preview-first installation with backups, and a Windows compile-and-package command. The new checks are awaiting CI execution.
+- [ ] Verify a complete build and overlay against a licensed Steam install; no public binary is distributed.
 
 ### In progress — verification needed
 

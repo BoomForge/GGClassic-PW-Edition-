@@ -10,6 +10,8 @@ The GameGuru.exe frontend is a separate project: GameGuru IDE/GameGuru IDE.sln. 
 
 A new .github/workflows/pw-full-build.yml source-only Windows CI job attempts a full build, but cannot prove runtime stability, availability of licensed dependencies, or publisher permission to distribute EXEs. No public binary artifact is uploaded.
 
+You can also run `tools/build_pw_windows.cmd` on Windows for a single VS2022 x64 compile-and-package step. It logs to `PW-Build/pw-windows-build.log`, checks for the expected executable and required companion files, and never touches Steam. An optional first argument supplies the version (default `0.1.0`).
+
 ## Local overlay ZIP from a successful build
 
 Run from repo root with Python 3.11+:
