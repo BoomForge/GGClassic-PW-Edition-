@@ -33,6 +33,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Updater compilation failed" }
           if (-not (Test-Path 'PWBootstrapper-dist/Pixelwolf-GGC-Updater.exe')) { throw "EXE missing" }
           Get-FileHash 'PWBootstrapper-dist/Pixelwolf-GGC-Updater.exe' -Algorithm SHA256 | Format-List
+      - name: Smoke-test real Windows GDI toolbar resource cleanup
+        shell: pwsh
+        run: |
+          # The last updater crashed only at runtime because a DllImport method
+          # name was not an exported Win32 entry point. Invoke the compiled EXE.
+          & ./PWBootstrapper-dist/Pixelwolf-GGC-Updater.exe --self-test-native-icons
+          if ($LASTEXITCODE -ne 0) { throw "Native GDI toolbar cleanup failed with exit $LASTEXITCODE" }
       - name: Smoke-test self-replacement helper on Windows PowerShell 5.1
         shell: pwsh
         run: |
