@@ -6124,7 +6124,11 @@ void mapeditorexecutable_loop(void)
 
 			int iWinFlags = 0;
 			bool bAlwaysOpen = true;
-			ImGui::Begin(TABENTITYNAME, &bAlwaysOpen, iGenralWindowsFlags | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove); //, &bAlwaysOpen, iWinFlags);
+			ImGui::Begin(TABENTITYNAME, &bAlwaysOpen, iGenralWindowsFlags | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove);
+			// Recover the actual lower node when ImGui restores a saved layout;
+			// otherwise the library can lose its dock on the next startup.
+			if (ImGui::IsWindowDocked())
+				g_pwBottomAssetDockId = ImGui::GetWindowDockID(); //, &bAlwaysOpen, iWinFlags);
 			static char cSearchEntities[1024] = "\0";
 
 			ImGui::BeginChild("##ChirlEntitiesLeftPanel", ImVec2(ImGui::GetWindowSize().x - 2.0f, fsy*3.0), false, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoNavInputs); //ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_AlwaysHorizontalScrollbar
