@@ -27,6 +27,7 @@
 #include "..\Imgui\imgui_internal.h"
 #include "..\Imgui\imgui_impl_win32.h"
 #include "..\Imgui\imgui_gg_dx11.h"
+#include "PW-LuaStudio.h"
 #endif
 
 #ifdef PETESTING
@@ -1956,6 +1957,9 @@ void mapeditorexecutable_loop(void)
 
 			if (ImGui::BeginMenu("Edit"))
 			{
+				if (ImGui::MenuItem("Lua Script Editor...")) PWLuaStudio::Open(GetActiveWindow());
+				ImGui::Separator();
+
 				if (ImGui::MenuItem("Undo","CTRL+Z")) 
 				{
 					t.inputsys.doundo = 1;

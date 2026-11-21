@@ -78,6 +78,13 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 - [x] Added local overlay packaging, checksum verification, preview-first installation with backups, and a Windows compile-and-package command. The new checks are awaiting CI execution.
 - [ ] Verify a complete build and overlay against a licensed Steam install; no public binary is distributed.
 
+### PW Lua Studio (source implemented; Windows validation pending)
+
+- [x] Added Edit > Lua Script Editor... as a native modeless window inside Guru-MapEditor.exe (Windows RichEdit, not an external IDE). Open/New/Save/Save As and dirty-change confirmation included.
+- [x] Added syntax colouring for Lua keywords, comments, strings, numbers and known GameGuru functions, a searchable built-in command browser based on installed global.lua and PW state functions, and Ctrl+Space prefix completion.
+- [x] Scripts save as UTF-8 with a timestamped backup of the prior file; editing never executes or hot-reloads gameplay code.
+- [ ] Confirm full VS2022 compilation, editor focus, file I/O and coloured text on Windows. The editor is a separate native tool window (not yet ImGui dockable); autocomplete is symbol-based, not a language-server engine. See [Lua Studio notes](docs/PW_LUA_STUDIO.md).
+
 ### In progress — verification needed
 
 - [ ] **Level cleanup regression:** in a compiled editor and standalone game, inspect thread and event-handle counts over 25+ transitions, plus stalled occlusion and return-to-editor cases. The isolated C++ thread test is not a full game test.
