@@ -75,6 +75,14 @@ python tools/make_pw_release.py --build-dir "D:\GGClassic-PW-Build" --version 0.
 
 Do not publish any modified GameGuru script/media without confirming the applicable source and redistribution licence.
 
+## Future player-profile save/load request (22 November 2026)
+
+A separate, **unimplemented** engine-wide feature request proposes old-console-style player profiles with a single logical save file per player. Manual, checkpoint and autosave operations should record gameplay progress, then allow loading that profile after quitting and restarting a standalone game. The intended state includes level/position, health/lives, weapons/ammo and developer-selected Lua/quest/inventory values, with versioned serialization, safe atomic writes and corrupt-file recovery.
+
+**Do not confuse the existing level-transition module with this proposed profile-save service.** The current module persists a limited set of explicitly registered values when moving between connected levels; it does not automatically capture all engine variables, and is not a general cross-session save manager.
+
+See [general-purpose engine requests](PIXELWOLF_CLASSIC_ROADMAP.md#general-purpose-game-system-requests--22-november-2026) for the profile-saving requirements and tests.
+
 ## Deferred acceptance — do not mark as gameplay-tested
 
 - [ ] Compile the full 64-bit editor, with installed licensed GameGuru media.
