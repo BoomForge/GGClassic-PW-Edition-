@@ -140,7 +140,8 @@ static void PWEnsureSceneProject()
     const char* current = g.projectfilename_s.Get();
     const std::string path = current ? current : "";
     if (g_pwFolderProjectSeen && path == g_pwFolderProject) return;
-    const bool firstSavedCopy = g_pwFolderProjectSeen && g_pwFolderProject.empty() &&
+    const bool firstSavedCopy = g_pwFolderProjectSeen &&
+                                !PWSceneIsSavedProject(g_pwFolderProject) &&
                                 g_pwFolderDirty && PWSceneIsSavedProject(path);
     g_pwFolderProject = path;
     g_pwFolderProjectSeen = true;
@@ -310,6 +311,9 @@ static void PWDrawSceneEntity(int e,
     if (ImGui::BeginPopupContextItem("PWEntityActions"))
     {
         if (ImGui::MenuItem("Select")) PWSelectHierarchyEntity(e);
+        if (ImGui::MenuItem("Edit Lua Script..."))
+            PWLuaStudio::OpenEntityScript(GetActiveWindow(),
+                t.entityelement[e].eleprof.aimain_s.Get());
         if (ImGui::MenuItem("Unparent / move to scene root",
             nullptr, false, !locked && (t.entityelement[e].iHasParentIndex != 0 ||
                                         g_pwEntityFolders.count(e) != 0)))
@@ -370,10 +374,15 @@ static void PWDrawSceneFolder(int folderId,
         std::vector<int> subfolders;
         for (const auto& f : g_pwFolders) if (f.parent == folderId) subfolders.push_back(f.id);
         for (int id : subfolders) PWDrawSceneFolder(id, children, displayed, depth + 1);
+        // Item drag/drop can modify the entity->folder map. Render a stable
+        // list of IDs rather than iterating while erasing/reparenting.
+        std::vector<int> folderEntities;
         for (const auto& entry : g_pwEntityFolders)
             if (entry.second == folderId && PWValidSceneEntity(entry.first) &&
                 t.entityelement[entry.first].iHasParentIndex == 0)
-                PWDrawSceneEntity(entry.first, children, displayed, depth + 1);
+                folderEntities.push_back(entry.first);
+        for (int e : folderEntities)
+            PWDrawSceneEntity(e, children, displayed, depth + 1);
         ImGui::TreePop();
     }
     ImGui::PopID();
@@ -449,7 +458,8 @@ static void PWRenderSceneHierarchy()
         for (int e = 1; e <= count; ++e)
             if (PWValidSceneEntity(e) && !displayed[e])
                 PWDrawSceneEntity(e, children, displayed, 0);
-        if (count == 0) ImGui::TextDisabled("No objects in this level");
+        if (roots.empty() && g_pwFolders.empty() && count == 0)
+            ImGui::TextDisabled("No objects in this level");
     }
     ImGui::EndChild();
 }
