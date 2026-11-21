@@ -612,13 +612,25 @@ try {
             using var bmp = new Bitmap(path);
             if (IsLegacyPWTextTile(path, bmp.Width != 64)) return true;
             if (bmp.Width != 64 || bmp.Height != 64) return false;
-            Color t = bmp.GetPixel(0, 0);
-            Color a = bmp.GetPixel(32, 4);
-            Color b = bmp.GetPixel(4, 32);
-            static bool IsCyanRing(Color c) =>
-                c.A >= 150 && Math.Abs(c.R - 108) < 25 &&
-                Math.Abs(c.G - 194) < 25 && Math.Abs(c.B - 235) < 25;
-            return t.A == 0 && IsCyanRing(a) && IsCyanRing(b);
+            // Known PW-generated icons are 64x64 transparent tiles with a
+            // dark centre and a cyan ring at radius 28. Antialiased edges can
+            // miss the old two-pixel detector, leaving the false icons in place.
+            if (bmp.GetPixel(0, 0).A != 0) return false;
+            Color mid = bmp.GetPixel(32, 32);
+            if (mid.A < 180 || mid.R > 95 || mid.G > 105 || mid.B > 120)
+                return false;
+            int cyanRingPixels = 0;
+            for (int i = 0; i < 24; i++)
+            {
+                double angle = i * 2 * Math.PI / 24;
+                int x = (int)Math.Round(32 + 28 * Math.Cos(angle));
+                int y = (int)Math.Round(32 + 28 * Math.Sin(angle));
+                Color px = bmp.GetPixel(Math.Clamp(x, 0, 63), Math.Clamp(y, 0, 63));
+                if (px.A >= 100 && Math.Abs(px.R - 108) < 35 &&
+                    Math.Abs(px.G - 194) < 35 && Math.Abs(px.B - 235) < 35)
+                    cyanRingPixels++;
+            }
+            return cyanRingPixels >= 6;
         }
         catch { return false; }
     }
