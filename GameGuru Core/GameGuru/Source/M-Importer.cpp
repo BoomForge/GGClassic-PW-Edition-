@@ -7,6 +7,7 @@
 #include "gameguru.h"
 #include "PW-ImportPaths.h" // PW Edition: safe Blender/Mixamo texture path handling
 #include "PW-SkeletalAudit.h" // Non-destructive GameGuru skeleton/clip inspection
+#include "PW-SkeletalIntegrity.h" // Native skin weight/bind-pose/keyframe consistency verification
 
 #if defined(_WIN64) && !defined(ENABLEIMGUI)
 //PE: for 64 bits file dialogs.
@@ -2437,6 +2438,45 @@ void imgui_importer_loop(void)
                 for (size_t n=0;n<rig.unmapped.size();++n)
                     ImGui::BulletText("%s",rig.unmapped[n].c_str());
                 ImGui::TreePop();
+            }
+            // Deeper scans are explicit: rehashing all skin weights and
+            // animation keys every ImGui frame would stall large imports.
+            static int pwLastAuditObject=-1;
+            static PWSkeletalIntegrity::Audit pwLastAudit;
+            static bool pwHaveAudit=false;
+            if (ImGui::Button("Scan skin weights and animation clips"))
+            {
+                pwLastAudit=PWSkeletalIntegrity::Inspect(GetObjectData(t.importer.objectnumber));
+                pwLastAuditObject=t.importer.objectnumber;
+                pwHaveAudit=true;
+            }
+            if (pwHaveAudit && pwLastAuditObject==t.importer.objectnumber)
+            {
+                ImGui::Text("Skin influences: %llu",pwLastAudit.influences);
+                ImGui::Text("Animation clips: %d",(int)pwLastAudit.clips.size());
+                if (pwLastAudit.HasProblems())
+                    ImGui::TextWrapped("Skin/clip scan found invalid indices, weights, incomplete buffers, or normalization issues.");
+                if (pwLastAudit.invalidVertexIndices)
+                    ImGui::Text("Invalid vertex indices: %u",pwLastAudit.invalidVertexIndices);
+                if (pwLastAudit.invalidWeights)
+                    ImGui::Text("Invalid bone weights: %u",pwLastAudit.invalidWeights);
+                if (pwLastAudit.unnormalizedVertices)
+                    ImGui::Text("Non-normalized influenced vertices: %u",pwLastAudit.unnormalizedVertices);
+                if (pwLastAudit.missingBuffers)
+                    ImGui::Text("Missing animation/skin buffers: %u",pwLastAudit.missingBuffers);
+                if (pwLastAudit.excessiveData)
+                    ImGui::Text("Oversized buffers skipped: %u",pwLastAudit.excessiveData);
+                if (ImGui::TreeNode("Source animation clips"))
+                {
+                    for (size_t n=0;n<pwLastAudit.clips.size();++n)
+                    {
+                        const PWSkeletalIntegrity::Clip& clip=pwLastAudit.clips[n];
+                        ImGui::BulletText("%s | duration: %llu ticks | tracks: %u | keys: %llu",
+                            clip.name.c_str(),clip.duration,clip.tracks,clip.keys);
+                    }
+                    ImGui::TreePop();
+                }
+                ImGui::TextWrapped("Scan is a snapshot. Click again after changing or reloading the model.");
             }
             ImGui::TextWrapped("The old 'Use Uber Animations' option replaces source animation keys; it is not general retargeting.");
             ImGui::TextWrapped("Optional DBO verification: set GGCPW_VERIFY_SKELETON_SAVE=1 before starting the editor.");
@@ -6070,7 +6110,9 @@ void ConvertWorldToRelative ( sFrame* pFrame, GGMATRIX* pStoreNewPoseFrames, GGM
 #ifdef ENABLEIMGUI
 // PW Edition: verify the normal DBO save/reload path only when explicitly
 // enabled, using an isolated scratch object that is immediately removed.
-static void PW_VerifySavedSkeleton(const char* path,const PWSkeletalAudit::Snapshot& before)
+static void PW_VerifySavedSkeleton(const char* path,
+    const PWSkeletalAudit::Snapshot& before,
+    const PWSkeletalIntegrity::Audit& deepBefore)
 {
     if (!PWSkeletalAudit::VerifyEnabled() || !before.HasSkinOrAnimation()) return;
     if (!path || !*path || FileExist((LPSTR)path)==0) return;
@@ -6079,8 +6121,12 @@ static void PW_VerifySavedSkeleton(const char* path,const PWSkeletalAudit::Snaps
     std::string problem;
     if (ObjectExist(scratch)==1)
     {
-        const PWSkeletalAudit::Snapshot after=PWSkeletalAudit::Inspect(GetObjectData(scratch));
+        sObject* reloaded=GetObjectData(scratch);
+        const PWSkeletalAudit::Snapshot after=PWSkeletalAudit::Inspect(reloaded);
+        const PWSkeletalIntegrity::Audit deepAfter=PWSkeletalIntegrity::Inspect(reloaded);
         problem=PWSkeletalAudit::Compare(before,after);
+        if (problem.empty())
+            problem=PWSkeletalIntegrity::Compare(deepBefore,deepAfter);
         DeleteObject(scratch);
     }
     else problem="Could not reload saved DBO for skeletal verification";
@@ -6090,7 +6136,7 @@ static void PW_VerifySavedSkeleton(const char* path,const PWSkeletalAudit::Snaps
         OutputDebugStringA(output.c_str());
         popup_text("Skeletal DBO verification warning - see debug output");
     }
-    else OutputDebugStringA("PW Skeletal DBO PASS: bone and animation counts retained.\n");
+    else OutputDebugStringA("PW Skeletal DBO PASS: skin weights, bind transforms and animation payloads retained.\n");
 }
 
 void importer_save_entity ( char *filename )
@@ -6704,9 +6750,17 @@ void importer_save_entity ( char *filename )
 	{
 		if ( FileExist (t.tSaveFile_s.Get()) == 1 ) DeleteAFile ( t.tSaveFile_s.Get() ) ;
 		ScaleObject (  t.importer.objectnumber,100,100,100 );
-		const PWSkeletalAudit::Snapshot pwSkeletonBefore=PWSkeletalAudit::Inspect(GetObjectData(t.importer.objectnumber));
+		PWSkeletalAudit::Snapshot pwSkeletonBefore;
+		PWSkeletalIntegrity::Audit pwDeepBefore;
+		if (PWSkeletalAudit::VerifyEnabled())
+		{
+			sObject* pwObjectBefore=GetObjectData(t.importer.objectnumber);
+			pwSkeletonBefore=PWSkeletalAudit::Inspect(pwObjectBefore);
+			if (pwSkeletonBefore.HasSkinOrAnimation())
+				pwDeepBefore=PWSkeletalIntegrity::Inspect(pwObjectBefore);
+		}
 		SaveObject (  t.tSaveFile_s.Get(),t.importer.objectnumber );
-		PW_VerifySavedSkeleton(t.tSaveFile_s.Get(),pwSkeletonBefore);
+		PW_VerifySavedSkeleton(t.tSaveFile_s.Get(),pwSkeletonBefore,pwDeepBefore);
 		ScaleObject (  t.importer.objectnumber,t.importer.objectScaleForEditing,t.importer.objectScaleForEditing,t.importer.objectScaleForEditing );
 	}
 	else
@@ -7815,9 +7869,17 @@ void importer_save_entity ( char *filename )
 	{
 		if ( FileExist (t.tSaveFile_s.Get()) == 1 ) DeleteAFile ( t.tSaveFile_s.Get() ) ;
 		ScaleObject (  t.importer.objectnumber,100,100,100 );
-		const PWSkeletalAudit::Snapshot pwSkeletonBefore=PWSkeletalAudit::Inspect(GetObjectData(t.importer.objectnumber));
+		PWSkeletalAudit::Snapshot pwSkeletonBefore;
+		PWSkeletalIntegrity::Audit pwDeepBefore;
+		if (PWSkeletalAudit::VerifyEnabled())
+		{
+			sObject* pwObjectBefore=GetObjectData(t.importer.objectnumber);
+			pwSkeletonBefore=PWSkeletalAudit::Inspect(pwObjectBefore);
+			if (pwSkeletonBefore.HasSkinOrAnimation())
+				pwDeepBefore=PWSkeletalIntegrity::Inspect(pwObjectBefore);
+		}
 		SaveObject (  t.tSaveFile_s.Get(),t.importer.objectnumber );
-		PW_VerifySavedSkeleton(t.tSaveFile_s.Get(),pwSkeletonBefore);
+		PW_VerifySavedSkeleton(t.tSaveFile_s.Get(),pwSkeletonBefore,pwDeepBefore);
 		ScaleObject (  t.importer.objectnumber,t.importer.objectScaleForEditing,t.importer.objectScaleForEditing,t.importer.objectScaleForEditing );
 	}
 	else
