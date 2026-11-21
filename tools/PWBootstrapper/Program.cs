@@ -7,6 +7,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Text.Json;
 using System.Windows.Forms;
+using System.Runtime.InteropServices;
 
 // Original open launcher code. No proprietary GameGuru binaries or media distributed.
 // Compiles the latest PW Edition source locally using user's Visual Studio 2022.
@@ -388,6 +389,11 @@ try {
             // filenames. Never overwrite a paid or existing image.
             var installFiles = FilesToInstall.ToList();
             AddMissingEditorIconFallbacks(built, steam, installFiles);
+            // Copy original Classic 42px toolbar artwork out of the OWNER'S
+            // installed GameGuru.exe resources (never shipped over the network).
+            // This supersedes our temporary, blue PW pictograms wherever an
+            // authentic matching Classic resource is present.
+            RestoreNativeClassicToolbar(built, steam, installFiles);
             foreach (var relative in installFiles)
                 if (!File.Exists(Path.Combine(built, relative)))
                     throw new FileNotFoundException("Required PW build output missing; nothing installed: " + relative);
@@ -539,10 +545,10 @@ try {
         using var g = Graphics.FromImage(bmp);
         g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         g.Clear(Color.Transparent);
-        using var bg = new SolidBrush(Color.FromArgb(235, 26, 31, 50));
+        using var bg = new SolidBrush(Color.FromArgb(235, 38, 40, 43));
         using var light = new SolidBrush(Color.FromArgb(245, 232, 240, 255));
-        using var accent = new SolidBrush(Color.FromArgb(255, 108, 194, 235));
-        using var warm = new SolidBrush(Color.FromArgb(255, 247, 189, 90));
+        using var accent = new SolidBrush(Color.FromArgb(255, 180, 185, 190));
+        using var warm = new SolidBrush(Color.FromArgb(255, 210, 205, 190));
         using var cool = new Pen(Color.FromArgb(245, 232, 240, 255), 4f);
         using var blue = new Pen(Color.FromArgb(255, 108, 194, 235), 4f);
         cool.StartCap = cool.EndCap = System.Drawing.Drawing2D.LineCap.Round;
@@ -718,6 +724,124 @@ try {
         if (generated + upgraded > 0)
             LogOutput("Restored " + generated + " missing pictographic editor icons and upgraded " +
                       upgraded + " prior PW text-only placeholders. Existing stock/custom art preserved.");
+    }
+
+
+    // The GameGuru Classic IDE resources are defined in GameGuru IDE/Editor.rc:
+    // StandardToolbar2 (152), ModeToolbar3 (178), TerrainToolbar (180),
+    // WaypointToolbar (182), GameToolbar (186). Each native bitmap is a row
+    // of 42x42 icons in the order declared in the original toolbar resource.
+    // Source images remain inside the user's licensed Steam copy.
+    [DllImport("kernel32.dll", EntryPoint = "LoadLibraryExW", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern IntPtr LoadResourceModule(string fileName, IntPtr file, uint flags);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool FreeLibrary(IntPtr module);
+
+    [DllImport("user32.dll", EntryPoint = "LoadImageW", SetLastError = true)]
+    static extern IntPtr LoadOriginalBitmap(IntPtr module, IntPtr id, uint imageType, int width, int height, uint flags);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool DeleteOriginalBitmap(IntPtr bitmap);
+
+    static bool IsGeneratedPWIcon(string path)
+    {
+        try
+        {
+            using var bmp = new Bitmap(path);
+            if (IsLegacyPWTextTile(path, bmp.Width != 64)) return true;
+            if (bmp.Width != 64 || bmp.Height != 64) return false;
+            Color t = bmp.GetPixel(0, 0);
+            Color a = bmp.GetPixel(32, 4);
+            Color b = bmp.GetPixel(4, 32);
+            static bool IsCyanRing(Color c) =>
+                c.A >= 150 && Math.Abs(c.R - 108) < 25 &&
+                Math.Abs(c.G - 194) < 25 && Math.Abs(c.B - 235) < 25;
+            return t.A == 0 && IsCyanRing(a) && IsCyanRing(b);
+        }
+        catch { return false; }
+    }
+
+    static void RestoreNativeClassicToolbar(string build, string steam, List<string> installFiles)
+    {
+        string stockLauncher = Path.Combine(steam, "GameGuru.exe");
+        if (!File.Exists(stockLauncher))
+        {
+            LogOutput("Original GameGuru.exe unavailable; cannot recover authentic Classic toolbar art.");
+            return;
+        }
+        // LOAD_LIBRARY_AS_DATAFILE prevents running the executable or loading
+        // Steam dependencies. RT_BITMAP resources are read-only.
+        IntPtr module = LoadResourceModule(stockLauncher, IntPtr.Zero, 0x00000002);
+        if (module == IntPtr.Zero)
+        {
+            LogOutput("Could not read stock toolbar bitmap resources from " + stockLauncher);
+            return;
+        }
+        // Names and column indexes follow GameGuru IDE/Editor.rc, 42px bitmaps.
+        var strips = new (int Resource, string[] Names)[]
+        {
+            (152, new[] { "newlevel.png", "loadlevel.png", "savelevel.png" }),
+            (178, new[] { "entity.png", "markers.png", "builder.png" }),
+            (180, new[] { "shape.png", "level.png", "storedlevel.png", "blendmode.png", "rampmode.png", "painttexture.png", "paintgrass.png" }),
+            (182, new[] { "newwaypoints.png", "waypoints.png" }),
+            (186, new[] { "testgame.png" })
+        };
+        int recovered = 0, missing = 0;
+        try
+        {
+            foreach (var (resource, names) in strips)
+            {
+                IntPtr hBitmap = LoadOriginalBitmap(module, (IntPtr)resource, 0, 0, 0, 0x2000);
+                if (hBitmap == IntPtr.Zero)
+                {
+                    LogOutput("Classic toolbar RT_BITMAP " + resource + " not present; preserving existing assets.");
+                    missing += names.Length;
+                    continue;
+                }
+                try
+                {
+                    using var strip = Bitmap.FromHbitmap(hBitmap);
+                    for (int col = 0; col < names.Length; col++)
+                    {
+                        string relative = Path.Combine("Files", "editors", "uiv3", names[col]);
+                        string existing = Path.Combine(steam, relative);
+                        if (File.Exists(existing) && !IsGeneratedPWIcon(existing)) continue;
+                        if (strip.Width < (col + 1) * 42 || strip.Height < 42)
+                        {
+                            LogOutput("Unexpected strip dimensions for RT_BITMAP " + resource + "; preserving " + names[col]);
+                            missing++;
+                            continue;
+                        }
+                        string path = Path.Combine(build, relative);
+                        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                        using var icon = new Bitmap(64, 64);
+                        using (var graphics = Graphics.FromImage(icon))
+                        {
+                            graphics.Clear(Color.Transparent);
+                            graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                            graphics.DrawImage(strip, new Rectangle(0, 0, 64, 64),
+                                new Rectangle(col * 42, 0, 42, 42), GraphicsUnit.Pixel);
+                        }
+                        icon.Save(path, ImageFormat.Png);
+                        if (!installFiles.Contains(relative, StringComparer.OrdinalIgnoreCase))
+                            installFiles.Add(relative);
+                        recovered++;
+                    }
+                }
+                finally { DeleteOriginalBitmap(hBitmap); }
+            }
+        }
+        catch (Exception e)
+        {
+            // Do not install a partially extracted mismatched icon strip:
+            // preserve stock files, keep explicit log for user troubleshooting.
+            LogOutput("Original Classic resource restoration reported: " + e.Message, stderr: true);
+        }
+        finally { FreeLibrary(module); }
+        LogOutput("Recovered " + recovered + " authentic Classic toolbar icons from licensed GameGuru.exe; missing/unsupported: " + missing + ".");
     }
 
     static bool HasCompiledPWBrand(string exe)
