@@ -46,6 +46,17 @@ jobs:
           foreach ($lib in @('GameGuru Core/SDK/DirectXTex/DirectXTex/Bin/Desktop_2022/x64/Release/DirectXTex.lib','GameGuru Core/SDK/DirectX/Effect11/Bin/Desktop_2022/x64/Release/Effects11.lib')) {
             if (-not (Test-Path $lib)) { throw "Missing built library: $lib" }
           }
+      - name: Build Ogg Vorbis static x64 dependencies
+        shell: cmd
+        run: |
+          msbuild "GameGuru Core\SDK\OGG\ogg_vorbis_static.sln" /t:Build /p:Configuration=Release /p:Platform=x64 /m:2 /nologo /v:minimal /fl /flp:logfile=pw-ogg-build.log;verbosity=normal
+      - name: Verify Ogg/Vorbis static libraries
+        shell: pwsh
+        run: |
+          foreach ($lib in @('ogg_static.lib','vorbis_static.lib','vorbisfile_static.lib')) {
+            $path = Join-Path 'GameGuru Core/SDK/OGG/lib64/Release' $lib
+            if (-not (Test-Path $path)) { throw "Missing Ogg static library $path" }
+          }
       - name: Build complete GameGuru Core Release x64 solution
         shell: cmd
         run: |
@@ -66,7 +77,7 @@ jobs:
         if: failure()
         shell: pwsh
         run: |
-          foreach ($file in @('pw-directxtex-build.log','pw-effects11-build.log','pw-core-build.log','pw-ide-build.log')) {
+          foreach ($file in @('pw-directxtex-build.log','pw-effects11-build.log','pw-ogg-build.log','pw-core-build.log','pw-ide-build.log')) {
             if (Test-Path $file) {
               Get-Content $file | Select-String -Pattern 'error (C[0-9]+|LNK[0-9]+|MSB[0-9]+)|fatal error|error :' | Select-Object -Last 40 | ForEach-Object { Write-Host $_.Line }
             }
