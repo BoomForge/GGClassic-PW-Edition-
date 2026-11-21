@@ -31,6 +31,21 @@ class PWLoadTraceReportTests(unittest.TestCase):
         self.assertIn("Parent scopes contain child scopes", output)
         self.assertIn("terrain_height_samples", output)
 
+    def test_begin_and_slow_markers_are_not_timed_as_completed_phases(self):
+        self.path.write_text(
+            "tick_ms,pid,stage,duration_ms\n"
+            "1,25,begin.editor.preview_init.total,0.000\n"
+            "2,25,slow.editor.preview_init.total,60500.000\n"
+            "3,25,editor.preview_init.total,60500.000\n",
+            encoding="utf8",
+        )
+        rows = read_trace(self.path)
+        self.assertEqual(len(rows), 3)
+        stages = aggregate(rows)
+        self.assertEqual(len(stages), 1)
+        self.assertEqual(stages[0]["stage"], "editor.preview_init.total")
+        self.assertEqual(stages[0]["median_ms"], 60500.0)
+
     def test_reject_invalid_duration(self):
         self.path.write_text(
             "tick_ms,pid,stage,duration_ms\n"
