@@ -67,3 +67,11 @@ The repaired installation now:
 If the Steam launcher still looks stock, use Steam > Manage > Browse local files and run \`Guru-MapEditor.exe\` or \`Launch-PW-Edition.cmd\`. The PW version has a \`PW Edition\` menu and an \`Edit > Lua Script Editor\` entry. The new internal update command opens the standalone source-building updater; it does not promise instant binary patching or public release availability yet.
 
 Actual editor runtime, Steam launcher routing, user account permissions and in-engine auto-update UX must still be tested locally. CI separately verifies that the compiled editor contains the distinctive PW title string.
+
+## Optional tutorial folder and Steam Play routing (21 November 2026)
+
+- Some licensed Steam installs do not contain `Files/tutorialbank`. The ImGui tutorial scanner previously called `SetDir("tutorialbank")` unconditionally and showed a modal **Path Cannot Be Found** dialog. PW Edition now checks that the optional directory exists before enumerating it; if missing, the tutorial list remains empty. This is an editor-side source fix, not a redistribution of tutorial files.
+- Temporary workaround for older builds: create an empty `Files/tutorialbank` directory inside the selected Steam GameGuru Classic folder.
+- The original Steam `GameGuru.exe` is deliberately left untouched. To open PW Edition from the normal Steam **Play** button, set **Steam Library > GameGuru Classic > Properties > General > Launch Options** to `"D:\\SteamLibrary\\steamapps\\common\\Game Guru\\Guru-MapEditor.exe" %command%` (adjust the path to the installed editor). This is user-controlled and reversible by clearing that field. It has not yet been verified on the owner's machine. Steam app tracking/overlay behavior may differ from the original launcher.
+- The Steam alternative-executable launch option passes the original Steam command as an extra argument; Classic's documented command-line handling recognises named flags such as `-r` and ignores other unrecognised command text in this startup path. Validate ordinary editor open, Test Level, and Steam Play behavior manually.
+- Future integrated Steam launcher work should preserve and restore the stock launcher and must not overwrite Steam userdata/settings without explicit approval.
