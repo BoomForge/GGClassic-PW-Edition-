@@ -616,9 +616,9 @@ try {
             // dark centre and a cyan ring at radius 28. Antialiased edges can
             // miss the old two-pixel detector, leaving the false icons in place.
             if (bmp.GetPixel(0, 0).A != 0) return false;
-            Color mid = bmp.GetPixel(32, 32);
-            if (mid.A < 180 || mid.R > 95 || mid.G > 105 || mid.B > 120)
-                return false;
+            // The symbol inside the ring varies (including bright white pixels);
+            // only the generated cyan rim and transparent corners are invariant.
+            if (bmp.GetPixel(63, 63).A != 0) return false;
             int cyanRingPixels = 0;
             for (int i = 0; i < 24; i++)
             {
