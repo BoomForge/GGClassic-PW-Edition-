@@ -331,38 +331,219 @@ internal static class Program
         "testgame.png", "theader.png", "vrmode.png", "waypoints.png"
     };
 
+    // The first installer drew the file names over solid coloured tiles. Those
+    // were temporary diagnostics, not usable toolbar art. Replace ONLY those
+    // recognizable tiles; preserve all existing stock/custom icons unchanged.
+    static bool IsLegacyPWTextTile(string path, bool wide)
+    {
+        try
+        {
+            using var bitmap = new Bitmap(path);
+            int w = wide ? 256 : 64, h = wide ? 96 : 64;
+            if (bitmap.Width != w || bitmap.Height != h) return false;
+            Color bg = Color.FromArgb(34, 40, 58);
+            Color rim = Color.FromArgb(91, 118, 185);
+            // GDI+ tile produced by the former updater: full opaque bg and
+            // 3-pixel blue rectangle inset by two pixels on each edge.
+            // Never replace arbitrary files solely because their names match.
+            return bitmap.GetPixel(0, 0).ToArgb() == bg.ToArgb() &&
+                   bitmap.GetPixel(w - 1, 0).ToArgb() == bg.ToArgb() &&
+                   bitmap.GetPixel(0, h - 1).ToArgb() == bg.ToArgb() &&
+                   bitmap.GetPixel(w - 1, h - 1).ToArgb() == bg.ToArgb() &&
+                   bitmap.GetPixel(2, 2).ToArgb() == rim.ToArgb() &&
+                   bitmap.GetPixel(w - 3, h - 3).ToArgb() == rim.ToArgb();
+        }
+        catch (Exception) { return false; }
+    }
+
+    // Original vector pictograms rendered locally, not downloaded copyrighted
+    // GameGuru icon resources. Symbols remain visual; names belong in tooltips.
+    static void DrawPWIcon(string filename, string target, bool wide)
+    {
+        int w = wide ? 256 : 64, h = wide ? 96 : 64;
+        using var bmp = new Bitmap(w, h);
+        using var g = Graphics.FromImage(bmp);
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        g.Clear(Color.Transparent);
+        using var bg = new SolidBrush(Color.FromArgb(235, 26, 31, 50));
+        using var light = new SolidBrush(Color.FromArgb(245, 232, 240, 255));
+        using var accent = new SolidBrush(Color.FromArgb(255, 108, 194, 235));
+        using var warm = new SolidBrush(Color.FromArgb(255, 247, 189, 90));
+        using var cool = new Pen(Color.FromArgb(245, 232, 240, 255), 4f);
+        using var blue = new Pen(Color.FromArgb(255, 108, 194, 235), 4f);
+        cool.StartCap = cool.EndCap = System.Drawing.Drawing2D.LineCap.Round;
+        cool.LineJoin = System.Drawing.Drawing2D.LineJoin.Round;
+        blue.StartCap = blue.EndCap = System.Drawing.Drawing2D.LineCap.Round;
+        blue.LineJoin = System.Drawing.Drawing2D.LineJoin.Round;
+        if (wide)
+        {
+            g.FillRectangle(bg, 2, 3, w - 4, h - 6);
+            g.DrawRectangle(blue, 3, 4, w - 7, h - 9);
+            using var title = new Font("Segoe UI", 25, FontStyle.Bold, GraphicsUnit.Pixel);
+            using var subtitle = new Font("Segoe UI", 15, FontStyle.Regular, GraphicsUnit.Pixel);
+            using var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+            g.DrawString("PIXELWOLF", title, light, new RectangleF(0, 19, w, 37), format);
+            g.DrawString("PW EDITION", subtitle, accent, new RectangleF(0, 52, w, 26), format);
+            bmp.Save(target, ImageFormat.Png);
+            return;
+        }
+        g.FillEllipse(bg, 4, 4, 56, 56);
+        g.DrawEllipse(blue, 4, 4, 56, 56);
+        void Line(float x1, float y1, float x2, float y2) => g.DrawLine(cool, x1, y1, x2, y2);
+        void Rect(float x, float y, float width, float height) => g.DrawRectangle(cool, x, y, width, height);
+        void Ell(float x, float y, float width, float height) => g.DrawEllipse(cool, x, y, width, height);
+        void Polygon(params PointF[] pts) => g.DrawPolygon(cool, pts);
+        PointF P(float x, float y) => new PointF(x, y);
+        string key = Path.GetFileNameWithoutExtension(filename).ToLowerInvariant();
+        switch (key)
+        {
+            case "loadlevel":
+            case "storedlevel":
+            case "loadlevel2":
+                Polygon(P(12, 26), P(12, 21), P(29, 21), P(34, 26), P(51, 26), P(49, 47), P(14, 47));
+                Line(32, 14, 32, 36); Line(25, 29, 32, 36); Line(39, 29, 32, 36);
+                break;
+            case "savelevel":
+                Rect(16, 13, 32, 38); Rect(22, 14, 20, 12); Rect(23, 34, 18, 17);
+                break;
+            case "newlevel":
+            case "ebe-new":
+                Rect(14, 14, 30, 35); Line(29, 26, 29, 42); Line(21, 34, 37, 34);
+                break;
+            case "testgame":
+            case "media-play":
+                g.FillPolygon(accent, new[] { P(24, 16), P(47, 32), P(24, 48) });
+                break;
+            case "media-pause":
+                g.FillRectangle(light, 21, 17, 8, 30); g.FillRectangle(light, 35, 17, 8, 30);
+                break;
+            case "media-record":
+            case "media-recording":
+            case "media-recordprocessing":
+                g.FillEllipse(warm, 21, 21, 22, 22); Ell(17, 17, 30, 30);
+                break;
+            case "media-refresh":
+                g.DrawArc(cool, 17, 17, 30, 30, 40, 270); Line(48, 25, 47, 38); Line(47, 38, 34, 36);
+                break;
+            case "pointer2":
+            case "pointer3":
+                g.FillPolygon(light, new[] { P(19, 12), P(46, 32), P(33, 34), P(28, 49) });
+                break;
+            case "entity":
+            case "ebe-cube":
+            case "ebe-block":
+            case "builder":
+                Polygon(P(32, 11), P(49, 21), P(49, 43), P(32, 53), P(15, 43), P(15, 21));
+                Line(15, 21, 32, 31); Line(49, 21, 32, 31); Line(32, 31, 32, 53);
+                break;
+            case "import":
+                Rect(14, 35, 36, 13); Line(32, 12, 32, 38); Line(23, 29, 32, 38); Line(41, 29, 32, 38);
+                break;
+            case "shape":
+            case "level":
+            case "levelmode":
+            case "sculpt":
+                Polygon(P(12, 47), P(24, 24), P(31, 34), P(38, 16), P(52, 47));
+                break;
+            case "rampmode":
+                Polygon(P(12, 48), P(51, 48), P(51, 20));
+                break;
+            case "blendmode":
+                Ell(14, 16, 27, 27); Ell(26, 23, 27, 27);
+                break;
+            case "painttexture":
+            case "paintgrass":
+                if (key == "paintgrass") {
+                    Line(22, 47, 18, 31); Line(29, 47, 31, 18); Line(39, 47, 46, 26);
+                    Line(17, 40, 13, 36); Line(43, 37, 50, 34);
+                } else {
+                    Line(43, 16, 25, 39); Polygon(P(20, 37), P(29, 42), P(22, 50), P(14, 50));
+                    Line(44, 13, 49, 18);
+                }
+                break;
+            case "markers":
+            case "dotcircle":
+            case "dotcirclem":
+            case "dotcircles":
+                Ell(17, 13, 30, 30); g.FillEllipse(warm, 27, 23, 10, 10);
+                Line(32, 43, 32, 53);
+                break;
+            case "waypoints":
+            case "newwaypoints":
+            case "drawwaypoints":
+                g.FillEllipse(accent, 13, 34, 9, 9); g.FillEllipse(accent, 28, 15, 9, 9);
+                g.FillEllipse(accent, 43, 37, 9, 9);
+                Line(22, 36, 30, 23); Line(36, 23, 44, 38);
+                break;
+            case "ccp":
+            case "socialvr":
+                Ell(26, 13, 12, 13); g.DrawArc(cool, 18, 31, 28, 22, 185, 170);
+                break;
+            case "ebe-stairs":
+            case "ebe-row":
+            case "ebe-floor":
+            case "ebe-column":
+            case "ebe-wall":
+                for (int step = 0; step < 3; step++) {
+                    int xx = 14 + step * 12, yy = key == "ebe-stairs" ? 36 - step * 10 : 30;
+                    Rect(xx, yy, 12, key == "ebe-column" ? 24 : 11);
+                }
+                break;
+            case "circle":
+            case "circlem":
+            case "circles":
+            case "rounding_overlay_style0-h":
+                Ell(14, 14, 36, 36); Ell(23, 23, 18, 18);
+                break;
+            case "shape-up":
+                Polygon(P(15, 42), P(32, 21), P(49, 42));
+                break;
+            case "shape-down":
+                Polygon(P(15, 22), P(32, 43), P(49, 22));
+                break;
+            case "media-maximize":
+                Rect(15, 15, 34, 34);
+                break;
+            case "media-minimize":
+                Line(18, 43, 47, 43);
+                break;
+            case "media-recording2":
+                g.FillEllipse(warm, 21, 21, 22, 22);
+                break;
+            default:
+                // A recognizable tool/cog pictogram is preferable to a
+                // miniature filename even for unclassified legacy buttons.
+                Ell(20, 20, 24, 24); g.FillEllipse(accent, 28, 28, 8, 8);
+                for (int n = 0; n < 8; ++n) {
+                    double a = n * Math.PI / 4;
+                    float x = (float)Math.Cos(a), y = (float)Math.Sin(a);
+                    Line(32 + 14 * x, 32 + 14 * y, 32 + 20 * x, 32 + 20 * y);
+                }
+                break;
+        }
+        bmp.Save(target, ImageFormat.Png);
+    }
+
     static void AddMissingEditorIconFallbacks(string build, string steam, List<string> installFiles)
     {
-        int created = 0;
+        int generated = 0, upgraded = 0;
         foreach (var filename in EditorIcons)
         {
             string relative = Path.Combine("Files", "editors", "uiv3", filename);
-            if (File.Exists(Path.Combine(steam, relative))) continue;
-            string target = Path.Combine(build, relative);
-            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-
+            string installed = Path.Combine(steam, relative);
             bool wide = filename.StartsWith("ABOUT-", StringComparison.OrdinalIgnoreCase) ||
                         filename.Equals("theader.png", StringComparison.OrdinalIgnoreCase);
-            int w = wide ? 256 : 64, h = wide ? 96 : 64;
-            using var bmp = new Bitmap(w, h);
-            using var g = Graphics.FromImage(bmp);
-            g.Clear(Color.FromArgb(34, 40, 58));
-            using var rim = new Pen(Color.FromArgb(91, 118, 185), 3);
-            g.DrawRectangle(rim, 2, 2, w - 5, h - 5);
-            string label = wide ? "PW EDITION" : filename.Split('.')[0].ToUpperInvariant().Replace("MEDIA-", "M-");
-            if (!wide && label.Length > 6) label = label[..6];
-            using var font = new Font("Segoe UI", wide ? 20 : 11, FontStyle.Bold, GraphicsUnit.Pixel);
-            using var ink = new SolidBrush(Color.White);
-            using var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-            g.DrawString(label, font, ink, new RectangleF(4, 4, w - 8, h - 8), format);
-            bmp.Save(target, ImageFormat.Png);
+            bool hadOldTextTile = File.Exists(installed) && IsLegacyPWTextTile(installed, wide);
+            if (File.Exists(installed) && !hadOldTextTile) continue;
+            string target = Path.Combine(build, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            DrawPWIcon(filename, target, wide);
             installFiles.Add(relative);
-            created++;
+            if (hadOldTextTile) upgraded++; else generated++;
         }
-        if (created > 0)
-            LogOutput("Generated " + created + " neutral PW UI icon fallbacks for resources missing from the Steam install.");
-        // Optional Roboto-Medium.ttf deliberately not copied: ChangeGGFont
-        // falls back to ImGui's built-in font if the file is absent.
+        if (generated + upgraded > 0)
+            LogOutput("Restored " + generated + " missing pictographic editor icons and upgraded " +
+                      upgraded + " prior PW text-only placeholders. Existing stock/custom art preserved.");
     }
 
     static bool HasCompiledPWBrand(string exe)
