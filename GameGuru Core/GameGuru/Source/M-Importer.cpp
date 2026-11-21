@@ -1957,7 +1957,9 @@ void importer_loadmodel ( void )
 						found = PWImport::FindTexture(t.importer.objectFileOriginalPath.Get(), reference, fileExists);
 					if (!found.empty())
 					{
-						iSlotUsed = importer_addtexturefiletolist(found.c_str(), found.c_str(), &tCount);
+						cstr resolvedTexture;
+						resolvedTexture = found.c_str();
+						iSlotUsed = importer_addtexturefiletolist(resolvedTexture, resolvedTexture, &tCount);
 						bUseTexturesFromConversion = true;
 					}
 					else if (!reference.empty())
@@ -1966,13 +1968,17 @@ void importer_loadmodel ( void )
 						// silently dropping material stages during FBX import.
 						const std::string expected = PWImport::Folder(t.importer.objectFileOriginalPath.Get())
 							+ PWImport::BaseName(reference);
-						iSlotUsed = importer_addtexturefiletolist(expected.c_str(), expected.c_str(), &tCount);
+						cstr resolvedTexture;
+						resolvedTexture = expected.c_str();
+						iSlotUsed = importer_addtexturefiletolist(resolvedTexture, resolvedTexture, &tCount);
 					}
 					#ifdef ENABLEIMGUI
 					else
 					{
 						const std::string placeholder = PWImport::Folder(t.importer.objectFileOriginalPath.Get()) + "blank";
-						iSlotUsed = importer_addtexturefiletolist(placeholder.c_str(), placeholder.c_str(), &tCount);
+						cstr resolvedTexture;
+						resolvedTexture = placeholder.c_str();
+						iSlotUsed = importer_addtexturefiletolist(resolvedTexture, resolvedTexture, &tCount);
 					}
 					#endif
 					if (iSlotUsed > 0)

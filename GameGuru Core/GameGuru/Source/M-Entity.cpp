@@ -2993,7 +2993,10 @@ static int pw_load_entity_texture_with_png_fallback ( cstr textureFile, int load
 		const size_t filenameLength = strlen(textureFile.Get());
 		if (filenameLength >= 4 && stricmp(textureFile.Get() + filenameLength - 4, ".dds") == 0)
 		{
-			cstr pngFile = Left(textureFile.Get(), filenameLength - 4) + ".png";
+			std::string pngPath(textureFile.Get(), filenameLength - 4);
+			pngPath += ".png";
+			cstr pngFile;
+			pngFile = pngPath.c_str();
 			textureID = loadinternaltextureex(pngFile.Get(), loadMode, textureDivide);
 		}
 	}
