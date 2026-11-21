@@ -1,0 +1,39 @@
+name: PW Edition Windows updater EXE (no engine binaries)
+on:
+  pull_request:
+    paths:
+      - "tools/PWBootstrapper/**"
+      - ".github/workflows/pw-bootstrapper-exe.yml"
+  push:
+    branches:
+      - work/pw-community-integration-20261121
+    paths:
+      - "tools/PWBootstrapper/**"
+      - ".github/workflows/pw-bootstrapper-exe.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  bootstrapper:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Compile standalone Windows updater
+        shell: pwsh
+        run: |
+          dotnet publish tools/PWBootstrapper/PWBootstrapper.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:DebugType=none -o PWBootstrapper-dist
+          if ($LASTEXITCODE -ne 0) { throw "Updater compilation failed" }
+          if (-not (Test-Path 'PWBootstrapper-dist/Pixelwolf-GGC-Updater.exe')) { throw "EXE missing" }
+          Get-FileHash 'PWBootstrapper-dist/Pixelwolf-GGC-Updater.exe' -Algorithm SHA256 | Format-List
+      - name: Publish updater EXE as workflow artifact (no GameGuru executables)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pixelwolf-GGC-Updater-Win64
+          path: PWBootstrapper-dist/Pixelwolf-GGC-Updater.exe
+          if-no-files-found: error
+          retention-days: 30
