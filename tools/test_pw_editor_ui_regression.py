@@ -67,6 +67,7 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn("bExternal_Entities_Window = true;", library)
         self.assertNotIn("bExternal_Entities_Window = false;", library)
         self.assertNotIn("textureId = TOOL_ENTITY;", library)
+        self.assertIn("int max_load_persync = 24;", library)
         self.assertNotIn("editor_filllibrary();", library)
         self.assertIn('textureId = 0; // No thumbnail:', library)
 
