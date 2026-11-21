@@ -2769,8 +2769,8 @@ void mapeditorexecutable_loop(void)
 		{
 			// One-time restoration of the original neutral GameGuru ImGui colour scheme.
 			// The PW blue scheme was not an approved part of the traditional layout.
-			myStyle2(NULL);
 			pref.current_style = 0;
+			myStyle2(NULL);
 			bExternal_Entities_Window = true;
 			ImGuiID dockspace_id = ImGui::GetID(g_pwEngineDockspaceName);
 			ImGui::DockBuilderRemoveNode(dockspace_id);
