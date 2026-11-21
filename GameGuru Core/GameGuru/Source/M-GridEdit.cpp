@@ -147,7 +147,9 @@ bool imgui_is_running = false;
 int refresh_gui_docking = 0;
 // New dockspace identity migrates the default layout once without continually
 // overwriting user adjustments saved in uiv3.layout.
-static const char* g_pwEngineDockspaceName = "PWEngineDockspaceV2";
+static const char* g_pwEngineDockspaceName = "PWEngineDockspaceV3";
+// Authoritative bottom dock ID: the full asset library is never a floating window.
+static ImGuiID g_pwBottomAssetDockId = 0;
 static bool g_pwSceneHierarchyOpen = true;
 // Classic disables shadow rendering when the editor camera zooms out too far.
 // Keep cascaded realtime editor shadows available at all distances by default.
@@ -2772,7 +2774,8 @@ void mapeditorexecutable_loop(void)
 			ImGui::DockBuilderSetNodeSize(dockspace_id, viewport->Size - ImVec2(0, toolbar_size + ImGuiStatusBar_Size));
 
 			ImGuiID dock_main_id = dockspace_id;
-			dock_id_bottom = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Down, 0.27f, NULL, &dock_main_id);
+			dock_id_bottom = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Down, 0.31f, NULL, &dock_main_id);
+			g_pwBottomAssetDockId = dock_id_bottom;
 			ImGuiID dock_id_left = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.20f, NULL, &dock_main_id);
 			const float inspectorRatio = viewport->Size.x < 1100.0f ? 0.30f : 0.24f;
 			ImGuiID dock_id_right = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, inspectorRatio, NULL, &dock_main_id);
@@ -23366,6 +23369,11 @@ void process_entity_library(void)
 		time_t tCurrentTimeSec;
 		time(&tCurrentTimeSec);
 
+		// Always attach the full library to the lower dock, including when the
+		// user's old uiv3.layout remembers it as a floating popup. DockBuilder
+		// alone only queues the docking for its initial workspace creation.
+		if (g_pwBottomAssetDockId != 0)
+			ImGui::SetNextWindowDockID(g_pwBottomAssetDockId, ImGuiCond_Always);
 		ImGui::Begin("Entity Library##ExternalWindow", &bExternal_Entities_Window, ex_window_flags);
 		if (justOpened)
 			ImGui::SetWindowFocus("Entity Library##ExternalWindow");
