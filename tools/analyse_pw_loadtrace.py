@@ -43,7 +43,12 @@ def read_trace(path: Path) -> list[dict[str, object]]:
 def aggregate(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     groups: dict[str, list[float]] = defaultdict(list)
     for row in rows:
-        groups[str(row["stage"])].append(float(row["duration_ms"]))
+        stage = str(row["stage"])
+        # begin.* survives an incomplete/stalled phase; slow.* flags >10s.
+        # They are diagnostics, not additional completed duration samples.
+        if stage.startswith(("begin.", "slow.")):
+            continue
+        groups[stage].append(float(row["duration_ms"]))
     result: list[dict[str, object]] = []
     for stage, durations in groups.items():
         samples = sorted(durations)
