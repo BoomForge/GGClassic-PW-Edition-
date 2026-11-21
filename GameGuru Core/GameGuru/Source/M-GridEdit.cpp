@@ -147,7 +147,7 @@ bool imgui_is_running = false;
 int refresh_gui_docking = 0;
 // New dockspace identity migrates the default layout once without continually
 // overwriting user adjustments saved in uiv3.layout.
-static const char* g_pwEngineDockspaceName = "PWEngineDockspaceV4";
+static const char* g_pwEngineDockspaceName = "PWEngineDockspaceV5";
 // Authoritative bottom dock ID: the full asset library is never a floating window.
 static ImGuiID g_pwBottomAssetDockId = 0;
 static bool g_pwSceneHierarchyOpen = true;
@@ -278,7 +278,7 @@ extern cFolderItem MainEntityList;
 
 bool bExport_Standalone_Window = false;
 bool bExport_SaveToGameCloud_Window = false;
-bool bExternal_Entities_Window = false;
+bool bExternal_Entities_Window = true; // Full stock asset library is the default bottom browser.
 int iDisplayLibraryType = 0;
 int iLastDisplayLibraryType = -1;
 cstr sStartLibrarySearchString = "";
@@ -2767,6 +2767,11 @@ void mapeditorexecutable_loop(void)
 		// Users can resize tabs and save the arrangement in uiv3.layout.
 		if (ImGui::DockBuilderGetNode(ImGui::GetID(g_pwEngineDockspaceName)) == NULL || refresh_gui_docking == 2)
 		{
+			// One-time restoration of the original neutral GameGuru ImGui colour scheme.
+			// The PW blue scheme was not an approved part of the traditional layout.
+			myStyle2(NULL);
+			pref.current_style = 0;
+			bExternal_Entities_Window = true;
 			ImGuiID dockspace_id = ImGui::GetID(g_pwEngineDockspaceName);
 			ImGui::DockBuilderRemoveNode(dockspace_id);
 			ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
@@ -2787,10 +2792,10 @@ void mapeditorexecutable_loop(void)
 
 			ImGui::DockBuilderDockWindow(TABEDITORNAME, dock_main_id);
 			ImGui::DockBuilderDockWindow("Scene Hierarchy##PWSceneHierarchy", dock_id_left);
-			ImGui::DockBuilderDockWindow(TABENTITYNAME, dock_id_bottom);
-			// Full asset library opens as a tab in the bottom dock instead of floating
-			// on top of the main viewport.
+			// The full original folder/thumbnail library is the primary lower tab.
+			// The legacy current-level entity list remains available as a secondary tab.
 			ImGui::DockBuilderDockWindow("Entity Library##ExternalWindow", dock_id_bottom);
+			ImGui::DockBuilderDockWindow(TABENTITYNAME, dock_id_bottom);
 #ifdef USELEFTPANELSTRUCTUREEDITOR
 			ImGui::DockBuilderDockWindow("Structure Editor##LeftPanel", dock_id_left);
 #endif
@@ -23383,6 +23388,9 @@ void process_entity_library(void)
 		// alone only queues the docking for its initial workspace creation.
 		if (g_pwBottomAssetDockId != 0)
 			ImGui::SetNextWindowDockID(g_pwBottomAssetDockId, ImGuiCond_Always);
+		// An opaque window is required: transparent backgrounds let terrain
+		// show through the library and make it look like a viewport overlay.
+		ImGui::SetNextWindowBgAlpha(1.0f);
 		ImGui::Begin("Entity Library##ExternalWindow", &bExternal_Entities_Window, ex_window_flags);
 		if (justOpened)
 			ImGui::SetWindowFocus("Entity Library##ExternalWindow");
