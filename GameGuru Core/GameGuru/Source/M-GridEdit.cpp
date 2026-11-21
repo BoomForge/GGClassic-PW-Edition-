@@ -147,7 +147,7 @@ bool imgui_is_running = false;
 int refresh_gui_docking = 0;
 // New dockspace identity migrates the default layout once without continually
 // overwriting user adjustments saved in uiv3.layout.
-static const char* g_pwEngineDockspaceName = "PWEngineDockspaceV3";
+static const char* g_pwEngineDockspaceName = "PWEngineDockspaceV4";
 // Authoritative bottom dock ID: the full asset library is never a floating window.
 static ImGuiID g_pwBottomAssetDockId = 0;
 static bool g_pwSceneHierarchyOpen = true;
@@ -2773,12 +2773,17 @@ void mapeditorexecutable_loop(void)
 			ImGui::DockBuilderSetNodePos(dockspace_id, viewport->Pos + ImVec2(0, toolbar_size));
 			ImGui::DockBuilderSetNodeSize(dockspace_id, viewport->Size - ImVec2(0, toolbar_size + ImGuiStatusBar_Size));
 
+			// Split the LEFT and RIGHT panels off the shared dockspace first.
+			// Then split the remaining CENTRAL frame horizontally, so the
+			// asset browser is genuinely part of the editor frame, between
+			// the hierarchy and inspector. A bottom-first split made it
+			// span the whole screen independent of both side panels.
 			ImGuiID dock_main_id = dockspace_id;
-			dock_id_bottom = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Down, 0.31f, NULL, &dock_main_id);
-			g_pwBottomAssetDockId = dock_id_bottom;
 			ImGuiID dock_id_left = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.20f, NULL, &dock_main_id);
 			const float inspectorRatio = viewport->Size.x < 1100.0f ? 0.30f : 0.24f;
 			ImGuiID dock_id_right = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, inspectorRatio, NULL, &dock_main_id);
+			dock_id_bottom = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Down, 0.31f, NULL, &dock_main_id);
+			g_pwBottomAssetDockId = dock_id_bottom;
 
 			ImGui::DockBuilderDockWindow(TABEDITORNAME, dock_main_id);
 			ImGui::DockBuilderDockWindow("Scene Hierarchy##PWSceneHierarchy", dock_id_left);
