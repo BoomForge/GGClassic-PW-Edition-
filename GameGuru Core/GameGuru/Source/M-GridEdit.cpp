@@ -147,10 +147,13 @@ bool imgui_is_running = false;
 int refresh_gui_docking = 0;
 // New dockspace identity migrates the default layout once without continually
 // overwriting user adjustments saved in uiv3.layout.
-static const char* g_pwEngineDockspaceName = "PWEngineDockspaceV5";
+static const char* g_pwEngineDockspaceName = "PWEngineDockspaceV6";
 // Authoritative bottom dock ID: the full asset library is never a floating window.
 static ImGuiID g_pwBottomAssetDockId = 0;
 static bool g_pwSceneHierarchyOpen = true;
+// Scene Hierarchy replaces the old "Entities" window (current level objects).
+// The actual Classic folder/thumbnail browser must be the ONLY bottom pane.
+static const bool g_pwShowLegacyLevelEntityList = false;
 // Classic disables shadow rendering when the editor camera zooms out too far.
 // Keep cascaded realtime editor shadows available at all distances by default.
 static bool g_pwEditorRealtimeShadows = true;
@@ -2767,10 +2770,10 @@ void mapeditorexecutable_loop(void)
 		// Users can resize tabs and save the arrangement in uiv3.layout.
 		if (ImGui::DockBuilderGetNode(ImGui::GetID(g_pwEngineDockspaceName)) == NULL || refresh_gui_docking == 2)
 		{
-			// One-time restoration of the original neutral GameGuru ImGui colour scheme.
-			// The PW blue scheme was not an approved part of the traditional layout.
-			pref.current_style = 0;
-			myStyle2(NULL);
+			// Restore Classic's light neutral UI instead of the PW dark/blue skin.
+			pref.current_style = 3;
+			myLightStyle(NULL);
+			ImGui::GetStyle().Colors[ImGuiCol_WindowBg].w = 1.0f;
 			bExternal_Entities_Window = true;
 			ImGuiID dockspace_id = ImGui::GetID(g_pwEngineDockspaceName);
 			ImGui::DockBuilderRemoveNode(dockspace_id);
@@ -2792,10 +2795,8 @@ void mapeditorexecutable_loop(void)
 
 			ImGui::DockBuilderDockWindow(TABEDITORNAME, dock_main_id);
 			ImGui::DockBuilderDockWindow("Scene Hierarchy##PWSceneHierarchy", dock_id_left);
-			// The full original folder/thumbnail library is the primary lower tab.
-			// The legacy current-level entity list remains available as a secondary tab.
-			ImGui::DockBuilderDockWindow("Entity Library##ExternalWindow", dock_id_bottom);
-			ImGui::DockBuilderDockWindow(TABENTITYNAME, dock_id_bottom);
+			// ONE bottom browser: no current-level Entities pane alongside it.
+			ImGui::DockBuilderDockWindow("Asset Browser##PWAssetBrowser", dock_id_bottom);
 #ifdef USELEFTPANELSTRUCTUREEDITOR
 			ImGui::DockBuilderDockWindow("Structure Editor##LeftPanel", dock_id_left);
 #endif
@@ -6022,12 +6023,7 @@ void mapeditorexecutable_loop(void)
 		static std::map<std::string, std::int32_t> entity_folders;
 		// The library is docked along the bottom, not a separately sized popup.
 		ImGuiWindowFlags ex_window_flags = 0;
-		if (refresh_gui_docking == 0 && !bExternal_Entities_Window)
-		{
-			ImGui::Begin("##Object Library ExternalWindow", &bExternal_Entities_Window, ex_window_flags);
-			ImGui::End();
-		}
-
+		// Never create the old dummy floating library window.
 		process_entity_library();
 		
 		static char cFullWritePath[MAX_PATH];
@@ -6114,7 +6110,7 @@ void mapeditorexecutable_loop(void)
 		//########################
 
 
-		if (refresh_gui_docking == 0) 
+		if (g_pwShowLegacyLevelEntityList && refresh_gui_docking == 0) 
 		{
 			bool bOpen = true;
 			ImGui::Begin(TABENTITYNAME, &bOpen, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
@@ -6122,7 +6118,7 @@ void mapeditorexecutable_loop(void)
 			ImGui::Begin("Current Objects##AdditionalIconsWindow", &bOpen, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
 		}
-		if (refresh_gui_docking > 0) 
+		if (g_pwShowLegacyLevelEntityList && refresh_gui_docking > 0) 
 		{
 			static int current_sort_order = 0;
 			bool bToolTipActive = true;
@@ -23391,9 +23387,12 @@ void process_entity_library(void)
 		// An opaque window is required: transparent backgrounds let terrain
 		// show through the library and make it look like a viewport overlay.
 		ImGui::SetNextWindowBgAlpha(1.0f);
-		ImGui::Begin("Entity Library##ExternalWindow", &bExternal_Entities_Window, ex_window_flags);
+		// This is a permanent dock window, not a closable popup.
+		ImGui::Begin("Asset Browser##PWAssetBrowser", NULL, ex_window_flags);
+		if (ImGui::IsWindowDocked())
+			g_pwBottomAssetDockId = ImGui::GetWindowDockID();
 		if (justOpened)
-			ImGui::SetWindowFocus("Entity Library##ExternalWindow");
+			ImGui::SetWindowFocus("Asset Browser##PWAssetBrowser");
 
 		bool bAddSelectionToGame = false;
 		bool bIsWeDocked = ImGui::IsWindowDocked();
