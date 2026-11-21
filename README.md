@@ -31,13 +31,20 @@ A> Due to this public repository being hammered by anonymous cloning, we have mo
 **Project:** [GGClassic PW Edition](https://github.com/BoomForge/GGClassic-PW-Edition-)  
 **Development branch:** [work/pw-community-integration-20261121](https://github.com/BoomForge/GGClassic-PW-Edition-/tree/work/pw-community-integration-20261121)  
 **Review:** [Draft PR #1](https://github.com/BoomForge/GGClassic-PW-Edition-/pull/1)  
-**Last updated:** 21 November 2026
+**Last updated:** 22 November 2026
 
 The goal is a **fast, familiar first-person world builder** for an early-2000s-style 3D RPG that will grow gradually over a long period. DDS support must remain intact. New graphics formats are **additional**, not replacements.
 
 This tracker reports the latest **development-branch** progress. The default `master` branch may not contain those source changes until the draft PR is tested and merged.
 
 Statuses below distinguish **committed source changes** from **tested runtime behaviour**. A checked source task does not mean a Windows executable has been built or verified.
+
+### Current milestone — Model Importer 2 M1 (22 November 2026)
+
+- [x] **User-confirmed editor acceptance:** The owner marked the corrected updater, original toolbar icons, Classic style, docked bottom asset browser, asset drag delay, nested hierarchy and Lua Studio as completed. Treat these as the owner's sign-off; they are not a new independent benchmark of every machine.
+- [x] **Model Importer 2 M1 preflight:** A new read-only ImGui panel inspects mesh/vertex/skin counts, frame parents, referenced texture stages and source animation clips. It checks source and FBX-converter folders for existing DDS/PNG/JPG/TGA material paths, warns about unresolved references and malformed tables, and can copy a versioned `pw.asset-preflight` JSON report.
+- [x] **Reusable manifest and isolated Windows checks:** `PW-AssetManifest.h` is a shared contract for the later Character Creator 2 workflow; `test_pw_asset_manifest.cpp` exercises material fallback, hierarchy, clips, JSON escaping and damaged-object handling. It is wired into the Windows skeletal-import CI.
+- [ ] **Importer 2 remaining:** Full UV/axis inspection, material relinking UI, safe transactional DBO/FPE export, real rigged FBX playback, Mixamo retargeting, and complete Windows editor/gameplay acceptance. **The legacy importer is intentionally unchanged.**
 
 ### Completed — checked and committed in source
 
