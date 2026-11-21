@@ -2447,22 +2447,36 @@ void imgui_importer_loop(void)
                 }
                 if (ImGui::TreeNode("Meshes##PWImporter2"))
                 {
+                    int shown = 0;
                     for (const auto& mesh : report.meshes)
+                    {
+                        if (shown++ >= 200) break;
                         ImGui::BulletText("Mesh %d | vertices %u | bones %u | material stages %u",
                             mesh.index, mesh.vertices, mesh.bones, mesh.materialStages);
+                    }
+                    if (report.meshes.size() > 200)
+                        ImGui::TextDisabled("Showing first 200 meshes; copy JSON for the complete snapshot.");
                     ImGui::TreePop();
                 }
                 if (ImGui::TreeNode("Frame hierarchy##PWImporter2"))
                 {
+                    int shown = 0;
                     for (const auto& frame : report.frames)
+                    {
+                        if (shown++ >= 200) break;
                         ImGui::BulletText("%s (parent: %s)", frame.name.c_str(),
                             frame.parent.empty() ? "root" : frame.parent.c_str());
+                    }
+                    if (report.frames.size() > 200)
+                        ImGui::TextDisabled("Showing first 200 frames; copy JSON for the complete snapshot.");
                     ImGui::TreePop();
                 }
                 if (ImGui::TreeNode("Material references##PWImporter2"))
                 {
+                    int shown = 0;
                     for (const auto& texture : report.textures)
                     {
+                        if (shown++ >= 200) break;
                         ImGui::BulletText("Mesh %d / stage %d: %s",
                             texture.mesh, texture.stage,
                             texture.reference.empty() ? "(unnamed)" : texture.reference.c_str());
@@ -2470,13 +2484,21 @@ void imgui_importer_loop(void)
                             ImGui::TextWrapped("   %s",
                                 texture.found ? texture.resolved.c_str() : "Unresolved in source/converter folder");
                     }
+                    if (report.textures.size() > 200)
+                        ImGui::TextDisabled("Showing first 200 texture stages; copy JSON for the complete snapshot.");
                     ImGui::TreePop();
                 }
                 if (ImGui::TreeNode("Animation clips##PWImporter2"))
                 {
+                    int shown = 0;
                     for (const auto& clip : report.clips)
+                    {
+                        if (shown++ >= 200) break;
                         ImGui::BulletText("%s | %llu ticks | %u tracks",
                             clip.name.c_str(), clip.durationTicks, clip.tracks);
+                    }
+                    if (report.clips.size() > 200)
+                        ImGui::TextDisabled("Showing first 200 clips; copy JSON for the complete snapshot.");
                     ImGui::TreePop();
                 }
                 if (!report.warnings.empty() && ImGui::TreeNode("Preflight warnings##PWImporter2"))
