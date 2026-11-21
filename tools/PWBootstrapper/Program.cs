@@ -820,14 +820,21 @@ try {
                         }
                         string path = Path.Combine(build, relative);
                         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                        using var icon = new Bitmap(64, 64);
+                        // Keep the exact 42x42 Classic artwork, not a 64px
+                        // resampling with altered colours or icon proportions.
+                        using var icon = new Bitmap(42, 42);
                         using (var graphics = Graphics.FromImage(icon))
                         {
                             graphics.Clear(Color.Transparent);
-                            graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                            graphics.DrawImage(strip, new Rectangle(0, 0, 64, 64),
+                            graphics.DrawImage(strip, new Rectangle(0, 0, 42, 42),
                                 new Rectangle(col * 42, 0, 42, 42), GraphicsUnit.Pixel);
                         }
+                        // MFC toolbar bitmaps sometimes encode transparency
+                        // with pure magenta. Only remove that explicit colour
+                        // key; never replace the genuine original palette.
+                        Color key = icon.GetPixel(0, 0);
+                        if (key.R >= 250 && key.G <= 5 && key.B >= 250)
+                            icon.MakeTransparent(key);
                         icon.Save(path, ImageFormat.Png);
                         if (!installFiles.Contains(relative, StringComparer.OrdinalIgnoreCase))
                             installFiles.Add(relative);
