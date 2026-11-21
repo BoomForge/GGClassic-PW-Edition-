@@ -158,6 +158,9 @@ static const bool g_pwShowLegacyLevelEntityList = false;
 // Keep cascaded realtime editor shadows available at all distances by default.
 static bool g_pwEditorRealtimeShadows = true;
 static char g_pwSceneHierarchySearch[128] = "";
+#ifdef ENABLEIMGUI
+#include "PW-SceneHierarchy.h"
+#endif
 
 static void PWShowInstalledBuildDetails()
 {
@@ -2841,50 +2844,12 @@ void mapeditorexecutable_loop(void)
 		if (dock_main_tabs == 0)
 			dock_main_tabs = dockspace_id;
 
-		// The hierarchy lists actual instances in this loaded level, not
-		// source assets. Selection is fed through the editor's existing
-		// iWidgetSelection path so the gizmo and inspector keep working.
-		if (ImGui::Begin("Scene Hierarchy##PWSceneHierarchy", &g_pwSceneHierarchyOpen, iGenralWindowsFlags | ImGuiWindowFlags_NoMove))
+		// Fully nested scene tree; uses engine-native parent indices and
+		// GameGuru's existing group movement/undo machinery.
+		if (ImGui::Begin("Scene Hierarchy##PWSceneHierarchy", &g_pwSceneHierarchyOpen,
+				iGenralWindowsFlags | ImGuiWindowFlags_NoMove))
 		{
-			ImGui::PushItemWidth(-1.0f);
-			ImGui::InputText("##PWSceneSearch", g_pwSceneHierarchySearch, sizeof(g_pwSceneHierarchySearch));
-			ImGui::PopItemWidth();
-			if (ImGui::IsItemHovered())
-				ImGui::SetTooltip("Filter level objects by name");
-			ImGui::Separator();
-			const char* levelName = g.projectfilename_s.Get();
-			ImGui::TextDisabled("Level: %s", levelName && *levelName ? levelName : "Untitled");
-			ImGui::BeginChild("##PWSceneEntries", ImVec2(0, 0), false);
-			int visibleEntries = 0;
-			for (int e = 1; e <= g.entityelementlist; ++e)
-			{
-				if (t.entityelement[e].bankindex <= 0 || t.entityelement[e].obj <= 0)
-					continue;
-				const char* name = t.entityelement[e].eleprof.name_s.Get();
-				if (!name || !*name) name = "Unnamed entity";
-				if (*g_pwSceneHierarchySearch && !pestrcasestr(name, g_pwSceneHierarchySearch))
-					continue;
-				++visibleEntries;
-				const bool locked = t.entityelement[e].editorlock != 0;
-				ImGui::PushID(e);
-				char label[384];
-				sprintf_s(label, sizeof(label), "%s%s", name, locked ? " [locked]" : "");
-				if (ImGui::Selectable(label, t.widget.pickedEntityIndex == e) && !locked)
-				{
-					// Clear a previous gizmo selection before requesting a new
-					// one; the downstream picking code only selects when empty.
-					widget_switchoff();
-					t.widget.pickedEntityIndex = 0;
-					t.gridentity = 0;
-					t.grideditselect = 5;
-					t.inputsys.domodeentity = 1;
-					iWidgetSelection = e;
-				}
-				ImGui::PopID();
-			}
-			if (visibleEntries == 0)
-				ImGui::TextDisabled("No matching objects in this level");
-			ImGui::EndChild();
+			PWRenderSceneHierarchy();
 		}
 		ImGui::End();
 
@@ -2907,6 +2872,14 @@ void mapeditorexecutable_loop(void)
 					t.entityelement[selected].rx, t.entityelement[selected].ry, t.entityelement[selected].rz);
 				ImGui::Text("Scale: %.1f, %.1f, %.1f",
 					t.entityelement[selected].scalex, t.entityelement[selected].scaley, t.entityelement[selected].scalez);
+				ImGui::Separator();
+				const char* entityLua = t.entityelement[selected].eleprof.aimain_s.Get();
+				ImGui::Separator();
+				ImGui::TextWrapped("AI Lua script: %s", (entityLua && *entityLua) ? entityLua : "(none assigned)");
+				if (ImGui::Button("Edit Lua Script..."))
+					PWLuaStudio::OpenEntityScript(GetActiveWindow(), entityLua);
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Open the entity's assigned script in Pixelwolf Lua Studio.");
 				ImGui::Separator();
 				ImGui::TextDisabled("The transform gizmo works in the central viewport.");
 				if (ImGui::Button("Edit Entity Properties"))
