@@ -2744,6 +2744,7 @@ void mapeditorexecutable_loop(void)
 			ImGui::DockBuilderDockWindow("Tutorial Video##LeftHelpVideoWindow", dock_id_right);
 			ImGui::DockBuilderDockWindow("Tutorial Steps##LeftHelpWindow", dock_id_right);
 
+			ImGui::DockBuilderDockWindow("Inspector##PWInspector", dock_id_right);
 			ImGui::DockBuilderDockWindow("Entity Properties##PropertiesWindow", dock_id_right);
 			ImGui::DockBuilderDockWindow("Character Creator##PropertiesWindow", dock_id_right);
 			ImGui::DockBuilderDockWindow("Structure Properties##BuilderPropertiesWindow", dock_id_right);
@@ -2821,6 +2822,41 @@ void mapeditorexecutable_loop(void)
 			if (visibleEntries == 0)
 				ImGui::TextDisabled("No matching objects in this level");
 			ImGui::EndChild();
+		}
+		ImGui::End();
+
+		// Persistent inspector is always available even before Classic enters
+		// its dedicated entity-property zoom/edit mode.
+		if (ImGui::Begin("Inspector##PWInspector", NULL, iGenralWindowsFlags))
+		{
+			const int selected = t.widget.pickedEntityIndex;
+			if (selected > 0 && selected <= g.entityelementlist &&
+				t.entityelement[selected].bankindex > 0 && t.entityelement[selected].obj > 0)
+			{
+				const char* label = t.entityelement[selected].eleprof.name_s.Get();
+				ImGui::TextWrapped("%s", label && *label ? label : "Unnamed entity");
+				ImGui::TextDisabled("Level instance #%d", selected);
+				ImGui::Separator();
+				ImGui::Text("Transform");
+				ImGui::Text("Position: %.1f, %.1f, %.1f",
+					t.entityelement[selected].x, t.entityelement[selected].y, t.entityelement[selected].z);
+				ImGui::Text("Rotation: %.1f, %.1f, %.1f",
+					t.entityelement[selected].rx, t.entityelement[selected].ry, t.entityelement[selected].rz);
+				ImGui::Text("Scale: %.1f, %.1f, %.1f",
+					t.entityelement[selected].scalex, t.entityelement[selected].scaley, t.entityelement[selected].scalez);
+				ImGui::Separator();
+				ImGui::TextDisabled("The transform gizmo works in the central viewport.");
+				if (ImGui::Button("Edit Entity Properties"))
+				{
+					// Delegate edits to the existing Classic property flow,
+					// including EBE and its zoom/restore safeguards.
+					t.widget.propertybuttonselected = 2;
+				}
+			}
+			else
+			{
+				ImGui::TextDisabled("Select an object in the Scene Hierarchy or viewport.");
+			}
 		}
 		ImGui::End();
 
@@ -6984,8 +7020,8 @@ void mapeditorexecutable_loop(void)
 			static bool bLeftPanelSelectedAsDefault = false;
 			if (!bLeftPanelSelectedAsDefault) {
 				//ImGui::SetWindowFocus(TABENTITYNAME);
-				//PE: Start in terrain tools.
-				ImGui::SetWindowFocus("Terrain Tools##TerrainToolsWindow");
+				// PW Edition default focus: keep the Inspector visible on the right.
+				ImGui::SetWindowFocus("Inspector##PWInspector");
 
 				bLeftPanelSelectedAsDefault = true;
 			}
