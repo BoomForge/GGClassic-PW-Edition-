@@ -2412,7 +2412,8 @@ void imgui_importer_loop(void)
             static int pwAssetReportObject = -1;
             static std::string pwAssetReportSource;
             const int currentObject = t.importer.objectnumber;
-            const std::string currentSource = t.importer.objectFileOriginalPath.Get();
+            const char* pwModelSourceName = t.importer.objectFileOriginalPath.Get();
+            const std::string currentSource = pwModelSourceName ? pwModelSourceName : "";
             ImGui::TextWrapped("Inspect meshes, frame hierarchy, material paths and clips before export.");
             if (ImGui::Button("Inspect loaded model##PWImporter2"))
             {
