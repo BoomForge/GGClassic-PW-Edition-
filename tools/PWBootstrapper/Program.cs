@@ -639,6 +639,53 @@ try {
         catch { return false; }
     }
 
+    // When the Steam GameGuru.exe was compiled against different resource IDs,
+    // recover only an UNAMBIGUOUS 42px-high strip with the exact required width.
+    // Never select a visually unrelated strip or infer an icon from a filename.
+    private delegate bool EnumResourceNameProc(IntPtr module, IntPtr resourceType, IntPtr resourceName, IntPtr data);
+    [DllImport("kernel32.dll", EntryPoint = "EnumResourceNamesW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumResourceNames(IntPtr module, IntPtr type,
+        EnumResourceNameProc callback, IntPtr data);
+
+    static int FindUniqueOriginalToolbarStrip(IntPtr module, int expectedColumns)
+    {
+        var ids = new List<int>();
+        EnumResourceNameProc callback = (_, _, name, _) =>
+        {
+            long value = name.ToInt64();
+            if (value > 0 && value < 65536)
+                ids.Add((int)value);
+            return true;
+        };
+        if (!EnumResourceNames(module, (IntPtr)2 /* RT_BITMAP */, callback, IntPtr.Zero))
+            return 0;
+        var candidates = new List<int>();
+        var alreadyMapped = new HashSet<int> { 152, 176, 178, 180, 182, 186 };
+        foreach (int id in ids.Distinct())
+        {
+            if (alreadyMapped.Contains(id)) continue;
+            IntPtr bitmap = LoadOriginalBitmap(module, (IntPtr)id, 0, 0, 0, 0x2000);
+            if (bitmap == IntPtr.Zero) continue;
+            try
+            {
+                using var image = Bitmap.FromHbitmap(bitmap);
+                if (image.Width == expectedColumns * 42 && image.Height == 42)
+                    candidates.Add(id);
+            }
+            catch (ArgumentException) { /* Non-toolbar resource. */ }
+            finally { DeleteOriginalBitmap(bitmap); }
+        }
+        if (candidates.Count != 1)
+        {
+            LogOutput("Classic resource fallback: " + candidates.Count +
+                " exact " + expectedColumns + "-column 42px strips. Ambiguous or missing; no substitution.");
+            return 0;
+        }
+        LogOutput("Original 42px toolbar bitmap matched a unique local resource ID: " + candidates[0]);
+        return candidates[0];
+    }
+
     static void RestoreNativeClassicToolbar(string build, string steam, List<string> installFiles)
     {
         string stockLauncher = Path.Combine(steam, "GameGuru.exe");
@@ -672,7 +719,14 @@ try {
                 IntPtr hBitmap = LoadOriginalBitmap(module, (IntPtr)resource, 0, 0, 0, 0x2000);
                 if (hBitmap == IntPtr.Zero)
                 {
-                    LogOutput("Classic toolbar RT_BITMAP " + resource + " not present; preserving existing assets.");
+                    int alternate = FindUniqueOriginalToolbarStrip(module, names.Length);
+                    if (alternate > 0)
+                        hBitmap = LoadOriginalBitmap(module, (IntPtr)alternate, 0, 0, 0, 0x2000);
+                }
+                if (hBitmap == IntPtr.Zero)
+                {
+                    LogOutput("Classic toolbar RT_BITMAP " + resource +
+                        " unavailable, with no unique compatible local original; preserving existing artwork.");
                     missing += names.Length;
                     continue;
                 }
