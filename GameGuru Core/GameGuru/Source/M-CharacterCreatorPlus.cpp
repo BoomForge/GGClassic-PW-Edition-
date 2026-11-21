@@ -7,6 +7,8 @@
 #include "gameguru.h"
 #include "M-CharacterCreatorPlusTTS.h"
 #include "CCameraC.h"
+#include "PW-SkeletalAudit.h"
+#include "PW-SkeletalIntegrity.h"
 
 //PE: GameGuru IMGUI.
 #include "..\Imgui\imgui.h"
@@ -2604,9 +2606,48 @@ bool charactercreatorplus_savecharacterentity ( int iCharObj, LPSTR pOptionalDBO
 	}
 
 
+	// Shared PW Edition rig preservation check. The ordinary character
+	// exporter is unchanged unless the explicit verification flag is enabled.
+	PWSkeletalAudit::Snapshot pwCharacterBefore;
+	PWSkeletalIntegrity::Audit pwCharacterDeepBefore;
+	const bool pwVerifyCharacterRig=PWSkeletalAudit::VerifyEnabled() && ObjectExist(iCharObj)==1;
+	if (pwVerifyCharacterRig)
+	{
+		sObject* pwSource=GetObjectData(iCharObj);
+		pwCharacterBefore=PWSkeletalAudit::Inspect(pwSource);
+		if (pwCharacterBefore.HasSkinOrAnimation())
+			pwCharacterDeepBefore=PWSkeletalIntegrity::Inspect(pwSource);
+	}
 	// save DBO at specified location
 	if ( FileExist(DBOFile_s.Get()) == 1 ) DeleteAFile ( DBOFile_s.Get() );
 	SaveObject ( DBOFile_s.Get(), iCharObj );
+	if (pwVerifyCharacterRig && pwCharacterBefore.HasSkinOrAnimation())
+	{
+		std::string pwIssue;
+		if (FileExist(DBOFile_s.Get())==0)
+			pwIssue="Saved character DBO not found";
+		else
+		{
+			const int pwScratch=findFreeObject();
+			LoadObject(DBOFile_s.Get(),pwScratch);
+			if (ObjectExist(pwScratch)==1)
+			{
+				sObject* pwReloaded=GetObjectData(pwScratch);
+				pwIssue=PWSkeletalAudit::Compare(pwCharacterBefore,PWSkeletalAudit::Inspect(pwReloaded));
+				if (pwIssue.empty())
+					pwIssue=PWSkeletalIntegrity::Compare(pwCharacterDeepBefore,PWSkeletalIntegrity::Inspect(pwReloaded));
+				DeleteObject(pwScratch);
+			}
+			else pwIssue="Saved character DBO could not be reloaded";
+		}
+		if (pwIssue.empty()) OutputDebugStringA("PW Character Creator: skin, bind pose and animation audit PASS.\n");
+		else
+		{
+			const std::string pwMessage="PW Character Creator DBO WARNING: "+pwIssue+"\n";
+			OutputDebugStringA(pwMessage.c_str());
+			popup_text("Character animation verification warning - see debug output");
+		}
+	}
 
 	// character template
     cstr copyFrom_s = g.fpscrootdir_s+"\\Files\\entitybank\\Characters\\Uber Character.fpe";
