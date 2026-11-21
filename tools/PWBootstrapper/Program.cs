@@ -69,6 +69,10 @@ internal static class Program
     {
         try
         {
+            // Safe Windows-only native API check used by GitHub Actions.
+            // No Steam files, downloads, or installation are involved.
+            if (args.Length == 1 && args[0] == "--self-test-native-icons")
+                return VerifyNativeToolbarBitmapLifetime();
             InitLog();
             return Run(args).GetAwaiter().GetResult();
         }
@@ -605,9 +609,26 @@ try {
     [DllImport("user32.dll", EntryPoint = "LoadImageW", SetLastError = true)]
     static extern IntPtr LoadOriginalBitmap(IntPtr module, IntPtr id, uint imageType, int width, int height, uint flags);
 
-    [DllImport("gdi32.dll", SetLastError = true)]
+    // P/Invoke method names are not Windows export names. GDI32 exports
+    // DeleteObject (not DeleteOriginalBitmap); explicitly bind its entry point
+    // so toolbar recovery can dispose the HBITMAP without EntryPointNotFoundException.
+    [DllImport("gdi32.dll", EntryPoint = "DeleteObject", ExactSpelling = true, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     static extern bool DeleteOriginalBitmap(IntPtr bitmap);
+
+    // CI smoke test: execute the *same* native binding used by toolbar recovery.
+    // A successful C# compilation alone would never catch a mistyped Win32 export.
+    static int VerifyNativeToolbarBitmapLifetime()
+    {
+        if (!OperatingSystem.IsWindows()) return 2;
+        using var sample = new Bitmap(42, 42);
+        IntPtr handle = sample.GetHbitmap();
+        if (handle == IntPtr.Zero) throw new InvalidOperationException("HBITMAP allocation failed.");
+        if (!DeleteOriginalBitmap(handle))
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "GDI32 DeleteObject failed.");
+        Console.WriteLine("PW toolbar native bitmap cleanup passed: gdi32!DeleteObject.");
+        return 0;
+    }
 
     static bool IsGeneratedPWIcon(string path)
     {
