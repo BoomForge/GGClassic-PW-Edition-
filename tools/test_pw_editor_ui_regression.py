@@ -58,6 +58,23 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('GetTickCount() - pwAssetStart', fn)
         self.assertIn('#if !defined(ENABLEIMGUI) || defined(USEOLDIDE)', fn)
 
+    def test_permanent_asset_browser_and_fast_ui_insertions(self):
+        # The library is a docked editor pane, never a transient popup.
+        library = GRID[GRID.index("void process_entity_library(void)\\n"):]
+        self.assertIn("bExternal_Entities_Window = true;", library)
+        self.assertNotIn("bExternal_Entities_Window = false;", library)
+        self.assertNotIn("textureId = TOOL_ENTITY;", library)
+        self.assertNotIn("editor_filllibrary();", library)
+        self.assertIn('textureId = 0; // No thumbnail:', library)
+
+    def test_hierarchy_parent_and_lua_entrypoints_survive(self):
+        hierarchy = (ROOT / "GameGuru Core/GameGuru/Source/PW-SceneHierarchy.h").read_text(encoding="utf-8")
+        self.assertIn("PWSetSceneParent(int child, int parent)", hierarchy)
+        self.assertIn("PWMoveEntityToFolder(int e, int folder)", hierarchy)
+        self.assertIn("editor_rec_addchildrentorubberband(e);", hierarchy)
+        self.assertIn("OpenEntityScript(GetActiveWindow()", hierarchy)
+        self.assertIn('if (ImGui::Button("Edit Lua Script..."))', GRID)
+
     def test_no_fake_toolbar_generation(self):
         self.assertNotIn('DrawPWIcon(', UPDATER)
         self.assertIn('ReportUnrecoveredClassicArtwork(built, steam);', UPDATER)
