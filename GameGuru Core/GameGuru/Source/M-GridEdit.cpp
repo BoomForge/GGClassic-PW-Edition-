@@ -4582,6 +4582,8 @@ void mapeditorexecutable_loop(void)
 
 							t.grideleprof.name_s = imgui_setpropertystring2(t.group, t.grideleprof.name_s.Get(), t.strarr_s[413].Get(), "Choose a unique name for this character");
 							t.grideleprof.aimain_s = imgui_setpropertylist2(t.group, t.controlindex, t.grideleprof.aimain_s.Get(), "Behaviour", "Select a behaviour for this character", 11);
+							if (ImGui::SmallButton("Edit Script##PWLuaSimpleCharacter"))
+								PWLuaStudio::OpenEntityScript(GetActiveWindow(), t.grideleprof.aimain_s.Get());
 							t.grideleprof.soundset1_s = imgui_setpropertyfile2(t.group, t.grideleprof.soundset1_s.Get(), "Voiceover", "Select t.a WAV or OGG file this character will use during their behavior", "audiobank\\");
 							t.grideleprof.ifused_s = imgui_setpropertystring2(t.group, t.grideleprof.ifused_s.Get(), "If Used", "Sometimes used to specify the name of an entity to be activated");
 						}
@@ -4768,6 +4770,8 @@ void mapeditorexecutable_loop(void)
 										ms = "Script";
 										cstr aim = t.grideleprof.aimain_s;
 										t.grideleprof.aimain_s = imgui_setpropertyfile2(t.group, t.grideleprof.aimain_s.Get(), (char *)ms.c_str(), t.strarr_s[207].Get(), pAIRoot);
+										if (ImGui::SmallButton("Edit Script##PWLuaBehaviour1"))
+											PWLuaStudio::OpenEntityScript(GetActiveWindow(), t.grideleprof.aimain_s.Get());
 										if (aim != t.grideleprof.aimain_s)
 											current_loaded_script = -1;
 									}
@@ -5172,6 +5176,8 @@ void mapeditorexecutable_loop(void)
 											ms = "Script";
 											cstr aim = t.grideleprof.aimain_s;
 											t.grideleprof.aimain_s = imgui_setpropertyfile2(t.group, t.grideleprof.aimain_s.Get(), (char *)ms.c_str(), t.strarr_s[207].Get(), pAIRoot);
+										if (ImGui::SmallButton("Edit Script##PWLuaBehaviour2"))
+											PWLuaStudio::OpenEntityScript(GetActiveWindow(), t.grideleprof.aimain_s.Get());
 											aimain = t.grideleprof.aimain_s.Lower();
 											if (aim != t.grideleprof.aimain_s)
 												current_loaded_script = -1;
@@ -5442,6 +5448,8 @@ void mapeditorexecutable_loop(void)
 										t.grideleprof.aimain_s = tmpvalue;
 										current_loaded_script = -1;
 									}
+									if (ImGui::SmallButton("Edit Script##PWLuaMainAI"))
+										PWLuaStudio::OpenEntityScript(GetActiveWindow(), t.grideleprof.aimain_s.Get());
 								}
 
 
