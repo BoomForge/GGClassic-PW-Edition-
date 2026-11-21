@@ -333,3 +333,8 @@ GameGuru Core/.vs/GameGuru/v17/DocumentLayout.backup.json
 GameGuru Core/.vs/GameGuru/v17/DocumentLayout.json
 GameGuru Core/SDK/OGG/.vs/ogg_vorbis_static/v17/DocumentLayout.backup.json
 GameGuru Core/SDK/OGG/.vs/ogg_vorbis_static/v17/DocumentLayout.json
+
+# PW local builds and owned Steam assets: NEVER check these into the public fork.
+/PW-TestInstall/
+/.pw-local-deps/
+/GameGuru Core/SDK/DirectX/Lib/x64/*.lib

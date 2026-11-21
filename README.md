@@ -109,6 +109,12 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 - [ ] **Rebuild missing Go backend functionality and implement GameGuru native skeletal retarget/export:** web source recovered, but HTTP backend remains compiled, MD3 final format loses skeletal data, and the older v1.0.4 source ZIP is still unavailable.
 - [ ] Evaluate the separate M.I.L.O retro-character-creator-foundation branch for canonical low-poly body/rig, morph, hair/clothing and export design.
 
+### Local Windows test builds
+
+- [x] Safe local build-and-stage script for owned GameGuru Classic Steam files: [tools/pw-local-test.ps1](tools/pw-local-test.ps1). Compiles x64 in VS2022, stages into a separate `PW-TestInstall` folder, and does **not** overwrite Steam or publish proprietary EXEs.
+- [x] CI now restores the pinned official Microsoft D3DX import libraries (`d3dx11.lib`, `d3dx9.lib`) locally and builds vendored DirectXTex/Effects11 dependencies before full engine linking. [Build instructions](docs/PW_LOCAL_WINDOWS_TEST_BUILD.md).
+- [ ] Confirm full x64 CI engine + launcher build success and verify gameplay in a local Windows test install.
+
 ### To do — future upgrades
 
 - [ ] Build an optional **full RPG inventory and quest save system** on top of the PW typed transition-value API; currently scripts explicitly select which simple values to carry.
