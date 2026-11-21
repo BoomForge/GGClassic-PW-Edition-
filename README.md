@@ -125,6 +125,14 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 - [x] CI now restores the pinned official Microsoft D3DX import libraries (`d3dx11.lib`, `d3dx9.lib`) locally and builds vendored DirectXTex/Effects11 dependencies before full engine linking. [Build instructions](docs/PW_LOCAL_WINDOWS_TEST_BUILD.md).
 - [ ] Confirm full x64 CI engine + launcher build success and verify gameplay in a local Windows test install.
 
+### Requested engine-wide quality-of-life improvements (22 November 2026)
+
+These are **new cross-genre user requests**, not completed features. See the [detailed requirements and acceptance tests](docs/PIXELWOLF_CLASSIC_ROADMAP.md#general-purpose-game-system-requests--22-november-2026).
+
+- [ ] **P0 — Reliable per-player profile saves:** An old-console-style player profile with one logical save file containing selected level, position, player progress and developer-registered Lua/game state. Support autosave, checkpoint, manual save, loading after a restart, safe/atomic writes, recovery and backwards compatibility. **Not the same as the existing opt-in level-transition variable persistence.**
+- [ ] **P0 — Fix direct hits from non-explosive projectiles:** Reproduce and repair a reported bug where arrows/bolts and other non-explosive projectiles fail to damage players or damageable active objects, while explosive projectiles appear to work. Verify collisions, health subtraction, damage callbacks and no double hits in Test Level and standalone.
+- [ ] **P1 — Customisable controls:** Introduce configurable action bindings and a Controls menu with save/reset/conflict handling. Provide Lua action queries and a compatibility plan for stock/community scripts using hard-coded key codes. This is **gameplay input binding**, separate from weapon model attachment/socket binding.
+
 ### To do — future upgrades
 
 - [ ] Build an optional **full RPG inventory and quest save system** on top of the PW typed transition-value API; currently scripts explicitly select which simple values to carry.
