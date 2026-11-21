@@ -23352,6 +23352,9 @@ float ImGuiGetMouseY(void)
 #ifdef ENABLEIMGUI
 void process_entity_library(void)
 {
+	// The PW asset library is a permanent dock, not an optional external dialog.
+	// Older Classic event handlers may still set the legacy visibility flag false.
+	bExternal_Entities_Window = true;
 	// Opening Add brings the bottom Asset Library tab forward once.
 	static bool wasLibraryOpen = false;
 	const bool justOpened = bExternal_Entities_Window && !wasLibraryOpen;
@@ -23975,7 +23978,7 @@ void process_entity_library(void)
 
 												if (myfiles->iPreview > 0 && !GetImageExistEx(myfiles->iPreview)) {
 													myfiles->iPreview = 0;
-													textureId = TOOL_ENTITY;
+													textureId = 0; // No thumbnail: show labelled placeholder, not toolbar icon.
 												}
 
 												if (!bHeaderDisplayed) {
@@ -24104,10 +24107,8 @@ void process_entity_library(void)
 														{
 															entity_adduniqueentity(false);
 															t.tasset = t.entid;
-															if (t.talreadyloaded == 0)
-															{
-																editor_filllibrary();
-															}
+															// PW browser reads the entity bank directly; never synchronise with
+																// the retired external IDE (editor_filllibrary blocks placement).
 														}
 														t.inputsys.constructselection = t.tasset;
 
@@ -24430,10 +24431,8 @@ void process_entity_library(void)
 								{
 									entity_adduniqueentity(false);
 									t.tasset = t.entid;
-									if (t.talreadyloaded == 0)
-									{
-										editor_filllibrary();
-									}
+									// PW browser reads the entity bank directly; never synchronise with
+																// the retired external IDE (editor_filllibrary blocks placement).
 								}
 
 								searchfiles->iFlags = 0;
@@ -24480,14 +24479,8 @@ void process_entity_library(void)
 				bAreWeOverLapping = true;
 			}
 		}
-		if (!bIsWeDocked && bCheckForClosing) {
-			if (bAreWeOverLapping)
-				bExternal_Entities_Window = false;
-		}
-
-		//Remove window on right click if we are overlapping.
-		if (bAreWeOverLapping && t.inputsys.mclick == 2)
-			bExternal_Entities_Window = false;
+		// The PW browser is permanently docked; floating-dialog overlap checks
+		// must not hide it after dragging assets or right-clicking.
 
 
 		bCheckForClosing = false;
