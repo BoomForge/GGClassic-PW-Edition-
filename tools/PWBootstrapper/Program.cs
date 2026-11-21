@@ -3,6 +3,8 @@ using System.IO.Compression;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.Text.Json;
 using System.Windows.Forms;
 
@@ -207,11 +209,16 @@ internal static class Program
             File.WriteAllText(Path.Combine(built, "Launch-PW-Edition.cmd"),
                 "@echo off\r\ncd /d \"%~dp0\"\r\nstart \"\" \"%~dp0Guru-MapEditor.exe\"\r\n", Encoding.ASCII);
             File.WriteAllText(Path.Combine(built, "pw-installed-commit.txt"), sha + Environment.NewLine, Encoding.ASCII);
-            foreach (var relative in FilesToInstall)
+            // Classic Steam installations may not include the newer ImGui UI
+            // images. Draw neutral, original fallback icons only for missing
+            // filenames. Never overwrite a paid or existing image.
+            var installFiles = FilesToInstall.ToList();
+            AddMissingEditorIconFallbacks(built, steam, installFiles);
+            foreach (var relative in installFiles)
                 if (!File.Exists(Path.Combine(built, relative)))
                     throw new FileNotFoundException("Required PW build output missing; nothing installed: " + relative);
             LogOutput("\nFull x64 build complete. PW-branded editor verified. Files ready:");
-            foreach (var relative in FilesToInstall) LogOutput("  " + relative);
+            foreach (var relative in installFiles) LogOutput("  " + relative);
 
             ValidateSteam(steam);
             if (Process.GetProcessesByName("GameGuru").Length > 0 ||
@@ -227,7 +234,7 @@ internal static class Program
                 Console.WriteLine("Cancelled before installation. Steam is unchanged.");
                 return 0;
             }
-            string backup = InstallWithRollback(built, steam, sha);
+            string backup = InstallWithRollback(built, steam, sha, installFiles);
             var installed = Path.Combine(steam, "Guru-MapEditor.exe");
             if (Digest(engine) != Digest(installed))
                 throw new IOException("Post-install editor SHA-256 mismatch. Check backup " + backup);
@@ -302,6 +309,62 @@ internal static class Program
             "Pixelwolf PW Edition", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
+    // Fresh PW UI ships as source. Original simple fallback graphics are
+    // rendered locally at install time, so proprietary stock/Newer GameGuru
+    // interface packs are never downloaded, redistributed or overwritten.
+    static readonly string[] EditorIcons =
+    {
+        "ABOUT-Country.png", "ABOUT-Logo.png", "ABOUT-TGC.png",
+        "blendmode.png", "builder.png", "ccp.png", "circle.png",
+        "circlem.png", "circles.png", "dotcircle.png", "dotcirclem.png",
+        "dotcircles.png", "drawwaypoints.png", "ebe-block.png",
+        "ebe-column.png", "ebe-control1.png", "ebe-control2.png",
+        "ebe-cube.png", "ebe-floor.png", "ebe-new.png", "ebe-row.png",
+        "ebe-stairs.png", "ebe-wall.png", "entity.png", "import.png",
+        "level.png", "loadlevel.png", "markers.png", "media-pause.png",
+        "media-play.png", "media-record.png", "media-recording.png",
+        "media-recordprocessing.png", "media-refresh.png",
+        "newlevel.png", "newwaypoints.png", "paintgrass.png",
+        "painttexture.png", "pointer2.png", "pointer3.png", "rampmode.png",
+        "rounding_overlay_style0-h.png", "savelevel.png", "shape-down.png",
+        "shape-up.png", "shape.png", "socialvr.png", "storedlevel.png",
+        "testgame.png", "theader.png", "vrmode.png", "waypoints.png"
+    };
+
+    static void AddMissingEditorIconFallbacks(string build, string steam, List<string> installFiles)
+    {
+        int created = 0;
+        foreach (var filename in EditorIcons)
+        {
+            string relative = Path.Combine("Files", "editors", "uiv3", filename);
+            if (File.Exists(Path.Combine(steam, relative))) continue;
+            string target = Path.Combine(build, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+
+            bool wide = filename.StartsWith("ABOUT-", StringComparison.OrdinalIgnoreCase) ||
+                        filename.Equals("theader.png", StringComparison.OrdinalIgnoreCase);
+            int w = wide ? 256 : 64, h = wide ? 96 : 64;
+            using var bmp = new Bitmap(w, h);
+            using var g = Graphics.FromImage(bmp);
+            g.Clear(Color.FromArgb(34, 40, 58));
+            using var rim = new Pen(Color.FromArgb(91, 118, 185), 3);
+            g.DrawRectangle(rim, 2, 2, w - 5, h - 5);
+            string label = wide ? "PW EDITION" : filename.Split('.')[0].ToUpperInvariant().Replace("MEDIA-", "M-");
+            if (!wide && label.Length > 6) label = label[..6];
+            using var font = new Font("Segoe UI", wide ? 20 : 11, FontStyle.Bold, GraphicsUnit.Pixel);
+            using var ink = new SolidBrush(Color.White);
+            using var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+            g.DrawString(label, font, ink, new RectangleF(4, 4, w - 8, h - 8), format);
+            bmp.Save(target, ImageFormat.Png);
+            installFiles.Add(relative);
+            created++;
+        }
+        if (created > 0)
+            LogOutput("Generated " + created + " neutral PW UI icon fallbacks for resources missing from the Steam install.");
+        // Optional Roboto-Medium.ttf deliberately not copied: ChangeGGFont
+        // falls back to ImGui's built-in font if the file is absent.
+    }
+
     static bool HasCompiledPWBrand(string exe)
     {
         // The exact ASCII text used by M-GridEdit.cpp for the editor window title.
@@ -313,7 +376,7 @@ internal static class Program
         return data.AsSpan().IndexOf(marker) >= 0;
     }
 
-    static string InstallWithRollback(string build, string steam, string sha)
+    static string InstallWithRollback(string build, string steam, string sha, IReadOnlyList<string> installFiles)
     {
         string backup = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             "PW-Edition-Backups", DateTime.Now.ToString("yyyyMMdd-HHmmss-fff"));
@@ -325,7 +388,7 @@ internal static class Program
         try
         {
             // Back up ALL originals first; stop before changing anything if one backup fails.
-            foreach (string relative in FilesToInstall)
+            foreach (string relative in installFiles)
             {
                 string target = Path.Combine(steam, relative);
                 string? folder = Path.GetDirectoryName(target);
