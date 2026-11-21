@@ -66,10 +66,10 @@ int main() {
     assert(m.clips[0].durationTicks == 30 && m.clips[0].tracks == 1);
     assert(!m.truncated);
     const auto json = PWAssetManifest::Json(m);
-    assert(json.find("\\"version\\": 1") != std::string::npos);
+    assert(json.find("\"version\": 1") != std::string::npos);
     assert(json.find("Head\\\\\\\"Bone") != std::string::npos);
-    assert(json.find("\\"found\\":false") != std::string::npos);
-    assert(json.find("\\"unresolvedTextures\\": 1") != std::string::npos);
+    assert(json.find("\"found\":false") != std::string::npos);
+    assert(json.find("\"unresolvedTextures\": 1") != std::string::npos);
 
     const auto empty = PWAssetManifest::Inspect(
         (Object*)nullptr, "", "", exists);
@@ -86,5 +86,5 @@ int main() {
     const auto report = PWAssetManifest::Inspect(&bad, "", "", exists);
     assert(report.warnings.size() >= 2 && report.skinBoneReferences == 3);
 
-    std::cout << "PW Asset Manifest M1 preflight: PASS\\n";
+    std::cout << "PW Asset Manifest M1 preflight: PASS\n";
 }
