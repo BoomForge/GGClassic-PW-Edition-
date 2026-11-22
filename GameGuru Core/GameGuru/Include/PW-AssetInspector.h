@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstring>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -170,6 +171,14 @@ inline void Select(const std::string& file) {
         s.modelId=0;
         return;
     }
+    const PWImportedGeometry::Report geometry = PWImportedGeometry::Inspect(GetObjectData(s.modelId));
+    if (!geometry.usable || !PWImportedGeometry::SensibleExtent(
+        ObjectSizeX(s.modelId,2), ObjectSizeY(s.modelId,2), ObjectSizeZ(s.modelId,2))) {
+        s.status="Model loaded without usable geometry; insertion is disabled.";
+        DeleteObject(s.modelId);
+        s.modelId=0;
+        return;
+    }
     if (!s.albedoSource.empty()) {
         s.modelTextureId=FreeImageId();
         if (s.modelTextureId) {
@@ -281,8 +290,9 @@ inline bool InsertIntoScene() {
     if (t.addentityfile_s=="") { s.status="Entity profile path was empty."; return false; }
     entity_adduniqueentity(false);
     const int id=t.entid;
-    if (id<=0 || !ObjectExist(g.entitybankoffset+id)) {
-        s.status="Entity profile failed to load; no scene object created.";
+    if (id<=0 || !ObjectExist(g.entitybankoffset+id) ||
+        !PWImportedGeometry::Inspect(GetObjectData(g.entitybankoffset+id)).usable) {
+        s.status="Entity profile failed to load usable geometry; no scene object created.";
         return false;
     }
     // Initialise the same entity defaults as the normal Asset Browser. Then
