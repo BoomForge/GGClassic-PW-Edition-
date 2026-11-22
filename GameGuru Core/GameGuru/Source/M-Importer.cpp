@@ -2318,7 +2318,14 @@ void imgui_importer_loop(void)
             // untouched. The existing importer owns preview/DBO/FPE output.
             importer_applyimagelisttextures(false, slot, false);
             importer_recreate_texturesprites();
-            if (originalImage > 0 && originalImage != stagedImage && ImageExist(originalImage) == 1)
+            // An image can be shared by several Classic importer slots.
+            // Do not destroy it while any other slot still references it.
+            bool oldImageIsShared = false;
+            for (int i = 1; i < IMPORTERTEXTURESMAX; ++i)
+                if (i != slot && t.importerTextures[i].imageID == originalImage)
+                    oldImageIsShared = true;
+            if (!oldImageIsShared && originalImage > 0
+                && originalImage != stagedImage && ImageExist(originalImage) == 1)
                 DeleteImage(originalImage);
             iImporterGenerateThumb = 0;
             break;
