@@ -90,6 +90,19 @@ colour blend.
 
 **Checks / limitations:** An earlier full Windows build of the overlap fix passed, but the **new disappearance correction is not yet confirmed in a real editor**. Check GitHub Actions for the latest full x64 compilation and regression results. Even passing CI cannot prove graphics are visible. The next owner test must use the **already-installed, in-editor PW Edition updater**, then compare one type, two different native types at equal weights, and a custom style. Verify no disappearing grass, no texture domination, no flicker, and consistent save/reload. If still blank despite the fallback, capture which style names and screenshot of the scene so the remaining object/camera/render path can be traced.
 
+## Follow-up after repeated failure: isolate experimental renderer (22 November 2026)
+
+**Third owner reproduction:** Even after the `OwnsGrid()` fallback, activating any second grass style still made all grass disappear in the running editor. This is definitive **visual/runtime failure** of the standalone mixed-instance renderer. Compiler, static regression and imported-asset test successes were **not** visual verification. The static tests had only checked that instance objects were created and marked visible; that does not prove the intended pixels were drawn or that the 320-object experimental preview covers Classic's vegetation grid.
+
+**Safety + diagnosis implemented in source through `b3687530` (latest full CI pending at time of writing):**
+- **Selecting multiple grass styles and weights no longer switches rendering modes automatically.** Mix choices are preserved in the project; original Classic grass remains visible as the safe/default renderer.
+- The new **Preview experimental multi-grass** checkbox explicitly opts in to the alternative renderer **for diagnosis only**. It is OFF on startup and resets when loading another level. Turning it OFF releases mixed objects and restores Classic.
+- Preview mode displays actual style model count, instance allocation count, placed count and per-object visible *flags*, plus reasons for missing grass mask, model or texture. This separates failed resource preparation from cases where objects exist but nothing is drawn. **Visible flags do not prove GPU raster output.**
+- The original multi-grass UI remains available as configuration; **do not claim the feature is working, or silently auto-enable preview** until a real local editor test shows two distinct types.
+- Preserve the **already-installed in-editor PW Edition updater** for applying this source fix after a successful full Windows compile. Do not instruct a manual ZIP install as default.
+- Next diagnostic evidence to request: after updating, check that selecting two styles with experimental preview OFF leaves Classic grass visible; optionally turn preview ON in a disposable test map, capture a screenshot of the statistics and viewport, then turn it OFF. If stats say instances are placed/visible yet the scene is blank, focus on camera, object/material/shader or native vegetation API integration; don't keep modifying only mask weights and instance counts.
+- **Project priority remains a real integrated multi-style grass renderer.** This safety gate intentionally does not satisfy that feature.
+
 ## Required acceptance before an install is called ready
 
 1. Compile full Windows x64 editor at the latest branch head.
