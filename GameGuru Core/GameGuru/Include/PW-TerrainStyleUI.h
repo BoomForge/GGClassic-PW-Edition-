@@ -71,24 +71,51 @@ static void PWImportTerrainStyle(bool skyStyle)
         popup_text("Finish the current entity import first.");
         return;
     }
+    // A current style is usually already active. If it is not a valid native
+    // template (e.g. the special dynamic sky), choose the first usable one
+    // silently: the user only supplies an image and never picks a mesh.
+    const std::string filesRoot = std::string(g.fpscrootdir_s.Get()) + "\\Files";
     std::string templateStyle;
     if (skyStyle)
     {
-        if (g.skyindex < 1 || g.skyindex > g.skymax)
+        if (g.skyindex > 0 && g.skyindex <= g.skymax)
+            templateStyle = t.skybank_s[g.skyindex].Get();
+        if (!PWTextureStyle::TemplateUsable(true, filesRoot, templateStyle))
         {
-            popup_text("Select an existing sky style before importing a texture.");
-            return;
+            templateStyle.clear();
+            for (int i = 1; i <= g.skymax; ++i)
+            {
+                const std::string candidate = t.skybank_s[i].Get();
+                if (PWTextureStyle::TemplateUsable(true, filesRoot, candidate))
+                {
+                    templateStyle = candidate;
+                    break;
+                }
+            }
         }
-        templateStyle = t.skybank_s[g.skyindex].Get();
     }
     else
     {
         templateStyle = g.vegstyle_s.Get();
-        if (templateStyle.empty())
+        if (!PWTextureStyle::TemplateUsable(false, filesRoot, templateStyle))
         {
-            popup_text("Select an existing grass style before importing a texture.");
-            return;
+            templateStyle.clear();
+            for (int i = 1; i <= g.vegstylemax; ++i)
+            {
+                const std::string candidate = t.vegstylebank_s[i].Get();
+                if (PWTextureStyle::TemplateUsable(false, filesRoot, candidate))
+                {
+                    templateStyle = candidate;
+                    break;
+                }
+            }
         }
+    }
+    if (templateStyle.empty())
+    {
+        popup_text(skyStyle ? "No compatible native sky style was found."
+                            : "No compatible native grass style was found.");
+        return;
     }
     cstr oldDir = GetDir();
 #ifdef _WIN64
@@ -105,7 +132,6 @@ static void PWImportTerrainStyle(bool skyStyle)
     SetDir(oldDir.Get());
     if (selected == "Error" || selected.Len() == 0) return;
 
-    const std::string filesRoot = std::string(g.fpscrootdir_s.Get()) + "\\Files";
     std::string created, error;
     if (!PWTextureStyle::CreateFromTexture(skyStyle, selected.Get(), filesRoot,
                                             templateStyle, created, error))
