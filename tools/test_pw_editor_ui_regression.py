@@ -5,6 +5,7 @@ import unittest
 ROOT = Path(__file__).resolve().parent.parent
 GRID = (ROOT / "GameGuru Core/GameGuru/Source/M-GridEdit.cpp").read_text(encoding="utf-8")
 UPDATER = (ROOT / "tools/PWBootstrapper/Program.cs").read_text(encoding="utf-8")
+IMPORTER = (ROOT / "GameGuru Core/GameGuru/Source/M-Importer.cpp").read_text(encoding="utf-8")
 
 
 class PWEditorUiRegressions(unittest.TestCase):
@@ -78,6 +79,22 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn("editor_rec_addchildrentorubberband(e);", hierarchy)
         self.assertIn("OpenEntityScript(GetActiveWindow()", hierarchy)
         self.assertIn('if (ImGui::Button("Edit Lua Script..."))', GRID)
+
+    def test_importer_thumbnail_uses_camera_viewport_not_desktop(self):
+        # A reported Serine import saved a solid-green BMP even though the
+        # DBO held native geometry. Match GameGuru's working scene preview.
+        capture = IMPORTER.split("void import_generate_thumb(void)", 1)[1].split(
+            "#else\nvoid importer_save_entity", 1)[0]
+        self.assertIn("FastSync();", capture)
+        self.assertIn("m_mycam->viewPort3D.Width", capture)
+        self.assertIn("m_mycam->viewPort3D.Height", capture)
+        self.assertIn("ShowObject(t.importer.objectnumber);", capture)
+        self.assertNotIn("GetChildWindowWidth(-1)", capture)
+
+    def test_shutdown_trace_records_cleanup_milestones(self):
+        self.assertIn('PWShutdownTrace("file-exit accepted")', GRID)
+        self.assertIn('PWShutdownTrace("finish entered; before common_justbeforeend")', GRID)
+        self.assertIn('PWShutdownTrace("common_justbeforeend returned; before prefs")', GRID)
 
     def test_no_fake_toolbar_generation(self):
         self.assertNotIn('DrawPWIcon(', UPDATER)
