@@ -133,6 +133,14 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 - [x] Confirm full x64 CI engine compile success (GitHub Actions, 22 Nov 2026). The original Win32 Steam launcher remains separately owned; the compiled x64 editor is not automatically distributed with the updater artifact.
 - [ ] Verify editor, importer and gameplay in a local Windows test installation.
 
+### Asset Inspector and updater build diagnostics (22 November 2026)
+
+- [x] **Updater compilation failure addressed:** Full x64 CI identified the actual blockers as Windows `min/max` macro expansion in `PW-GrassMix.h` / `M-Grass.cpp` and an invalid `cstr` initialisation in `M-MapFile.cpp`, **not** the C4267/C4305 warnings displayed in the user's updater screenshot. The full Windows build passed at `f3dde58d` before the later Asset Inspector edits.
+- [x] **Updater failure UI improvement:** Surface MSBuild error diagnostics first, retaining the complete dated log and the existing no-install-on-build-failure safeguard.
+- [x] **Asset Inspector source:** Separate, non-docked popup launched from the permanent Asset Browser. Recursive on-disk `Files` tree on the left; true image preview or native 3D preview on the right (FPE/DBO/X/FBX), mouse orbit and wheel zoom; Insert into Scene adds a native undoable entity forward of the editor camera. Non-FPE models are copied/converted into isolated `entitybank/user/PWInspector` folders.
+- [x] Dedicated UI regression guards for Inspector routing, preview modes, and direct insertion; [Asset Inspector design and acceptance](docs/PW_ASSET_INSPECTOR.md).
+- [ ] **Not yet tested interactively:** newest Inspector-inclusive full x64 compile, actual runtime preview, all material variants, insertion position, undo, FPM persistence, standalone packaging. Do not claim this as a verified updater/installer until those gates are passed.
+
 ### Skybox and grass import — owner-corrected texture-only design (22 November 2026)
 
 - [x] **Source change:** Terrain Tools sky/grass import now asks for **one image only**, then safely clones the currently active native skybox or grass template, including its existing mesh/UV and compatible configuration. It creates a new name and switches to the created style. **No FBX/DBO/X model picker, no user-supplied mesh, no scale/yaw controls.** PNG/DDS/JPG/JPEG/BMP/TGA image formats are accepted.
