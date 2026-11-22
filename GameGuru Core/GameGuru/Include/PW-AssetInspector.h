@@ -1,0 +1,435 @@
+#pragma once
+// PW Edition Asset Inspector: a deliberately SEPARATE, user-opened window.
+// The permanent bottom Asset Browser and Classic toolbar remain untouched.
+// Included in M-GridEdit.cpp after the engine/editor helpers.
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <fstream>
+#include <string>
+#include <vector>
+#include <windows.h>
+
+namespace PWAssetInspector {
+struct State {
+    bool open = false;
+    bool renderRequested = false;
+    std::string selected;
+    std::string root;
+    std::string status;
+    std::string modelSource;
+    std::string albedoSource;
+    int imageId = 0;
+    int modelId = 0;
+    int modelTextureId = 0;
+    int previewId = 0;
+    float yaw = 0.f;
+    float pitch = 0.f;
+    float zoom = 1.f;
+    bool isImage = false;
+    bool isModel = false;
+};
+inline State& Current() { static State value; return value; }
+inline bool IsFile(const std::string& p) {
+    const DWORD attr = GetFileAttributesA(p.c_str());
+    return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
+}
+inline bool IsFolder(const std::string& p) {
+    const DWORD attr = GetFileAttributesA(p.c_str());
+    return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)
+           && !(attr & FILE_ATTRIBUTE_REPARSE_POINT);
+}
+inline std::string Lower(const std::string& s) {
+    std::string value = s;
+    for (char& c : value) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return value;
+}
+inline bool Ends(const std::string& s, const char* ext) {
+    const std::string e = ext;
+    return s.size() >= e.size() && Lower(s.substr(s.size()-e.size())) == e;
+}
+inline bool ImageFile(const std::string& p) {
+    return Ends(p, ".png") || Ends(p, ".dds") || Ends(p, ".jpg") ||
+           Ends(p, ".jpeg") || Ends(p, ".bmp") || Ends(p, ".tga");
+}
+inline bool ModelFile(const std::string& p) {
+    return Ends(p, ".fpe") || Ends(p, ".dbo") || Ends(p, ".x") || Ends(p, ".fbx");
+}
+inline std::string FolderOf(const std::string& file) {
+    const size_t p = file.find_last_of("\\/");
+    return p == std::string::npos ? "" : file.substr(0,p);
+}
+inline std::string NameOf(const std::string& file) {
+    const size_t p = file.find_last_of("\\/");
+    return file.substr(p == std::string::npos ? 0 : p+1);
+}
+inline std::string Stem(const std::string& file) {
+    std::string n = NameOf(file);
+    const size_t p = n.find_last_of('.');
+    if (p != std::string::npos) n.resize(p);
+    return n;
+}
+inline std::string Trim(const std::string& value) {
+    const size_t a = value.find_first_not_of(" \t\r\n");
+    if (a == std::string::npos) return "";
+    const size_t b = value.find_last_not_of(" \t\r\n");
+    return value.substr(a,b-a+1);
+}
+inline std::string ProfileField(const std::string& fpe, const char* field) {
+    std::ifstream in(fpe, std::ios::binary);
+    std::string line;
+    const std::string wanted = Lower(field);
+    int budget = 512;
+    while (budget-- > 0 && std::getline(in,line)) {
+        const size_t equals = line.find('=');
+        if (equals == std::string::npos || Trim(line).empty() ||
+            Trim(line)[0] == ';') continue;
+        if (Lower(Trim(line.substr(0,equals))) == wanted) {
+            std::string v = Trim(line.substr(equals+1));
+            const size_t comment = v.find(';');
+            if (comment != std::string::npos) v.resize(comment);
+            return Trim(v);
+        }
+    }
+    return "";
+}
+inline std::string ResolveProfileAsset(const std::string& fpe, const std::string& asset) {
+    if (asset.empty() || asset.find(':') != std::string::npos ||
+        asset[0] == '\\' || asset[0] == '/' || asset.find("..") != std::string::npos)
+        return "";
+    const std::string dir = FolderOf(fpe);
+    const std::string local = dir + "\\" + asset;
+    if (IsFile(local)) return local;
+    const std::string bank = Current().root + "\\entitybank\\" + asset;
+    if (IsFile(bank)) return bank;
+    return "";
+}
+inline int FreeObjectId() {
+    const int base = g.importermenuobjectoffset + 8500;
+    for (int i=0;i<900;++i) {
+        const int id=base+i;
+        if (id>0 && !ObjectExist(id)) return id;
+    }
+    return 0;
+}
+inline int FreeImageId() {
+    const int base=g.importermenuimageoffset+8500;
+    for (int i=0;i<900;++i) {
+        const int id=base+i;
+        if (id>0 && !ImageExist(id)) return id;
+    }
+    return 0;
+}
+inline void Release() {
+    State& s=Current();
+    if (s.modelId && ObjectExist(s.modelId)) DeleteObject(s.modelId);
+    if (s.imageId && ImageExist(s.imageId)) DeleteImage(s.imageId);
+    if (s.modelTextureId && ImageExist(s.modelTextureId)) DeleteImage(s.modelTextureId);
+    if (s.previewId && ImageExist(s.previewId)) DeleteImage(s.previewId);
+    s.modelId=s.imageId=s.modelTextureId=s.previewId=0;
+    s.isModel=s.isImage=s.renderRequested=false;
+}
+inline void Select(const std::string& file) {
+    State& s=Current();
+    if (file==s.selected) return;
+    Release();
+    s.selected=file; s.status.clear(); s.modelSource.clear(); s.albedoSource.clear();
+    s.yaw=s.pitch=0.f; s.zoom=1.f;
+    if (!IsFile(file)) { s.status="File is unavailable."; return; }
+    if (ImageFile(file)) {
+        s.imageId=FreeImageId();
+        if (s.imageId) {
+            LoadImage((LPSTR)file.c_str(),s.imageId);
+            s.isImage=ImageExist(s.imageId)!=0;
+        }
+        if (!s.isImage) s.status="The selected image could not be decoded.";
+        return;
+    }
+    if (!ModelFile(file)) {
+        s.status="Select an image or a 3D model to see its visual preview.";
+        return;
+    }
+    s.modelSource=file;
+    if (Ends(file,".fpe")) {
+        s.modelSource=ResolveProfileAsset(file,ProfileField(file,"model"));
+        s.albedoSource=ResolveProfileAsset(file,ProfileField(file,"textured"));
+        if (s.modelSource.empty()) {
+            s.status="FPE model reference could not be resolved.";
+            return;
+        }
+    }
+    s.modelId=FreeObjectId();
+    if (!s.modelId) { s.status="No free temporary preview object ID."; return; }
+    if (Ends(s.modelSource,".fbx")) {
+        LoadFBX((LPSTR)s.modelSource.c_str(),s.modelId);
+    } else {
+        LoadObject((LPSTR)s.modelSource.c_str(),s.modelId);
+    }
+    if (!ObjectExist(s.modelId)) {
+        s.status="Could not load this model; no placeholder mesh was substituted.";
+        s.modelId=0;
+        return;
+    }
+    if (!s.albedoSource.empty()) {
+        s.modelTextureId=FreeImageId();
+        if (s.modelTextureId) {
+            LoadImage((LPSTR)s.albedoSource.c_str(),s.modelTextureId);
+            if (ImageExist(s.modelTextureId)) TextureObject(s.modelId,s.modelTextureId);
+        }
+    }
+    s.previewId=FreeImageId();
+    if (!s.previewId) { s.status="No free image ID for a 3D preview."; return; }
+    HideObject(s.modelId);
+    s.isModel=true;
+    s.renderRequested=true;
+}
+inline void Open() {
+    State& s=Current();
+    s.root=std::string(g.fpscrootdir_s.Get())+"\\Files";
+    s.open=true;
+}
+inline bool ValidProfilePath(const std::string& full, std::string& relative) {
+    const std::string prefix=Current().root+"\\entitybank\\";
+    if (Lower(full).find(Lower(prefix)) != 0) return false;
+    relative=full.substr(prefix.size());
+    return !relative.empty() && relative.find("..")==std::string::npos;
+}
+inline std::string SafeName(const std::string& name) {
+    std::string result="PW_";
+    for (char c : name) {
+        if (result.size() >= 58) break;
+        const unsigned char value=static_cast<unsigned char>(c);
+        result+=std::isalnum(value)?c:'_';
+    }
+    return result=="PW_"?"PW_Asset":result;
+}
+inline bool MakeModelProfile(std::string& relative, std::string& error) {
+    State& s=Current();
+    const std::string user=s.root+"\\entitybank\\user";
+    const std::string destination=user+"\\PWInspector";
+    if (!IsFolder(user) && !CreateDirectoryA(user.c_str(),nullptr)) {
+        error="Cannot create the user asset directory."; return false;
+    }
+    if (!IsFolder(destination) && !CreateDirectoryA(destination.c_str(),nullptr)) {
+        error="Cannot create the custom inspector asset directory."; return false;
+    }
+    const std::string base=SafeName(Stem(s.selected));
+    std::string name;
+    for (int i=1;i<=999;++i) {
+        const std::string candidate=base+(i==1?"":"_"+std::to_string(i));
+        if (GetFileAttributesA((destination+"\\"+candidate+".fpe").c_str())==INVALID_FILE_ATTRIBUTES &&
+            GetFileAttributesA((destination+"\\"+candidate+".dbo").c_str())==INVALID_FILE_ATTRIBUTES) {
+            name=candidate; break;
+        }
+    }
+    if (name.empty()) { error="No free custom asset name."; return false; }
+    const std::string target=destination+"\\"+name+".dbo";
+    // The engine understands DBO/X entities. Convert a previewed FBX into DBO
+    // automatically, and package other native models into the USER bank.
+    if (Ends(s.modelSource,".dbo")) {
+        if (!CopyFileA(s.modelSource.c_str(),target.c_str(),TRUE)) {
+            error="Could not copy native model to custom asset bank."; return false;
+        }
+    } else if (s.modelId && ObjectExist(s.modelId)) {
+        SaveObject((LPSTR)target.c_str(),s.modelId);
+        if (!IsFile(target)) {
+            error="Could not save converted preview model as DBO."; return false;
+        }
+    } else {
+        error="The model could not be converted to a placeable entity."; return false;
+    }
+    // Copy one explicit FPE albedo when present. Embedded materials in DBO
+    // remain native; the engine does not silently invent missing UV textures.
+    std::string textureLine;
+    std::string copiedTexture;
+    if (!s.albedoSource.empty() && ImageFile(s.albedoSource)) {
+        copiedTexture=NameOf(s.albedoSource);
+        if (CopyFileA(s.albedoSource.c_str(),(destination+"\\"+copiedTexture).c_str(),FALSE) ||
+            IsFile(destination+"\\"+copiedTexture)) textureLine="textured = "+copiedTexture+"\r\n";
+    }
+    const std::string profile=destination+"\\"+name+".fpe";
+    std::ofstream out(profile,std::ios::binary|std::ios::trunc);
+    if (out) {
+        out << "; PW Edition Asset Inspector auto-generated entity\r\n"
+            << "desc = " << name << "\r\n"
+            << "model = " << name << ".dbo\r\n"
+            << textureLine
+            << "effect = effectbank\\reloaded\\entity_basic.fx\r\n"
+            << "defaultstatic = 0\r\n"
+            << "scale = 100\r\n";
+        out.flush();
+    }
+    if (!out.good()) {
+        out.close();
+        DeleteFileA(profile.c_str());
+        DeleteFileA(target.c_str());
+        error="Failed to write the custom entity profile."; return false;
+    }
+    relative="user\\PWInspector\\"+name+".fpe";
+    return true;
+}
+inline bool InsertIntoScene() {
+    State& s=Current();
+    if (!s.isModel || !ObjectExist(s.modelId)) {
+        s.status="Select a usable model before inserting."; return false;
+    }
+    std::string relative,error;
+    if (!Ends(s.selected,".fpe") || !ValidProfilePath(s.selected,relative)) {
+        if (!MakeModelProfile(relative,error)) { s.status=error; return false; }
+    }
+    t.addentityfile_s=relative.c_str();
+    if (t.addentityfile_s=="") { s.status="Entity profile path was empty."; return false; }
+    entity_adduniqueentity(false);
+    const int id=t.entid;
+    if (id<=0 || !ObjectExist(g.entitybankoffset+id)) {
+        s.status="Entity profile failed to load; no scene object created.";
+        return false;
+    }
+    // Initialise the same entity defaults as the normal Asset Browser. Then
+    // place on the ground directly in FRONT of the editor camera, never at
+    // the mouse cursor or the world origin.
+    t.grideditselect=5;
+    t.inputsys.constructselection=id;
+    editor_constructionselection();
+    if (t.gridentity!=id) {
+        s.status="Could not initialise entity placement.";
+        t.inputsys.constructselection=0;
+        return false;
+    }
+    const float distance=350.0f;
+    const float x=NewXValue(CameraPositionX(),CameraAngleY(),distance);
+    const float z=NewZValue(CameraPositionZ(),CameraAngleY(),distance);
+    const float y=t.terrain.TerrainID>0
+        ? BT_GetGroundHeight(t.terrain.TerrainID,x,z) : g.gdefaultterrainheight;
+    t.gridentityposx_f=x;
+    t.gridentityposz_f=z;
+    t.gridentityposy_f=y+t.entityprofile[id].defaultheight+t.entityprofile[id].offy;
+    t.gridentityhasparent=0;
+    t.gridentityoverwritemode=0;
+    gridedit_addentitytomap(); // native entity instance + undo recording
+    t.gridentity=0;
+    t.inputsys.constructselection=0;
+    t.refreshgrideditcursor=1;
+    editor_refreshentitycursor();
+    g.projectmodified=1;
+    s.status="Inserted into the scene in front of the camera.";
+    return true;
+}
+struct Entry { std::string name; bool folder=false; };
+inline void DrawTree(const std::string& path, const std::string& name, int depth) {
+    if (depth>15 || !IsFolder(path)) return;
+    ImGui::PushID(path.c_str());
+    const bool expanded=ImGui::TreeNodeEx("##dir",ImGuiTreeNodeFlags_OpenOnArrow,
+                                           "%s",name.c_str());
+    if (expanded) {
+        std::vector<Entry> entries;
+        WIN32_FIND_DATAA data={};
+        HANDLE find=FindFirstFileA((path+"\\*").c_str(),&data);
+        if (find!=INVALID_HANDLE_VALUE) {
+            do {
+                if (entries.size()>=2048) break; // protect editor responsiveness
+                if (!strcmp(data.cFileName,".") || !strcmp(data.cFileName,"..") ||
+                    (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) continue;
+                Entry e;
+                e.name=data.cFileName;
+                e.folder=(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)!=0;
+                entries.push_back(e);
+            } while(FindNextFileA(find,&data));
+            FindClose(find);
+        }
+        std::sort(entries.begin(),entries.end(),[](const Entry& a,const Entry& b){
+            if (a.folder!=b.folder) return a.folder>b.folder;
+            return Lower(a.name)<Lower(b.name);
+        });
+        for (const Entry& e : entries) {
+            const std::string full=path+"\\"+e.name;
+            if (e.folder) DrawTree(full,e.name,depth+1);
+            else if (ImGui::Selectable(e.name.c_str(),Current().selected==full))
+                Select(full);
+        }
+        ImGui::TreePop();
+    }
+    ImGui::PopID();
+}
+inline void Draw() {
+    State& s=Current();
+    if (!s.open) return;
+    if (s.root.empty()) s.root=std::string(g.fpscrootdir_s.Get())+"\\Files";
+    ImGui::SetNextWindowSize(ImVec2(920,610),ImGuiCond_FirstUseEver);
+    const bool visible=ImGui::Begin("Asset Inspector##PWAssetInspector",&s.open,
+                                    ImGuiWindowFlags_NoDocking);
+    if (visible) {
+        const float left=(std::min)(300.f,ImGui::GetContentRegionAvail().x*0.35f);
+        ImGui::BeginChild("##PWAssetDirectoryTree",ImVec2(left,0),true);
+        ImGui::TextUnformatted("GameGuru Files");
+        ImGui::Separator();
+        DrawTree(s.root,"Files",0);
+        ImGui::EndChild();
+        ImGui::SameLine();
+        ImGui::BeginChild("##PWAssetPreview",ImVec2(0,0),true);
+        ImGui::TextWrapped("%s",s.selected.empty()?"Select a file on the left":NameOf(s.selected).c_str());
+        ImGui::Separator();
+        if (s.isImage && s.imageId && ImageExist(s.imageId)) {
+            const float w=(std::max)(1.f,(float)ImageWidth(s.imageId));
+            const float h=(std::max)(1.f,(float)ImageHeight(s.imageId));
+            const ImVec2 area=ImGui::GetContentRegionAvail();
+            const float scale=(std::min)(area.x/(std::max)(w,1.f),
+                                           (std::max)(120.f,area.y-75.f)/h);
+            ID3D11ShaderResourceView* view=GetImagePointerView(s.imageId);
+            if (view) ImGui::Image((ImTextureID)view,ImVec2(w*scale,h*scale));
+            ImGui::Text("%d x %d pixels",ImageWidth(s.imageId),ImageHeight(s.imageId));
+        } else if (s.isModel && s.modelId && ObjectExist(s.modelId)) {
+            ID3D11ShaderResourceView* view=s.previewId?GetImagePointerView(s.previewId):NULL;
+            const float size=(std::max)(120.f,(std::min)(500.f,ImGui::GetContentRegionAvail().x-5.f));
+            if (view) ImGui::Image((ImTextureID)view,ImVec2(size,size));
+            else ImGui::Dummy(ImVec2(size,size));
+            if (ImGui::IsItemHovered()) {
+                ImGuiIO& io=ImGui::GetIO();
+                bool changed=false;
+                if (ImGui::IsMouseDragging(0)) {
+                    s.yaw+=io.MouseDelta.x*0.7f;
+                    s.pitch+=io.MouseDelta.y*0.7f;
+                    if (s.pitch>80.f) s.pitch=80.f;
+                    if (s.pitch<-80.f) s.pitch=-80.f;
+                    changed=true;
+                }
+                if (io.MouseWheel!=0.f) {
+                    s.zoom*=io.MouseWheel>0.f?0.86f:1.16f;
+                    if (s.zoom<0.35f) s.zoom=0.35f;
+                    if (s.zoom>4.f) s.zoom=4.f;
+                    changed=true;
+                }
+                if (changed) s.renderRequested=true;
+            }
+            ImGui::TextDisabled("Drag to rotate. Scroll to zoom.");
+            if (ImGui::Button("Reset View")) {
+                s.yaw=s.pitch=0.f;s.zoom=1.f;s.renderRequested=true;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Insert into Scene"))
+                InsertIntoScene();
+            if (s.renderRequested && iLaunchAfterSync==0)
+                iLaunchAfterSync=32; // render after ImGui, as native preview does
+        } else if (!s.status.empty()) {
+            ImGui::TextWrapped("%s",s.status.c_str());
+        } else {
+            ImGui::TextDisabled("Images and FPE, DBO, X or FBX models are previewable.");
+        }
+        if (!s.status.empty() && s.isModel) {
+            ImGui::Separator();
+            ImGui::TextWrapped("%s",s.status.c_str());
+        }
+        ImGui::EndChild();
+    }
+    ImGui::End();
+    if (!s.open) { Release(); s.selected.clear(); }
+}
+inline void RenderPending() {
+    State& s=Current();
+    if (s.open && s.isModel && s.renderRequested &&
+        s.modelId>0 && ObjectExist(s.modelId) && s.previewId>0) {
+        RenderToPreview(s.modelId,s.previewId,s.yaw,s.pitch,s.zoom);
+        s.renderRequested=false;
+    }
+}
+} // namespace PWAssetInspector
