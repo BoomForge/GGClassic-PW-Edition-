@@ -7465,12 +7465,18 @@ void mapeditorexecutable_loop(void)
 					iLaunchAfterSync = 0;
 					cStr tOldDir = GetDir();
 					char * cFileSelected;
-					cFileSelected = (char *)noc_file_dialog_open(NOC_FILE_DIALOG_OPEN, "All\0*.*\0X\0*.x\0DBO\0*.dbo\0OBJ\0*.obj\0FBX\0*.fbx\0GLTF\0*.gltf\0GLB\0*.glb\0\0\0", NULL, NULL , true );
+					cFileSelected = (char *)noc_file_dialog_open(NOC_FILE_DIALOG_OPEN, "All\0*.*\0X\0*.x\0DBO\0*.dbo\0OBJ\0*.obj\0FBX\0*.fbx\0GLB\0*.glb\0\0\0", NULL, NULL , true );
 					SetDir(tOldDir.Get());
 					if (cFileSelected && strlen(cFileSelected) > 0) 
 					{
+                        if (strlen(cFileSelected) >= MAX_PATH)
+                        {
+                            strcpy(cTriggerMessage, "Model path is too long for the Classic importer.");
+                            bTriggerMessage = true;
+                            break;
+                        }
 						char szModelPath[ MAX_PATH ];
-						strcpy( szModelPath, cFileSelected );
+                        strcpy_s(szModelPath, sizeof(szModelPath), cFileSelected);
 						const char* pExtension = strrchr( szModelPath, '.' );
 						if ( !pExtension )
 						{
@@ -7485,6 +7491,8 @@ void mapeditorexecutable_loop(void)
 							if (stricmp(pExtension, ".dbo") == NULL) bPermittedFormat = true;
 							if (stricmp(pExtension, ".obj") == NULL) bPermittedFormat = true;
 							if (stricmp(pExtension, ".fbx") == NULL) bPermittedFormat = true;
+                            // GLB is routed through the Blender-to-FBX bridge; raw .gltf is not yet supported.
+                            if (stricmp(pExtension, ".glb") == NULL) bPermittedFormat = true;
 							if (bPermittedFormat == true)
 							{
 								// load the model
