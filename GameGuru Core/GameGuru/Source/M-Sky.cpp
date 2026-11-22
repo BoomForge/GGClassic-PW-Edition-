@@ -4,6 +4,10 @@
 #include "stdafx.h"
 #include "gameguru.h"
 #include "PW-EnvironmentStyleSettings.h"
+#include "PW-TextureStyleClone.h"
+
+// Temporary image owned only by the current custom main sky.
+static int g_pwCustomSkyTextureImage = 0;
 
 
 void sky_init ( void )
@@ -281,6 +285,12 @@ void sky_skyspec_init ( void )
 
 			// Sky object
 			if ( ObjectExist(t.skyobj) == 1 ) DeleteObject ( t.skyobj );
+            // Release the last sky's texture after deleting its geometry.
+            if (t.tskyi == 0 && g_pwCustomSkyTextureImage > 0)
+            {
+                if (ImageExist(g_pwCustomSkyTextureImage)) DeleteImage(g_pwCustomSkyTextureImage);
+                g_pwCustomSkyTextureImage = 0;
+            }
 			cstr pFileToLoad = cstr(cstr("skybank\\")+t.skyname_s+"\\"+t.skynameonly_s+".DBO");
 			timestampactivity(0,cstr(cstr("Load sky geometry:")+pFileToLoad).Get() );
 			if (FileExist(pFileToLoad.Get()) == 0)
@@ -302,6 +312,30 @@ void sky_skyspec_init ( void )
 				// load DBO directly (preferred)
 				LoadObject ( pFileToLoad.Get(), t.skyobj );
 			}
+
+            // Texture-only custom skies retain the original native sky dome
+            // and shader. Apply the chosen image as stage 0 after LoadObject.
+            if (t.tskyi == 0 && ObjectExist(t.skyobj))
+            {
+                const std::string texture = PWTextureStyle::SkyTexturePath(
+                    std::string("skybank\\\\") + t.skyname_s.Get());
+                if (!texture.empty())
+                {
+                    const int base = g.importermenuimageoffset + 8000;
+                    for (int n = 0; n < 16000; ++n)
+                    {
+                        const int imageId = base + n;
+                        if (imageId <= 0 || ImageExist(imageId)) continue;
+                        LoadImage((LPSTR)texture.c_str(), imageId);
+                        if (ImageExist(imageId))
+                        {
+                            TextureObject(t.skyobj, imageId);
+                            g_pwCustomSkyTextureImage = imageId;
+                        }
+                        break;
+                    }
+                }
+            }
 
 			// Common settings for sky object
             // Normal Classic skies remain at 750% with no extra yaw;
