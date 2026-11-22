@@ -2605,14 +2605,14 @@ void imgui_importer_loop(void)
                 ImGui::TextWrapped("Assigned file: %s", reference.empty() ? "(none)" : reference.c_str());
                 const bool exists = !reference.empty() && FileExist((LPSTR)reference.c_str()) == 1;
                 ImGui::TextUnformatted(exists ? "Texture file found." : "Texture file missing or unassigned.");
-                const char* modelName = t.importer.objectFileOriginalPath.Get();
-                const std::string modelPath = modelName ? modelName : "";
+                const char* originalDirectoryName = t.importer.objectFileOriginalPath.Get();
+                const std::string originalDirectory = originalDirectoryName ? originalDirectoryName : "";
                 const auto fileExists = [](const std::string& filename) -> bool {
                     const DWORD attr = GetFileAttributesA(filename.c_str());
                     return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) == 0;
                 };
                 const std::string suggestion = PWMaterialRelink::Suggest(
-                    reference, modelPath,
+                    reference, originalDirectory,
                     std::string(g.rootdir_s.Get()) + "importer\\temp\\", fileExists);
                 if (!suggestion.empty())
                 {
