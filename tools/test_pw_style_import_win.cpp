@@ -35,6 +35,10 @@ int main() {
     assert(PWStyleImport::Install(grass + "\\veg.DBO", root + "\\vegbank",
                                   PWStyleImport::Kind::Grass, name, error));
     assert(PWStyleImport::RegularFile(root + "\\vegbank\\Summer Grass\\grass.png"));
+    assert(PWTextureStyle::TemplateUsable(true, root, "Misty Valley"));
+    assert(PWTextureStyle::TemplateUsable(false, root, "Summer Grass"));
+    assert(!PWTextureStyle::TemplateUsable(true, root, "..\\\\escape"));
+    assert(!PWTextureStyle::TemplateUsable(false, root, "Misty Valley"));
     // One image is all the user supplies: preserve the installed mesh and
     // sky/grass settings while creating a new style without changing sources.
     writeFile(root + "\\Cloud Image.PNG");
