@@ -215,46 +215,68 @@ inline std::string SafeName(const std::string& name) {
 inline bool MakeModelProfile(std::string& relative, std::string& error) {
     State& s=Current();
     const std::string user=s.root+"\\entitybank\\user";
-    const std::string destination=user+"\\PWInspector";
+    const std::string root=user+"\\PWInspector";
     if (!IsFolder(user) && !CreateDirectoryA(user.c_str(),nullptr)) {
         error="Cannot create the user asset directory."; return false;
     }
-    if (!IsFolder(destination) && !CreateDirectoryA(destination.c_str(),nullptr)) {
+    if (!IsFolder(root) && !CreateDirectoryA(root.c_str(),nullptr)) {
         error="Cannot create the custom inspector asset directory."; return false;
     }
     const std::string base=SafeName(Stem(s.selected));
     std::string name;
     for (int i=1;i<=999;++i) {
         const std::string candidate=base+(i==1?"":"_"+std::to_string(i));
-        if (GetFileAttributesA((destination+"\\"+candidate+".fpe").c_str())==INVALID_FILE_ATTRIBUTES &&
-            GetFileAttributesA((destination+"\\"+candidate+".dbo").c_str())==INVALID_FILE_ATTRIBUTES) {
+        if (GetFileAttributesA((root+"\\"+candidate).c_str())==INVALID_FILE_ATTRIBUTES) {
             name=candidate; break;
         }
     }
     if (name.empty()) { error="No free custom asset name."; return false; }
-    const std::string target=destination+"\\"+name+".dbo";
-    // The engine understands DBO/X entities. Convert a previewed FBX into DBO
-    // automatically, and package other native models into the USER bank.
-    if (Ends(s.modelSource,".dbo")) {
-        if (!CopyFileA(s.modelSource.c_str(),target.c_str(),TRUE)) {
-            error="Could not copy native model to custom asset bank."; return false;
-        }
-    } else if (s.modelId && ObjectExist(s.modelId)) {
-        SaveObject((LPSTR)target.c_str(),s.modelId);
-        if (!IsFile(target)) {
-            error="Could not save converted preview model as DBO."; return false;
-        }
-    } else {
-        error="The model could not be converted to a placeable entity."; return false;
+    const std::string destination=root+"\\"+name;
+    if (!CreateDirectoryA(destination.c_str(),nullptr)) {
+        error="Cannot create custom model folder."; return false;
     }
-    // Copy one explicit FPE albedo when present. Embedded materials in DBO
-    // remain native; the engine does not silently invent missing UV textures.
+    const std::string target=destination+"\\"+name+".dbo";
+    bool copied=false;
+    if (Ends(s.modelSource,".dbo"))
+        copied=CopyFileA(s.modelSource.c_str(),target.c_str(),TRUE)!=0;
+    else if (s.modelId && ObjectExist(s.modelId)) {
+        // A raw X/FBX requires a native DBO before entitybank can place it.
+        SaveObject((LPSTR)target.c_str(),s.modelId);
+        copied=IsFile(target);
+    }
+    if (!copied) {
+        RemoveDirectoryA(destination.c_str());
+        error="Model could not be copied/converted into a native DBO.";
+        return false;
+    }
+    // Include nearby material images in this asset's OWN subfolder so another
+    // asset cannot silently reuse a texture with the same filename.
+    const std::string sourceFolder=FolderOf(s.modelSource);
+    WIN32_FIND_DATAA data={};
+    HANDLE find=FindFirstFileA((sourceFolder+"\\*").c_str(),&data);
+    std::uint64_t total=0;
+    int count=0;
+    if (find!=INVALID_HANDLE_VALUE) {
+        do {
+            if (data.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))
+                continue;
+            const std::string filename=data.cFileName;
+            if (!ImageFile(filename)) continue;
+            const std::uint64_t bytes=(std::uint64_t(data.nFileSizeHigh)<<32)|data.nFileSizeLow;
+            if (count>=48 || total+bytes>128ULL*1024ULL*1024ULL) break;
+            const std::string original=sourceFolder+"\\"+filename;
+            if (CopyFileA(original.c_str(),(destination+"\\"+filename).c_str(),TRUE)) {
+                total+=bytes; ++count;
+            }
+        } while(FindNextFileA(find,&data));
+        FindClose(find);
+    }
     std::string textureLine;
-    std::string copiedTexture;
     if (!s.albedoSource.empty() && ImageFile(s.albedoSource)) {
-        copiedTexture=NameOf(s.albedoSource);
-        if (CopyFileA(s.albedoSource.c_str(),(destination+"\\"+copiedTexture).c_str(),FALSE) ||
-            IsFile(destination+"\\"+copiedTexture)) textureLine="textured = "+copiedTexture+"\r\n";
+        const std::string imageName=NameOf(s.albedoSource);
+        const std::string dest=destination+"\\"+imageName;
+        if (IsFile(dest) || CopyFileA(s.albedoSource.c_str(),dest.c_str(),TRUE))
+            textureLine="textured = "+imageName+"\r\n";
     }
     const std::string profile=destination+"\\"+name+".fpe";
     std::ofstream out(profile,std::ios::binary|std::ios::trunc);
@@ -272,9 +294,11 @@ inline bool MakeModelProfile(std::string& relative, std::string& error) {
         out.close();
         DeleteFileA(profile.c_str());
         DeleteFileA(target.c_str());
-        error="Failed to write the custom entity profile."; return false;
+        // Preserve any copied images for diagnosis; never delete other assets.
+        error="Could not save the model's custom FPE profile.";
+        return false;
     }
-    relative="user\\PWInspector\\"+name+".fpe";
+    relative="user\\PWInspector\\"+name+"\\"+name+".fpe";
     return true;
 }
 inline bool InsertIntoScene() {
