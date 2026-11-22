@@ -110,15 +110,30 @@ Acceptance criteria:
 - [ ] Test keyboard/mouse inputs first and investigate controller support separately where feasible. Validate pause/menu focus, alternate layouts, duplicate bindings, input after reloading and standalone export.
 - [ ] Distinguish **input-key binding** from **weapon-to-character-bone/socket binding** already specified under Importer 2 / Character Creator 2. Neither is implemented by the existing cross-level weapon persistence code.
 
+### P1 — Basic game display options (windowed/fullscreen and resolution)
+
+**User request:** A straightforward options menu allowing the player to select **windowed or fullscreen** and choose a **screen resolution**. An uncomplicated settings window presented at game startup is an acceptable alternative to a complete in-game Options menu. This is a general feature for exported games of any genre.
+
+Acceptance criteria:
+- [ ] Offer windowed and fullscreen display modes, with a resolution selector populated from modes supported by the current display and renderer. Keep the minimum interface simple; additional settings are optional.
+- [ ] Make the display settings accessible at startup **or** in-game (an initial launcher/configuration window is acceptable). If a game can change display mode during play, avoid destroying unsaved game progress.
+- [ ] Apply requested changes safely, with confirmation and automatic fallback to the last known working configuration if a resolution is unsupported, times out or leaves the screen unusable.
+- [ ] Persist selected display preferences between runs in a clearly documented, game-specific settings file; distinguish display preferences from player-profile save data.
+- [ ] Validate on Windows x64 standalone builds: first run, repeat launch, desktop and laptop resolutions, multi-monitor changes, DPI scaling and switching windowed/fullscreen without breaking aspect ratio, mouse capture or GUI layout.
+- [ ] Preserve Classic's current default graphics startup for older projects unless the new options UI is explicitly enabled or integrated with a backwards-compatible default.
+
+**Status:** requested / not implemented. Whether to use a startup dialog or an in-game menu can be chosen during implementation, as long as players can change the minimum two settings.
+
 ### Relative priority
 
 1. Stabilise the current importer/editor integration and its existing regression gates.
 2. Reproduce the non-explosive projectile damage bug before altering projectile internals.
 3. Design the profile-save state schema and persistence adapters around existing transition values, then test crash-safe restart recovery.
-4. Introduce configurable gameplay-action controls with explicit Lua compatibility safeguards.
-5. Keep weapon bone/socket binding in the separate rigging roadmap and prevent it being confused with gameplay keybinding.
+4. Introduce basic player display options (windowed/fullscreen and resolution), with a safe recovery path.
+5. Introduce configurable gameplay-action controls with explicit Lua compatibility safeguards.
+6. Keep weapon bone/socket binding in the separate rigging roadmap and prevent it being confused with gameplay keybinding.
 
-All three requests require source implementation, standalone tests and actual Windows gameplay acceptance. Their presence on the roadmap is not proof of a fix.
+All four requests require source implementation, standalone tests and actual Windows gameplay acceptance. Their presence on the roadmap is not proof of a fix.
 
 ## Implementation rules
 
