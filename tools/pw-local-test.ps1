@@ -35,8 +35,16 @@ $buildFull=[IO.Path]::GetFullPath($build).TrimEnd('\','/')
 if ($dest.Equals($rootFull,[StringComparison]::OrdinalIgnoreCase) -or
     $rootFull.StartsWith($dest+'\',[StringComparison]::OrdinalIgnoreCase) -or
     $dest.Equals($buildFull,[StringComparison]::OrdinalIgnoreCase) -or
-    $dest.StartsWith($buildFull+'\',[StringComparison]::OrdinalIgnoreCase)) {
+    $dest.StartsWith($buildFull+'\',[StringComparison]::OrdinalIgnoreCase) -or
+    $buildFull.StartsWith($dest+'\',[StringComparison]::OrdinalIgnoreCase)) {
  throw "Test install must not overwrite the repository or PW-Build output"
+}
+# Inside the checkout, use only the dedicated ignored PW-TestInstall folder.
+$allowedRepoTest=Join-Path $rootFull "PW-TestInstall"
+if ($dest.StartsWith($rootFull+'\',[StringComparison]::OrdinalIgnoreCase) -and
+    -not $dest.Equals($allowedRepoTest,[StringComparison]::OrdinalIgnoreCase) -and
+    -not $dest.StartsWith($allowedRepoTest+'\',[StringComparison]::OrdinalIgnoreCase)) {
+ throw "TestDir inside the repository must be PW-TestInstall (or a subfolder)"
 }
 if (Test-Path -LiteralPath $dest) {
  $attributes=(Get-Item -LiteralPath $dest -Force).Attributes
