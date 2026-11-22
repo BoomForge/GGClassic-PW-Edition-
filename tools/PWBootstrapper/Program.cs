@@ -61,7 +61,8 @@ internal static class Program
         "pw-edition-version.txt",
         @"Files\scriptbank\global.lua",
         @"Files\scriptbank\pw_transition_state.lua",
-        @"Files\effectbank\reloaded\apbr_animwithtran_emissive.fx"
+        @"Files\effectbank\reloaded\apbr_animwithtran_emissive.fx",
+        @"Files\PWTools\pw_glb_to_fbx.py"
     };
 
     [STAThread]
