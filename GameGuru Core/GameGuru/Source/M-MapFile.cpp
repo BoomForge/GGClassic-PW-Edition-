@@ -51,8 +51,9 @@ static void PWCollectMixedGrassStyleDependencies()
             !PWStyleImport::SafeName(slot.style))
             continue;
         const std::string folderName = std::string("vegbank\\") + slot.style;
-        cstr path = folderName.c_str();
-        addfoldertocollection(path.Get());
+        std::vector<char> path(folderName.begin(), folderName.end());
+        path.push_back(0);
+        addfoldertocollection(path.data());
     }
 }
 
