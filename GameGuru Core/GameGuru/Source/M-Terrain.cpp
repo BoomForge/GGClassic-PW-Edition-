@@ -98,6 +98,7 @@ bool bEnableVeg = true; //Display veg on by default.
 
 bool bEnableWeather = false;
 int iLastUpdateVeg = 0;
+#include "PW-TerrainStyleUI.h"
 extern bool bTutorialCheckAction;
 bool TutorialNextAction(void);
 bool CheckTutorialPlaceit(void);
@@ -592,6 +593,13 @@ void imgui_terrain_loop(void)
 				break;
 		 }
 		#endif
+        // Execute file picker on the next UI tick, outside the widget draw.
+        if (delay_terrain_execute == 2 || delay_terrain_execute == 3)
+        {
+            const bool skyStyle = delay_terrain_execute == 2;
+            delay_terrain_execute = 0;
+            PWImportTerrainStyle(skyStyle);
+        }
 		if (skib_terrain_frames_execute > 0)
 			skib_terrain_frames_execute--;
 
@@ -900,7 +908,12 @@ void imgui_terrain_loop(void)
 					ImGui::EndCombo();
 				}
 			
-				ImGui::PopItemWidth();
+                ImGui::PopItemWidth();
+                if (ImGui::Button("Import Sky Style..."))
+                    delay_terrain_execute = 2;
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Choose skyspec.txt from a Classic sky folder containing its matching DBO or X model.");
+                ImGui::TextDisabled("Installs to skybank and refreshes available skies.");
 				ImGui::Indent(-10);
 				ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX(), ImGui::GetCursorPosY() + 3));
 
@@ -1167,7 +1180,12 @@ void imgui_terrain_loop(void)
 					ImGui::EndCombo();
 				}
 
-				ImGui::PopItemWidth();
+                ImGui::PopItemWidth();
+                if (ImGui::Button("Import Grass Style..."))
+                    delay_terrain_execute = 3;
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Choose veg.DBO or veg.X from a Classic vegetation folder containing grass.dds.");
+                ImGui::TextDisabled("Installs to vegbank and refreshes available grasses.");
 
 				ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX(), ImGui::GetCursorPosY() + 3));
 				ImGui::Text("Display Vegetation:");
