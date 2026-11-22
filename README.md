@@ -133,6 +133,8 @@ These are **new cross-genre user requests**, not completed features. See the [de
 - [ ] **P0 — Fix direct hits from non-explosive projectiles:** Reproduce and repair a reported bug where arrows/bolts and other non-explosive projectiles fail to damage players or damageable active objects, while explosive projectiles appear to work. Verify collisions, health subtraction, damage callbacks and no double hits in Test Level and standalone.
 - [ ] **P1 — Customisable controls:** Introduce configurable action bindings and a Controls menu with save/reset/conflict handling. Provide Lua action queries and a compatibility plan for stock/community scripts using hard-coded key codes. This is **gameplay input binding**, separate from weapon model attachment/socket binding.
 
+- [ ] **P1 — Basic display options:** Player-selectable windowed/fullscreen and resolution in a simple in-game options menu **or** startup configuration window. Remember the selection, list compatible modes, safely revert unusable settings, and verify in standalone games. Requested 22 Nov; not implemented. See [display options requirements](docs/PIXELWOLF_CLASSIC_ROADMAP.md#p1--basic-game-display-options-windowedfullscreen-and-resolution).
+
 ### To do — future upgrades
 
 - [ ] Build an optional **full RPG inventory and quest save system** on top of the PW typed transition-value API; currently scripts explicitly select which simple values to carry.
