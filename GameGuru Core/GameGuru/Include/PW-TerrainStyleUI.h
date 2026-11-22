@@ -1,8 +1,7 @@
 #pragma once
-// PW Edition: environment assets use the SAME native 3D model importer as
-// regular FBX/DBO entities. The importer previews textured geometry; its save
-// operation routes to skybank/vegbank instead of emitting an ordinary FPE.
+// PW Edition: texture-only native sky and grass style creation.
 #include "PW-StyleImport.h"
+#include "PW-TextureStyleClone.h"
 #include "PW-ImportPaths.h"
 #include <string>
 extern int g_pwEnvironmentImportTarget; // 0 entity, 1 sky, 2 grass
@@ -65,47 +64,56 @@ void PWActivateImportedEnvironmentStyleFromImporter(int type, const char* name)
 
 static void PWImportTerrainStyle(bool skyStyle)
 {
+    // The only external input is an image. Clone the CURRENTLY SELECTED native
+    // sky/grass style (mesh, UVs, shader and configuration) behind the scenes.
     if (t.importer.importerActive != 0)
     {
-        popup_text("Close or save your current model import before opening another.");
+        popup_text("Finish the current entity import first.");
         return;
+    }
+    std::string templateStyle;
+    if (skyStyle)
+    {
+        if (g.skyindex < 1 || g.skyindex > g.skymax)
+        {
+            popup_text("Select an existing sky style before importing a texture.");
+            return;
+        }
+        templateStyle = t.skybank_s[g.skyindex].Get();
+    }
+    else
+    {
+        templateStyle = g.vegstyle_s.Get();
+        if (templateStyle.empty())
+        {
+            popup_text("Select an existing grass style before importing a texture.");
+            return;
+        }
     }
     cstr oldDir = GetDir();
 #ifdef _WIN64
     cstr selected = openFileBox(
-        "GameGuru 3D models\0*.fbx;*.dbo;*.x\0FBX model\0*.fbx\0DBO model\0*.dbo\0X model\0*.x\0",
-        "", skyStyle ? "Import Sky Mesh" : "Import Grass Mesh",
-        "fbx", IMPORTEROPENFILE);
+        "Image textures\0*.png;*.dds;*.jpg;*.jpeg;*.bmp;*.tga\0PNG image\0*.png\0DDS image\0*.dds\0All files\0*.*\0",
+        "", skyStyle ? "Choose Sky Texture" : "Choose Grass Texture",
+        "png", IMPORTEROPENFILE);
 #else
     cstr selected = openFileBox(
-        "GameGuru 3D models|*.fbx;*.dbo;*.x|FBX model|*.fbx|DBO model|*.dbo|X model|*.x|",
-        "", skyStyle ? "Import Sky Mesh" : "Import Grass Mesh",
-        "fbx", IMPORTEROPENFILE);
+        "Image textures|*.png;*.dds;*.jpg;*.jpeg;*.bmp;*.tga|PNG image|*.png|DDS image|*.dds|All files|*.*|",
+        "", skyStyle ? "Choose Sky Texture" : "Choose Grass Texture",
+        "png", IMPORTEROPENFILE);
 #endif
     SetDir(oldDir.Get());
     if (selected == "Error" || selected.Len() == 0) return;
-    if (!PWImport::EndsWithI(selected.Get(), ".fbx") &&
-        !PWImport::EndsWithI(selected.Get(), ".dbo") &&
-        !PWImport::EndsWithI(selected.Get(), ".x"))
+
+    const std::string filesRoot = std::string(g.fpscrootdir_s.Get()) + "\\Files";
+    std::string created, error;
+    if (!PWTextureStyle::CreateFromTexture(skyStyle, selected.Get(), filesRoot,
+                                            templateStyle, created, error))
     {
-        popup_text("Select an FBX, DBO or X model. GLB is disabled for now.");
+        popup_text((LPSTR)error.c_str());
         return;
     }
-    if (!PWStyleImport::RegularFile(selected.Get()))
-    {
-        popup_text("Selected model cannot be opened.");
-        return;
-    }
-    // Choose a writable default name from the model, editable in Inspector.
-    std::string baseName = PWImport::BaseName(selected.Get());
-    const size_t dot = baseName.find_last_of('.');
-    if (dot != std::string::npos) baseName.resize(dot);
-    if (baseName.size() >= sizeof(g_pwEnvironmentName)) baseName.resize(sizeof(g_pwEnvironmentName) - 1);
-    strcpy_s(g_pwEnvironmentName, sizeof(g_pwEnvironmentName), baseName.c_str());
-    g_pwEnvironmentScalePct = 100.f;
-    g_pwEnvironmentYawDeg = 0.f;
-    g_pwEnvironmentImportTarget = skyStyle ? 1 : 2;
-    t.timporterfile_s = selected;
-    importer_loadmodel(); // The existing textured 3D model preview and controls.
-    if (t.importer.importerActive != 1) g_pwEnvironmentImportTarget = 0;
+    PWActivateImportedEnvironmentStyle(skyStyle ? 1 : 2, created.c_str());
+    popup_text(skyStyle ? "Sky texture applied to a new native sky style."
+                        : "Grass texture applied to a new native grass style.");
 }
