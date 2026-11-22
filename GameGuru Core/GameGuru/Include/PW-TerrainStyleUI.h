@@ -1,47 +1,21 @@
 #pragma once
-// Pixelwolf editor-only sky/grass style import command. Include after the
-// terrain-editor globals; never call a Win32 picker from inside an ImGui widget.
+// PW Edition: environment assets use the SAME native 3D model importer as
+// regular FBX/DBO entities. The importer previews textured geometry; its save
+// operation routes to skybank/vegbank instead of emitting an ordinary FPE.
 #include "PW-StyleImport.h"
+#include "PW-ImportPaths.h"
 #include <string>
+extern int g_pwEnvironmentImportTarget; // 0 entity, 1 sky, 2 grass
 
-static void PWImportTerrainStyle(bool skyStyle)
+static void PWActivateImportedEnvironmentStyle(int type, const char* importedName)
 {
-    cstr oldDir = GetDir();
-    cstr selected = "";
-#ifdef _WIN64
-    if (skyStyle)
-        selected = openFileBox("Classic sky specification\0skyspec.txt\0All Files\0*.*\0",
-            "", "Select skyspec.txt in the sky style folder", "txt", IMPORTEROPENFILE);
-    else
-        selected = openFileBox("GameGuru vegetation model\0veg.dbo;veg.x\0All Files\0*.*\0",
-            "", "Select veg.DBO or veg.X in the grass style folder", "dbo", IMPORTEROPENFILE);
-#else
-    if (skyStyle)
-        selected = openFileBox("Classic sky specification|skyspec.txt|All Files|*.*|",
-            "", "Select skyspec.txt in the sky style folder", "txt", IMPORTEROPENFILE);
-    else
-        selected = openFileBox("GameGuru vegetation model|veg.dbo;veg.x|All Files|*.*|",
-            "", "Select veg.DBO or veg.X in the grass style folder", "dbo", IMPORTEROPENFILE);
-#endif
-    SetDir(oldDir.Get());
-    if (selected == "Error" || selected.Len() == 0) return;
-    std::string style, error;
-    const std::string bank = std::string(g.fpscrootdir_s.Get()) + "\\Files\\" +
-        (skyStyle ? "skybank" : "vegbank");
-    if (!PWStyleImport::Install(selected.Get(), bank,
-            skyStyle ? PWStyleImport::Kind::Sky : PWStyleImport::Kind::Grass,
-            style, error))
+    const std::string name = importedName ? importedName : "";
+    if (type == 1)
     {
-        popup_text((LPSTR)error.c_str());
-        return;
-    }
-
-    if (skyStyle)
-    {
-        sky_init();
+        sky_init(); // Refresh native skybank.
         for (int i = 1; i <= g.skymax; ++i)
         {
-            if (!PWStyleImport::Same(t.skybank_s[i].Get(), style)) continue;
+            if (!PWStyleImport::Same(t.skybank_s[i].Get(), name)) continue;
             g.skyindex = i;
             t.visuals.skyindex = i;
             t.gamevisuals.skyindex = i;
@@ -59,12 +33,12 @@ static void PWImportTerrainStyle(bool skyStyle)
             return;
         }
     }
-    else
+    else if (type == 2)
     {
         grass_initstyles();
         for (int i = 1; i <= g.vegstylemax; ++i)
         {
-            if (!PWStyleImport::Same(t.vegstylebank_s[i].Get(), style)) continue;
+            if (!PWStyleImport::Same(t.vegstylebank_s[i].Get(), name)) continue;
             g.vegstyleindex = i;
             g.vegstyle_s = t.vegstylebank_s[i];
             t.visuals.vegetationindex = i;
@@ -78,5 +52,49 @@ static void PWImportTerrainStyle(bool skyStyle)
             return;
         }
     }
-    popup_text("Style copied, but the new style is not visible in GameGuru's bank list.");
+    popup_text("Native style saved, but GameGuru did not list the new style.");
+}
+
+void PWActivateImportedEnvironmentStyleFromImporter(int type, const char* name)
+{
+    PWActivateImportedEnvironmentStyle(type, name);
+}
+
+static void PWImportTerrainStyle(bool skyStyle)
+{
+    if (t.importer.importerActive != 0)
+    {
+        popup_text("Close or save your current model import before opening another.");
+        return;
+    }
+    cstr oldDir = GetDir();
+#ifdef _WIN64
+    cstr selected = openFileBox(
+        "GameGuru 3D models\0*.fbx;*.dbo;*.x\0FBX model\0*.fbx\0DBO model\0*.dbo\0X model\0*.x\0",
+        "", skyStyle ? "Import Sky Mesh" : "Import Grass Mesh",
+        "fbx", IMPORTEROPENFILE);
+#else
+    cstr selected = openFileBox(
+        "GameGuru 3D models|*.fbx;*.dbo;*.x|FBX model|*.fbx|DBO model|*.dbo|X model|*.x|",
+        "", skyStyle ? "Import Sky Mesh" : "Import Grass Mesh",
+        "fbx", IMPORTEROPENFILE);
+#endif
+    SetDir(oldDir.Get());
+    if (selected == "Error" || selected.Len() == 0) return;
+    if (!PWImport::EndsWithI(selected.Get(), ".fbx") &&
+        !PWImport::EndsWithI(selected.Get(), ".dbo") &&
+        !PWImport::EndsWithI(selected.Get(), ".x"))
+    {
+        popup_text("Select an FBX, DBO or X model. GLB is disabled for now.");
+        return;
+    }
+    if (!PWStyleImport::RegularFile(selected.Get()))
+    {
+        popup_text("Selected model cannot be opened.");
+        return;
+    }
+    g_pwEnvironmentImportTarget = skyStyle ? 1 : 2;
+    t.timporterfile_s = selected;
+    importer_loadmodel(); // The existing textured 3D model preview and controls.
+    if (t.importer.importerActive != 1) g_pwEnvironmentImportTarget = 0;
 }
