@@ -256,9 +256,13 @@ void grass_setgrassimage ( void )
 	{
         // PW Edition: user grass styles may provide an ordinary PNG atlas
         // instead of DDS. Preserve DDS-first Classic compatibility.
-        cstr grassFile = cstr(cstr("vegbank\\") + g.vegstyle_s + "\\grass.dds");
-        if (FileExist(grassFile.Get()) == 0)
-            grassFile = cstr(cstr("vegbank\\") + g.vegstyle_s + "\\grass.png");
+        cstr grassBase = cstr(cstr("vegbank\\") + g.vegstyle_s + "\\grass");
+        cstr grassFile = grassBase + ".dds";
+        if (FileExist(grassFile.Get()) == 0) grassFile = grassBase + ".png";
+        if (FileExist(grassFile.Get()) == 0) grassFile = grassBase + ".jpg";
+        if (FileExist(grassFile.Get()) == 0) grassFile = grassBase + ".jpeg";
+        if (FileExist(grassFile.Get()) == 0) grassFile = grassBase + ".bmp";
+        if (FileExist(grassFile.Get()) == 0) grassFile = grassBase + ".tga";
         LoadImage(grassFile.Get(), t.tGrassImg);
 	}
 	extern bool bResourcesSet, bGridMade;
@@ -807,6 +811,10 @@ static bool Prepare() {
         if (FileExist((LPSTR)model.c_str()) == 0) return false;
         std::string atlas = dir + "\\grass.dds";
         if (FileExist((LPSTR)atlas.c_str()) == 0) atlas = dir + "\\grass.png";
+        if (FileExist((LPSTR)atlas.c_str()) == 0) atlas = dir + "\\grass.jpg";
+        if (FileExist((LPSTR)atlas.c_str()) == 0) atlas = dir + "\\grass.jpeg";
+        if (FileExist((LPSTR)atlas.c_str()) == 0) atlas = dir + "\\grass.bmp";
+        if (FileExist((LPSTR)atlas.c_str()) == 0) atlas = dir + "\\grass.tga";
         if (FileExist((LPSTR)atlas.c_str()) == 0) return false;
         RenderStyle& rs = render[i];
         rs.source = FindFreeId();
