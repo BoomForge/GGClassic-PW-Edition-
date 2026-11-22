@@ -4200,11 +4200,14 @@ void terrain_shadowupdate ( void )
 				}
 			}
 
-			//  hide all vegetation
-			if (  t.hardwareinfoglobals.nograss == 0 ) 
+			//  Hide both Classic vegetation and PW mixed grass while rendering
+            // the cascade shadow targets. Mixed instances were previously left
+            // visible here, unlike the native grid.
+			if (  t.hardwareinfoglobals.nograss == 0 )
 			{
-				HideVegetationGrid (  );
+				HideVegetationGrid();
 			}
+            PWGrassMix::SetInstancesVisible(false);
 
 			//  shadows for map editor and game
 			if ( 1 ) 
@@ -4411,8 +4414,9 @@ void terrain_shadowupdate ( void )
 				}
 			}
 
-			//  show all vegetation, but only if in game (we don't show veg in grid edit mode)
-			if (  t.hardwareinfoglobals.nograss == 0 ) 
+			// Restore only the active vegetation renderer after the shadow pass.
+            // Showing both sets of blades overlays textures and causes flicker.
+			if (t.hardwareinfoglobals.nograss == 0)
 			{
 				#ifdef ENABLEIMGUI
                 if (t.game.gameloop != 0 || bEnableVeg)
@@ -4420,14 +4424,20 @@ void terrain_shadowupdate ( void )
                 if (t.game.gameloop != 0)
 				#endif
                 {
-                    // Cascaded shadows temporarily hide the native grid.
-                    // Do NOT restore it when PW's mixed grass is on screen.
                     if (PWGrassMix::Active() && PWGrassMix::Ready())
+                    {
                         HideVegetationGrid();
+                        PWGrassMix::SetInstancesVisible(true);
+                    }
                     else
+                    {
                         ShowVegetationGrid();
+                        PWGrassMix::SetInstancesVisible(false);
+                    }
                 }
+                else PWGrassMix::SetInstancesVisible(false);
 			}
+            else PWGrassMix::SetInstancesVisible(false);
 
 			//  show water in editor
 			if (  ObjectExist(t.terrain.objectstartindex+2) == 1 && t.twaterobj == 1  )  ShowObject (  t.terrain.objectstartindex+2 );
