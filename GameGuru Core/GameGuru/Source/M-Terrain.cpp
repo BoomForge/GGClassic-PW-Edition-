@@ -1266,6 +1266,12 @@ void imgui_terrain_loop(void)
                                     100.f * slot.weight / total);
                         }
                         ImGui::TextDisabled("Bounded render: up to 320 visible mixed grass pieces.");
+                        // Resource preparation and a populated painted area
+                        // are different conditions: never silently hide grass.
+                        if (!PWGrassMix::Ready())
+                            ImGui::TextDisabled("Mix loading or missing a style: Classic grass stays visible.");
+                        else if (!PWGrassMix::OwnsGrid())
+                            ImGui::TextDisabled("No mixed grass placed near this view; showing Classic grass.");
                     }
                     else
                         ImGui::TextDisabled("Select at least two enabled types to mix. One type uses Classic grass.");
