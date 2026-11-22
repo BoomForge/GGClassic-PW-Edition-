@@ -294,7 +294,7 @@ void grass_loop ( void )
             t.terrain.TerrainID, t.terrain.superflat == 1,
             TERRAIN_SUPERFLAT_HEIGHT, t.terrain.grassmemblock,
             t.visuals.VegQuantity_f);
-        HideVegetationGrid(); // Classic can draw only one native grass type.
+        if (PWGrassMix::Ready()) HideVegetationGrid(); // Native grid supports only one species.
     }
     else if (pwWasMixed)
     {
@@ -426,7 +426,7 @@ void grass_updategrassfrombitmap ( void )
 	
 	//this was only required because images are loading in RGBA, when they should be BGRA (as it was with DX9!!)
 	//ConvertVegMemblock ( t.terrain.grassmemblock );
-    PWGrassMix::Dirty();
+    PWGrassMix::InvalidateMask();
 
 	// slopes and water can't exist in superflat mode, so only delete invalid grass in terrain mode
 	if ( t.terrain.superflat == 0  )  DeleteInvalidGrass (  t.terrain.TerrainID,t.terrain.waterliney_f,1.0 );
@@ -741,6 +741,8 @@ static int FindFreeImageId() {
         if (!ImageExist(id)) return id;
     return 0;
 }
+bool Ready() { return ready; }
+void InvalidateMask() { lastCameraCellX = lastCameraCellZ = -999999; }
 void ResetInstances() {
     for (int i = 0; i < MaxStyles; ++i) {
         RenderStyle& rs = render[i];
