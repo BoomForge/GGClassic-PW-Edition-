@@ -82,7 +82,7 @@ jobs:
         shell: pwsh
         run: |
           $root = 'PW-Build/Release'
-          foreach ($name in @('Guru-MapEditor.exe','pw-updater.ps1','pw-edition-version.txt','Files/scriptbank/global.lua','Files/scriptbank/pw_transition_state.lua','Files/effectbank/reloaded/apbr_animwithtran_emissive.fx')) {
+          foreach ($name in @('Guru-MapEditor.exe','pw-updater.ps1','pw-edition-version.txt','Files/scriptbank/global.lua','Files/scriptbank/pw_transition_state.lua','Files/effectbank/reloaded/apbr_animwithtran_emissive.fx','Files/PWTools/pw_glb_to_fbx.py')) {
             if (-not (Test-Path (Join-Path $root $name))) { throw "Missing output: $name" }
           }
           # Distinguish the actual rebuilt editor from a stock executable that
