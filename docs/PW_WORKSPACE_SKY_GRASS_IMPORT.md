@@ -77,6 +77,19 @@ colour blend.
 
 **Local acceptance via the already-integrated in-editor updater (not manual ZIP):** After successful CI, use PW Edition's existing updater, then inspect: native single style with mix off; two distinct grass types at 50/50, then 25/75; a new custom style alongside stock grass; an existing painted area while moving the camera; toggle Display Vegetation; test level, return to editor, save/reopen. Confirm distinct meshes and textures without z-fighting. Record the commit reported by the updater if it fails.
 
+## Follow-up 22 November — selecting a second grass type hides everything
+
+**Observed by owner after the previous rendering fix:** When more than one grass style is selected, the vegetation disappears entirely. This is a separate regression from the original texture-overlap/flicker.
+
+**Further source defects found and patched:**
+1. `PWGrassMix::Ready()` meant only that style models/images loaded successfully, **not** that any grass instances were populated. All editor/shadow/startup hiding gates now use `PWGrassMix::OwnsGrid()`, which is true only after real mixed objects have been placed. If none were placed, the editor continues to display the original Classic grid instead of hiding *all* grass.
+2. `grass_init()` previously hid Classic immediately if a second style was merely configured, before sampling any painted vegetation. It now keeps Classic visible until the mixer genuinely takes ownership.
+3. The old mixed-grid search was only 21×21 world cells around the camera and sampled one pixel from each 2×2 painted-mask cell. In the editor, the camera can be high and away from the painted grass, and small brush strokes can miss the sampled pixel entirely. Sampling now expands outward up to a 48-cell/2400-unit radius, reads all four mask pixels per cell, prioritises near-camera cells first, and still limits allocated mixed objects to 320.
+4. `InstanceObject` creates **independent per-instance transforms**; it did not copy the source grass object's native 200% scaling or template yaw. Each mixed instance now explicitly receives its own saved style scale and rotation.
+5. Static regression checks now assert populated-instance ownership, old-grid fallback, painted-mask coverage, distinct per-style assets, native grass size/yaw and shadow-cycle behaviour.
+
+**Checks / limitations:** An earlier full Windows build of the overlap fix passed, but the **new disappearance correction is not yet confirmed in a real editor**. Check GitHub Actions for the latest full x64 compilation and regression results. Even passing CI cannot prove graphics are visible. The next owner test must use the **already-installed, in-editor PW Edition updater**, then compare one type, two different native types at equal weights, and a custom style. Verify no disappearing grass, no texture domination, no flicker, and consistent save/reload. If still blank despite the fallback, capture which style names and screenshot of the scene so the remaining object/camera/render path can be traced.
+
 ## Required acceptance before an install is called ready
 
 1. Compile full Windows x64 editor at the latest branch head.
