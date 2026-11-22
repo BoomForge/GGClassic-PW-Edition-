@@ -318,7 +318,7 @@ void sky_skyspec_init ( void )
             if (t.tskyi == 0 && ObjectExist(t.skyobj))
             {
                 const std::string texture = PWTextureStyle::SkyTexturePath(
-                    std::string("skybank\\\\") + t.skyname_s.Get());
+                    std::string("skybank\\") + t.skyname_s.Get());
                 if (!texture.empty())
                 {
                     const int base = g.importermenuimageoffset + 8000;
