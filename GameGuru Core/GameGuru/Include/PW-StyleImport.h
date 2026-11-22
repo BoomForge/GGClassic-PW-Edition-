@@ -62,8 +62,10 @@ inline bool CanInstall(const std::string& marker, const std::string& sourceDir,
         }
     } else {
         if ((!Same(leaf, "veg.dbo") && !Same(leaf, "veg.x")) ||
-            !RegularFile(marker) || !RegularFile(sourceDir + "\\grass.dds")) {
-            error = "Choose veg.DBO or veg.X inside a vegetation style folder with grass.dds.";
+            !RegularFile(marker) ||
+            (!RegularFile(sourceDir + "\\grass.dds") &&
+             !RegularFile(sourceDir + "\\grass.png"))) {
+            error = "Choose veg.DBO or veg.X inside a vegetation style folder with grass.dds or grass.png.";
             return false;
         }
     }
