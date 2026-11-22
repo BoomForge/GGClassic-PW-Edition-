@@ -71,6 +71,17 @@ inline bool IsSkyOverride(const std::string& f) {
            TextureExtension(f);
 }
 #ifdef _WIN32
+inline bool TemplateUsable(bool sky, const std::string& filesRoot,
+                           const std::string& selectedStyle) {
+    if (!SafeStyleReference(selectedStyle)) return false;
+    const std::string folder = filesRoot + (sky ? "\\skybank\\" : "\\vegbank\\") + selectedStyle;
+    if (!PWStyleImport::Directory(folder)) return false;
+    const std::string stem = LastSegment(selectedStyle);
+    const std::string mesh = folder + "\\" + (sky ? stem : "veg");
+    if (!PWStyleImport::RegularFile(mesh + ".dbo") &&
+        !PWStyleImport::RegularFile(mesh + ".x")) return false;
+    return !sky || PWStyleImport::RegularFile(folder + "\\skyspec.txt");
+}
 inline bool CreateFromTexture(bool sky, const std::string& texture,
                               const std::string& filesRoot,
                               const std::string& selectedStyle,
