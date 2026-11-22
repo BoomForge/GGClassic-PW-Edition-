@@ -7574,12 +7574,18 @@ void import_generate_thumb(void)
 	DBPRO_GLOBAL tagCameraData* m_mycam;
 	m_mycam = m_CameraManager.GetData(0);
 	float thumbnail_dimenions = 128;
-	if (m_mycam)
+	if (m_mycam && m_mycam->pCameraToImageSurface)
 	{
-		//extern ImVec2 OldrenderTargetSize; //OldrenderTargetSize.x
-
-		float dw = GetDisplayWidth(); //GetChildWindowWidth(-1);
-		float dh = GetDisplayHeight(); //GetChildWindowHeight(-1);
+        // PW Edition: the DX11 importer is drawn into the docked editor camera
+        // viewport, NOT the full desktop-sized display. Cropping using the
+        // full display dimensions captured mostly terrain / green emptiness.
+        float dw = (float)GetChildWindowWidth(-1);
+        float dh = (float)GetChildWindowHeight(-1);
+        if (dw < thumbnail_dimenions || dh < thumbnail_dimenions)
+        {
+            dw = (float)GetDisplayWidth();
+            dh = (float)GetDisplayHeight();
+        }
 		float gi_rectw = (dw*0.5) -(thumbnail_dimenions*0.5);
 		float gi_recth = (dh*0.5) -(thumbnail_dimenions*0.5);
 		extern GlobStruct* g_pGlob;
