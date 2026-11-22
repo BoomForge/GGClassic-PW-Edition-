@@ -7,6 +7,7 @@ on:
       - "GameGuru Core/GameGuru/Include/PW-GLBBridge.h"
       - "GameGuru Core/GameGuru/Include/PW-ThumbnailCheck.h"
       - "GameGuru Core/GameGuru/Include/PW-StyleImport.h"
+      - "GameGuru Core/GameGuru/Include/PW-TextureStyleClone.h"
       - "GameGuru Core/GameGuru/Include/PW-TerrainStyleUI.h"
       - "GameGuru Core/GameGuru/Include/PW-EnvironmentImport.h"
       - "GameGuru Core/GameGuru/Include/PW-EnvironmentStyleSettings.h"
