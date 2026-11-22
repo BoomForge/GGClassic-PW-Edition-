@@ -8,6 +8,7 @@
 #include "PW-ImportPaths.h" // PW Edition: safe Blender/Mixamo texture path handling
 #include "PW-AssetManifest.h" // Shared Model Importer 2 / Character Creator 2 preflight
 #include "PW-MaterialRelink.h" // Model Importer 2 M2: validated slot selection and texture relinking
+#include "PW-GLBBridge.h" // GLB 2.0 import via Blender -> existing FBX pipeline
 #include "PW-SkeletalAudit.h" // Non-destructive GameGuru skeleton/clip inspection
 #include "PW-SkeletalIntegrity.h" // Native skin weight/bind-pose/keyframe consistency verification
 
@@ -104,6 +105,38 @@ extern preferences pref; //cyb
 
 // Prototypes
 void LoadFBX ( LPSTR pFilename, int iObjectNumber );
+
+// Convert GLB using an installed Blender, then load its real FBX geometry,
+// materials and armature through the legacy GameGuru importer. Conversion is
+// isolated under Files\importer\temp and never overwrites the source GLB.
+static bool PW_LoadGLBIntoImporter(const char* input, int objectNumber)
+{
+    const std::string source = input ? input : "";
+    const char* filesRoot = g.rootdir_s.Get();
+    const std::string files = filesRoot ? filesRoot : "";
+    std::string converted, problem;
+    if (!PWGLB::Convert(source, files, converted, problem))
+    {
+        OutputDebugStringA(("PW GLB import failed: " + problem + "\n").c_str());
+        popup_text((LPSTR)problem.c_str());
+        return false;
+    }
+    // LoadFBX takes a mutable legacy LPSTR; do not cast away const from
+    // the std::string's internal storage.
+    std::vector<char> path(converted.begin(), converted.end());
+    path.push_back(0);
+    extern bool g_bOverrideXCacheWhenUsingImporter;
+    g_bOverrideXCacheWhenUsingImporter = true;
+    LoadFBX(path.data(), objectNumber);
+    g_bOverrideXCacheWhenUsingImporter = false;
+    if (ObjectExist(objectNumber) != 1)
+    {
+        popup_text("Converted GLB could not be loaded by GameGuru's FBX importer.");
+        return false;
+    }
+    return true;
+}
+
 
 
 void importer_init ( void )
@@ -1690,7 +1723,8 @@ void importer_loadmodel ( void )
 
 	// check if importing an FBX for first time
 	bool bHasFBXExtension = false;
-	if ( PWImport::EndsWithI(t.importer.objectFilename.Get(), ".fbx") ) bHasFBXExtension = true;
+	if ( PWImport::EndsWithI(t.importer.objectFilename.Get(), ".fbx") ||
+         PWImport::EndsWithI(t.importer.objectFilename.Get(), ".glb") ) bHasFBXExtension = true;
 	if ( bHasFBXExtension == true && g_iFirstTimeFBXImport == 0 )
 	{
 		// set-up importer for FBX friendly import settings
@@ -1708,7 +1742,21 @@ void importer_loadmodel ( void )
 	t.strwork = ""; t.strwork = t.strwork + t.importer.objectFileOriginalPath + t.importer.objectFilename;
 	if ( FileExist ( t.strwork.Get() ) ) 
 	{
-		if ( PWImport::EndsWithI(t.strwork.Get(), ".fbx") )
+        if ( PWGLB::IsGLB(t.strwork.Get()) )
+        {
+            if (!PW_LoadGLBIntoImporter(t.strwork.Get(), t.importer.objectnumber))
+            {
+                // Do not silently substitute a cube for a failed GLB import.
+                importer_free();
+                t.importer.importerActive = 0;
+                #if defined(ENABLEIMGUI) && !defined(USEOLDIDE)
+                bImporter_Window = false;
+                #endif
+                return;
+            }
+            g_bLoadedFBXModel = true;
+        }
+		else if ( PWImport::EndsWithI(t.strwork.Get(), ".fbx") )
 		{
 			extern bool g_bOverrideXCacheWhenUsingImporter;
 			g_bOverrideXCacheWhenUsingImporter = true;
@@ -1728,7 +1776,20 @@ void importer_loadmodel ( void )
 		t.strwork = ""; t.strwork = t.strwork + g.fpscrootdir_s + "\\Files\\"+t.importer.objectFilename;
 		if (  FileExist( t.strwork.Get() ) ) 
 		{
-			if ( PWImport::EndsWithI(t.strwork.Get(), ".fbx") )
+            if ( PWGLB::IsGLB(t.strwork.Get()) )
+            {
+                if (!PW_LoadGLBIntoImporter(t.strwork.Get(), t.importer.objectnumber))
+                {
+                    importer_free();
+                    t.importer.importerActive = 0;
+                    #if defined(ENABLEIMGUI) && !defined(USEOLDIDE)
+                    bImporter_Window = false;
+                    #endif
+                    return;
+                }
+                g_bLoadedFBXModel = true;
+            }
+			else if ( PWImport::EndsWithI(t.strwork.Get(), ".fbx") )
 			{
 				LoadFBX ( t.strwork.Get(), t.importer.objectnumber );
 				//SetObjectRenderMatrixMode ( t.importer.objectnumber, 1 );
@@ -1742,6 +1803,16 @@ void importer_loadmodel ( void )
 		}
 		else
 		{
+            if (PWGLB::IsGLB(t.importer.objectFilename.Get()))
+            {
+                popup_text("GLB source file is missing; no model was imported.");
+                importer_free();
+                t.importer.importerActive = 0;
+                #if defined(ENABLEIMGUI) && !defined(USEOLDIDE)
+                bImporter_Window = false;
+                #endif
+                return;
+            }
 			MakeObjectCube (  t.importer.objectnumber,100 );
 		}
 	}
