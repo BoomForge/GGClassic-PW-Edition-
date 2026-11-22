@@ -1707,6 +1707,13 @@ void importer_changeshader ( LPSTR pNewShaderFilename )
 
 void importer_loadmodel ( void )
 {
+    // Keep the experimental GLB bridge in source, but reject GLB before
+    // importer_init() or any engine state is touched. FBX remains enabled.
+    if (PWImport::EndsWithI(t.timporterfile_s.Get(), ".glb"))
+    {
+        popup_text("GLB importing is temporarily disabled in PW Edition. Use FBX.");
+        return;
+    }
 	// user prompt when loading model in
 	popup_text("importing and converting model");
 

@@ -7496,7 +7496,7 @@ void mapeditorexecutable_loop(void)
 					iLaunchAfterSync = 0;
 					cStr tOldDir = GetDir();
 					char * cFileSelected;
-					cFileSelected = (char *)noc_file_dialog_open(NOC_FILE_DIALOG_OPEN, "All\0*.*\0X\0*.x\0DBO\0*.dbo\0OBJ\0*.obj\0FBX\0*.fbx\0GLB\0*.glb\0\0\0", NULL, NULL , true );
+					cFileSelected = (char *)noc_file_dialog_open(NOC_FILE_DIALOG_OPEN, "All supported models\0*.x;*.dbo;*.obj;*.fbx\0X\0*.x\0DBO\0*.dbo\0OBJ\0*.obj\0FBX\0*.fbx\0\0\0", NULL, NULL , true );
 					SetDir(tOldDir.Get());
 					if (cFileSelected && strlen(cFileSelected) > 0) 
 					{
@@ -7522,8 +7522,7 @@ void mapeditorexecutable_loop(void)
 							if (stricmp(pExtension, ".dbo") == NULL) bPermittedFormat = true;
 							if (stricmp(pExtension, ".obj") == NULL) bPermittedFormat = true;
 							if (stricmp(pExtension, ".fbx") == NULL) bPermittedFormat = true;
-                            // GLB is routed through the Blender-to-FBX bridge; raw .gltf is not yet supported.
-                            if (stricmp(pExtension, ".glb") == NULL) bPermittedFormat = true;
+                            // PW Edition: GLB is disabled until it passes a real import test.
 							if (bPermittedFormat == true)
 							{
 								// load the model
@@ -17655,12 +17654,12 @@ void gridedit_import_ask ( void )
 		{
 			if (  t.tdone  ==  0 ) 
 			{
-				SetFileMapString ( 1 , 1256 , "Choose an X, FBX, GLB or DBO file for a new object, or an FPE for an existing entity (*.*)" );
+				SetFileMapString ( 1 , 1256 , "Choose an X, FBX or DBO file for a new object, or FPE for an existing entity (*.*)" );
 				SetFileMapString (  1, 1512, "Import New Entity" );
 			}
 			else
 			{
-				SetFileMapString (  1, 1256, "Please choose X, FBX, GLB, DBO or FPE (*.x;*.fbx;*.glb;*.dbo;*.fpe)" );
+				SetFileMapString (  1, 1256, "Please choose X, FBX, DBO or FPE (*.x;*.fbx;*.dbo;*.fpe)" );
 				SetFileMapString (  1, 1512, "Invalid File, Please t.try again" );
 			}
 			SetFileMapDWORD (  1, 424, 1 );
@@ -17673,7 +17672,6 @@ void gridedit_import_ask ( void )
 			t.tdone = 1;
 			if (	strcmp ( Lower(Right(t.returnstring_s.Get(),2)) , ".x" ) == 0 
 			||		strcmp ( Lower(Right(t.returnstring_s.Get(),4)) ,".fbx" ) == 0
-            ||      strcmp ( Lower(Right(t.returnstring_s.Get(),4)) , ".glb" ) == 0
 			||		strcmp ( Lower(Right(t.returnstring_s.Get(),4)) , ".dbo" ) == 0 
 			||		strcmp ( Lower(Right(t.returnstring_s.Get(),4)) , ".fpe" ) == 0 
 			||		t.returnstring_s  ==  ""  )  
