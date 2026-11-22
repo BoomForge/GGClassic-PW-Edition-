@@ -7534,10 +7534,18 @@ void importer_save_entity ( char *filename )
 
 void import_generate_thumb(void)
 {
-	// generate new BMP thumb from scratch
-	CreateBitmap(32, 64, 64);
-	SetCurrentBitmap(32);
-	SetCameraAspect(1.0);
+    // The legacy editor rendered into a 64x64 offscreen bitmap. In the
+    // docked DX11 editor that switches the render target away from the scene
+    // camera: the subsequent 128px camera-surface capture can be empty/green.
+    // Capture from the existing camera target instead; keep Classic's 64px
+    // route unchanged for non-ImGui configurations.
+#if defined(ENABLEIMGUI) && !defined(USEOLDIDE)
+    SetCurrentBitmap(0);
+#else
+    CreateBitmap(32, 64, 64);
+    SetCurrentBitmap(32);
+#endif
+    SetCameraAspect(1.0);
 
 	//  Make a white background Box (  )
 	t.twhiteobj = 1;

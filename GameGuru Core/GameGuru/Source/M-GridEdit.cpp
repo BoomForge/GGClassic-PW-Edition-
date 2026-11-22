@@ -148,7 +148,7 @@ bool imgui_is_running = false;
 int refresh_gui_docking = 0;
 // New dockspace identity migrates the default layout once without continually
 // overwriting user adjustments saved in uiv3.layout.
-static const char* g_pwEngineDockspaceName = "PWEngineDockspaceV6";
+static const char* g_pwEngineDockspaceName = "PWEngineDockspaceV7";
 
 // PW Edition: persistent checkpoints to distinguish an unhandled window-close
 // from a blocked common_justbeforeend() / Steam cleanup. No forced process kill.
@@ -2875,6 +2875,14 @@ void mapeditorexecutable_loop(void)
 			ImGuiID dock_id_right = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, inspectorRatio, NULL, &dock_main_id);
 			dock_id_bottom = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Down, 0.31f, NULL, &dock_main_id);
 			g_pwBottomAssetDockId = dock_id_bottom;
+            // Permanent editor and asset browser panes: disable tab tearing /
+            // undocking, but preserve splitter resizing between them.
+            ImGuiDockNode* sceneDock = ImGui::DockBuilderGetNode(dock_main_id);
+            ImGuiDockNode* assetDock = ImGui::DockBuilderGetNode(dock_id_bottom);
+            if (sceneDock)
+                sceneDock->LocalFlags |= ImGuiDockNodeFlags_NoTabBar | ImGuiDockNodeFlags_NoWindowMenuButton;
+            if (assetDock)
+                assetDock->LocalFlags |= ImGuiDockNodeFlags_NoTabBar | ImGuiDockNodeFlags_NoWindowMenuButton;
 
 			ImGui::DockBuilderDockWindow(TABEDITORNAME, dock_main_id);
 			ImGui::DockBuilderDockWindow("Scene Hierarchy##PWSceneHierarchy", dock_id_left);
@@ -23497,9 +23505,9 @@ void process_entity_library(void)
 		// show through the library and make it look like a viewport overlay.
 		ImGui::SetNextWindowBgAlpha(1.0f);
 		// This is a permanent dock window, not a closable popup.
-		ImGui::Begin("Asset Browser##PWAssetBrowser", NULL, ex_window_flags);
-		if (ImGui::IsWindowDocked())
-			g_pwBottomAssetDockId = ImGui::GetWindowDockID();
+        ImGui::Begin("Asset Browser##PWAssetBrowser", NULL, ex_window_flags);
+        // Never learn a new dock from a mistakenly detached browser.
+        // The workspace owns this ID, not the individual asset panel.
 		if (justOpened)
 			ImGui::SetWindowFocus("Asset Browser##PWAssetBrowser");
 
