@@ -5,12 +5,18 @@ on:
       - work/pw-community-integration-20261121
     paths:
       - "GameGuru Core/GameGuru/Source/M-GridEdit.cpp"
+      - "GameGuru Core/GameGuru/Source/M-Terrain.cpp"
+      - "GameGuru Core/GameGuru/Source/M-Grass.cpp"
+      - "GameGuru Core/GameGuru/Include/PW-GrassMix.h"
       - "tools/PWBootstrapper/Program.cs"
       - "tools/test_pw_editor_ui_regression.py"
       - ".github/workflows/pw-ui-regression-guards.yml"
   pull_request:
     paths:
       - "GameGuru Core/GameGuru/Source/M-GridEdit.cpp"
+      - "GameGuru Core/GameGuru/Source/M-Terrain.cpp"
+      - "GameGuru Core/GameGuru/Source/M-Grass.cpp"
+      - "GameGuru Core/GameGuru/Include/PW-GrassMix.h"
       - "tools/PWBootstrapper/Program.cs"
       - "tools/test_pw_editor_ui_regression.py"
       - ".github/workflows/pw-ui-regression-guards.yml"
