@@ -534,7 +534,7 @@ void imgui_terrain_loop(void)
             // Never re-show Classic's one-atlas grid over the PW multi-style instances.
             // The old grid and our mixed blades occupy the same painted terrain,
             // so rendering both causes z-fighting and makes one texture dominate.
-            if (PWGrassMix::Active() && PWGrassMix::Ready())
+            if (PWGrassMix::OwnsGrid())
                 HideVegetationGrid();
             else
                 ShowVegetationGrid();
@@ -580,7 +580,7 @@ void imgui_terrain_loop(void)
             // Never re-show Classic's one-atlas grid over the PW multi-style instances.
             // The old grid and our mixed blades occupy the same painted terrain,
             // so rendering both causes z-fighting and makes one texture dominate.
-            if (PWGrassMix::Active() && PWGrassMix::Ready())
+            if (PWGrassMix::OwnsGrid())
                 HideVegetationGrid();
             else
                 ShowVegetationGrid();
@@ -4424,7 +4424,7 @@ void terrain_shadowupdate ( void )
                 if (t.game.gameloop != 0)
 				#endif
                 {
-                    if (PWGrassMix::Active() && PWGrassMix::Ready())
+                    if (PWGrassMix::OwnsGrid())
                     {
                         HideVegetationGrid();
                         PWGrassMix::SetInstancesVisible(true);
