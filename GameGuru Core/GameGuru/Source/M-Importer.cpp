@@ -9,6 +9,7 @@
 #include "PW-AssetManifest.h" // Shared Model Importer 2 / Character Creator 2 preflight
 #include "PW-MaterialRelink.h" // Model Importer 2 M2: validated slot selection and texture relinking
 #include "PW-GLBBridge.h" // GLB 2.0 import via Blender -> existing FBX pipeline
+#include "PW-ImportedGeometry.h" // Ensure FBX/GLB export has real mesh/vertex data
 #include "PW-SkeletalAudit.h" // Non-destructive GameGuru skeleton/clip inspection
 #include "PW-SkeletalIntegrity.h" // Native skin weight/bind-pose/keyframe consistency verification
 
@@ -1817,7 +1818,31 @@ void importer_loadmodel ( void )
 		}
 	}
 
-	// 111118 - if import fails for any reason, ensure no crash
+	// PW Edition: the old FBX importer could fail while leaving a registered
+    // object (or the old importer would substitute a cube). That produces a
+    // thumbnail and an FPE for a NON-EXISTENT character. Reject it before the
+    // size calculation: a zero-sized object leads to infinite camera scale.
+    const bool pwModernImport = PWImport::EndsWithI(t.importer.objectFilename.Get(), ".fbx")
+                            || PWImport::EndsWithI(t.importer.objectFilename.Get(), ".glb");
+    if (pwModernImport)
+    {
+        const PWImportedGeometry::Report pwGeometry =
+            PWImportedGeometry::Inspect(ObjectExist(t.importer.objectnumber)
+                ? GetObjectData(t.importer.objectnumber) : nullptr);
+        if (!pwGeometry.usable)
+        {
+            OutputDebugStringA(("PW IMPORT FAILURE: " + pwGeometry.error + "\n").c_str());
+            popup_text("FBX/GLB import failed: no mesh geometry. No entity was saved.");
+            importer_free();
+            t.importer.importerActive = 0;
+            #if defined(ENABLEIMGUI) && !defined(USEOLDIDE)
+            bImporter_Window = false;
+            #endif
+            return;
+        }
+    }
+
+    // 111118 - if import fails for any reason, ensure no crash
 	if ( ObjectExist ( t.importer.objectnumber ) == 0 )
 	{
 		MakeObjectCube (  t.importer.objectnumber,100 );
@@ -1877,6 +1902,22 @@ void importer_loadmodel ( void )
 	if (  ObjectSizeZ (t.importer.objectnumber,2) > t.tObjectSize_f  ) t.tObjectSize_f = ObjectSizeZ (t.importer.objectnumber,2);
 	t.importer.originalObjectSize = t.tObjectSize_f;
 
+	// PW Edition: never divide by a zero / nonfinite FBX bound and then
+    // manufacture a green thumbnail for an invisible entity.
+    const float pwSizeX = ObjectSizeX(t.importer.objectnumber, 2);
+    const float pwSizeY = ObjectSizeY(t.importer.objectnumber, 2);
+    const float pwSizeZ = ObjectSizeZ(t.importer.objectnumber, 2);
+    if (pwModernImport && !PWImportedGeometry::SensibleExtent(pwSizeX, pwSizeY, pwSizeZ))
+    {
+        OutputDebugStringA("PW IMPORT FAILURE: loaded model has zero or invalid bounds.\n");
+        popup_text("FBX/GLB model has invalid size/bounds; cannot create a placeable entity.");
+        importer_free();
+        t.importer.importerActive = 0;
+        #if defined(ENABLEIMGUI) && !defined(USEOLDIDE)
+        bImporter_Window = false;
+        #endif
+        return;
+    }
 	//  Check the size and adjust scale to fit in view
 	t.tScale = ( 300.00 / t.tObjectSize_f ) * 100.0;
 	t.tScale = t.tScale * t.importer.scaleMulti;
