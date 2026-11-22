@@ -26,6 +26,10 @@ A> Due to this public repository being hammered by anonymous cloning, we have mo
 
 ---
 
+## Continue development — start here
+
+**Canonical current-state handoff:** [docs/PW_DEVELOPMENT_STATE.md](docs/PW_DEVELOPMENT_STATE.md). For a new chat or a new development revision, read that file on the active development branch, then verify the latest PR commit and CI status before proceeding. It records the current build/runtime distinction, owner-corrected requirements and next acceptance steps. Update and read it back after meaningful changes; historical checklist entries below may be older than the verified handoff.
+
 ## Pixelwolf Edition — Feature Upgrade Tracker
 
 **Project:** [GGClassic PW Edition](https://github.com/BoomForge/GGClassic-PW-Edition-)  
@@ -139,7 +143,7 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 - [x] **Updater failure UI improvement:** Surface MSBuild error diagnostics first, retaining the complete dated log and the existing no-install-on-build-failure safeguard.
 - [x] **Asset Inspector source:** Separate, non-docked popup launched from the permanent Asset Browser. Recursive on-disk `Files` tree on the left; true image preview or native 3D preview on the right (FPE/DBO/X/FBX), mouse orbit and wheel zoom; Insert into Scene adds a native undoable entity forward of the editor camera. Non-FPE models are copied/converted into isolated `entitybank/user/PWInspector` folders.
 - [x] Dedicated UI regression guards for Inspector routing, preview modes, and direct insertion; [Asset Inspector design and acceptance](docs/PW_ASSET_INSPECTOR.md).
-- [ ] **Not yet tested interactively:** newest Inspector-inclusive full x64 compile, actual runtime preview, all material variants, insertion position, undo, FPM persistence, standalone packaging. Do not claim this as a verified updater/installer until those gates are passed.
+- [x] **Inspector-inclusive full x64 CI compile passed:** [run #44994266761](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44994266761), commit `4716fe95`; compilation and staged-file validation succeeded, but **no downloadable artifact was produced**. [ ] Interactive editor runtime preview, material variants, insertion position, undo, FPM persistence, local Steam overlay and updater/installer remain unverified. See the [current handoff](docs/PW_DEVELOPMENT_STATE.md).
 
 ### Skybox and grass import — owner-corrected texture-only design (22 November 2026)
 
