@@ -6,6 +6,9 @@
 #include "PW-ImportPaths.h"
 #include <string>
 extern int g_pwEnvironmentImportTarget; // 0 entity, 1 sky, 2 grass
+extern char g_pwEnvironmentName[128];
+extern float g_pwEnvironmentScalePct;
+extern float g_pwEnvironmentYawDeg;
 
 static void PWActivateImportedEnvironmentStyle(int type, const char* importedName)
 {
@@ -93,6 +96,14 @@ static void PWImportTerrainStyle(bool skyStyle)
         popup_text("Selected model cannot be opened.");
         return;
     }
+    // Choose a writable default name from the model, editable in Inspector.
+    std::string baseName = PWImport::BaseName(selected.Get());
+    const size_t dot = baseName.find_last_of('.');
+    if (dot != std::string::npos) baseName.resize(dot);
+    if (baseName.size() >= sizeof(g_pwEnvironmentName)) baseName.resize(sizeof(g_pwEnvironmentName) - 1);
+    strcpy_s(g_pwEnvironmentName, sizeof(g_pwEnvironmentName), baseName.c_str());
+    g_pwEnvironmentScalePct = 100.f;
+    g_pwEnvironmentYawDeg = 0.f;
     g_pwEnvironmentImportTarget = skyStyle ? 1 : 2;
     t.timporterfile_s = selected;
     importer_loadmodel(); // The existing textured 3D model preview and controls.
