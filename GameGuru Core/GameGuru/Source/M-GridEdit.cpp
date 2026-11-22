@@ -7,6 +7,7 @@
 #include "stdafx.h"
 #include "gameguru.h"
 #include "PW-LoadTrace.h" // Pixelwolf Edition: optional load profiling
+#include "PW-ImportedGeometry.h" // Validate selected imported asset before cursor placement
 #include "M-WelcomeSystem.h"
 #include "M-Widget.h"
 #include "direct.h"
@@ -24170,23 +24171,38 @@ void process_entity_library(void)
 														std::string sFpeName = path_for_filename.c_str();
 														sFpeName = sFpeName + "\\" + myfiles->m_sName.Get();
 														t.addentityfile_s = sFpeName.c_str();
-														if (t.addentityfile_s != "")
-														{
-															entity_adduniqueentity(false);
-															t.tasset = t.entid;
-															// PW browser reads the entity bank directly; never synchronise with
-																// the retired external IDE (editor_filllibrary blocks placement).
-														}
-														t.inputsys.constructselection = t.tasset;
-
-														t.gridentity = t.entid;
-														t.inputsys.constructselection = t.entid;
-														t.inputsys.domodeentity = 1;
-														t.grideditselect = 5;
-
-														editor_refresheditmarkers();
-														//PE: Close window for now.
-														bCheckForClosing = true;
+                                                        if (t.addentityfile_s != "")
+                                                        {
+                                                            entity_adduniqueentity(false);
+                                                            const int pwBankObject = g.entitybankoffset + t.entid;
+                                                            // Importer failure previously gave a normal-looking
+                                                            // scene entry even if the FPE/DBO was empty or absent.
+                                                            // Expose the failure instead of placing a ghost model.
+                                                            const PWImportedGeometry::Report pwAsset =
+                                                                PWImportedGeometry::Inspect(
+                                                                    t.entid > 0 && ObjectExist(pwBankObject)
+                                                                        ? GetObjectData(pwBankObject) : nullptr);
+                                                            if (!pwAsset.usable)
+                                                            {
+                                                                t.tasset = 0;
+                                                                t.gridentity = 0;
+                                                                t.inputsys.constructselection = 0;
+                                                                popup_text("Asset could not be placed: FPE model has no usable geometry. Reimport FBX and check DBO output.");
+                                                                OutputDebugStringA(("PW ASSET PLACEMENT BLOCKED: " +
+                                                                    std::string(t.addentityfile_s.Get()) + ": " +
+                                                                    pwAsset.error + "\n").c_str());
+                                                            }
+                                                            else
+                                                            {
+                                                                t.tasset = t.entid;
+                                                                t.gridentity = t.entid;
+                                                                t.inputsys.constructselection = t.entid;
+                                                                t.inputsys.domodeentity = 1;
+                                                                t.grideditselect = 5;
+                                                                editor_refresheditmarkers();
+                                                                bCheckForClosing = true;
+                                                            }
+                                                        }
 													}
 												}
 
