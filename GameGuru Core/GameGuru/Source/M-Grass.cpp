@@ -295,7 +295,8 @@ void grass_loop ( void )
     // Weighted PW mix uses real per-style model instances chosen from the
     // same painted vegetation mask, instead of a cosmetic blend slider.
     static bool pwWasMixed = false;
-    const bool pwMixed = PWGrassMix::Active() && t.visuals.vegetationmode != 0;
+    const bool pwMixed = PWGrassMix::Active() && t.visuals.vegetationmode != 0
+        && t.hardwareinfoglobals.nograss == 0;
     if (pwMixed)
     {
         PWGrassMix::Refresh(CameraPositionX(0), CameraPositionZ(0),
@@ -307,7 +308,8 @@ void grass_loop ( void )
     else if (pwWasMixed)
     {
         PWGrassMix::ResetInstances();
-        ShowVegetationGrid();
+        if (t.hardwareinfoglobals.nograss == 0)
+            ShowVegetationGrid();
     }
     pwWasMixed = pwMixed;
 
@@ -771,6 +773,22 @@ void ResetInstances() {
     lastCameraCellX = lastCameraCellZ = -999999;
     builtRevision = 0;
     allocatedBase = 0;
+}
+void SetInstancesVisible(bool visible) {
+    // Classic hides vegetation during cascade-shadow rendering. Our own
+    // instance objects must follow the same pass, or they can flicker.
+    if (!ready) return;
+    for (int i = 0; i < MaxStyles; ++i) {
+        const RenderStyle& rs = render[i];
+        for (size_t j = 0; j < rs.instances.size(); ++j) {
+            const int id = rs.instances[j];
+            if (!ObjectExist(id)) continue;
+            if (visible && j < rs.used)
+                ShowObject(id);
+            else
+                HideObject(id);
+        }
+    }
 }
 static std::string ConfigPath(const std::string& folder) {
     if (folder.empty()) return "pw_grassmix.cfg";
