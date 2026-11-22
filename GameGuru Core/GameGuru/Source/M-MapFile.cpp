@@ -7,6 +7,7 @@
 #include "gameguru.h"
 #include "Common-Keys.h"
 #include "PW-LoadTrace.h" // PW Edition: loading measurements
+#include "PW-GrassMix.h" // Weighted grass mix sidecar inside FPM archive
 #include "PW-FPMCache.h" // PW Edition: optional verified per-session FPM cache
 
 #ifdef ENABLEIMGUI
@@ -503,6 +504,7 @@ void mapfile_saveproject_fpm ( void )
 		CopyAFile ( cfgfile_s.Get(), cfginlevelbank_s.Get() );
 	}
 
+    PWGrassMix::Save(g.mysystem.levelBankTestMap_s.Get());
 	// Create a FPM (zipfile)
 	CreateFileBlock (  1, t.ttempprojfilename_s.Get() );
 	SetFileBlockKey (  1, "mypassword" );
@@ -524,6 +526,8 @@ void mapfile_saveproject_fpm ( void )
 	AddFileToBlock (  1, "vegmask.dds" );
 	#endif
 	AddFileToBlock (  1, "vegmaskgrass.dat" );
+    if (FileExist("pw_grassmix.cfg") == 1)
+        AddFileToBlock(1, "pw_grassmix.cfg");
 	if ( FileExist ( "superpalette.ter" ) == 1 ) 
 		AddFileToBlock ( 1, "superpalette.ter" );
 
@@ -838,6 +842,7 @@ void mapfile_loadproject_fpm ( void )
 		if ( FileExist("conkit.dat") == 1 ) DeleteAFile ( "conkit.dat" );
 		if ( FileExist("map.obs") == 1 ) DeleteAFile ( "map.obs" );
 		if (FileExist("locked.cfg") == 1) DeleteAFile("locked.cfg");
+        if (FileExist("pw_grassmix.cfg") == 1) DeleteAFile("pw_grassmix.cfg");
 
 		//  Delete terrain texture files (if any)
 		if ( FileExist("Texture_D.dds") == 1 ) DeleteAFile ( "Texture_D.dds" );
@@ -891,6 +896,7 @@ void mapfile_loadproject_fpm ( void )
 		}
 
 		SetDir ( g.mysystem.levelBankTestMapAbs_s.Get() );
+        PWGrassMix::Load(g.mysystem.levelBankTestMapAbs_s.Get());
 
 
 		//  If file still not present, extraction failed
