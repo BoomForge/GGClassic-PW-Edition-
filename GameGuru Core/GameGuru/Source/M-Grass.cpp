@@ -148,7 +148,9 @@ void grass_init ( void )
     // Do not briefly draw the original one-style vegetation grid on top of a
     // selected PW mix while the replacement instances are being prepared.
     // grass_loop() will explicitly restore Classic on invalid/missing assets.
-	SetVegetationGridVisible(!PWGrassMix::Active());
+    // Keep Classic visible until PW has *actually* placed mixed blades.
+    // Resource readiness and an empty painted mask must not blank the editor.
+    SetVegetationGridVisible(true);
 
 }
 
@@ -354,10 +356,10 @@ void grass_loop ( void )
 	}
     if (pwMixed)
     {
-        if (PWGrassMix::Ready())
+        if (PWGrassMix::OwnsGrid())
             HideVegetationGrid();
         else
-            ShowVegetationGrid(); // Graceful single-style fallback on a bad mix.
+            ShowVegetationGrid(); // Leave the painted area visible until PW actually populates it.
     }
 }
 
@@ -759,6 +761,12 @@ static int FindFreeImageId() {
     return 0;
 }
 bool Ready() { return ready; }
+bool OwnsGrid() {
+    if (!ready || !Active()) return false;
+    for (int i = 0; i < MaxStyles; ++i)
+        if (render[i].used > 0) return true;
+    return false;
+}
 void InvalidateMask() { lastCameraCellX = lastCameraCellZ = -999999; }
 void ResetInstances() {
     for (int i = 0; i < MaxStyles; ++i) {
@@ -892,18 +900,30 @@ void Refresh(float cameraX, float cameraZ, int terrainId, bool superflat,
     lastCameraCellX = centerX; lastCameraCellZ = centerZ;
     for (int i = 0; i < MaxStyles; ++i) render[i].used = 0;
 
-    // 21x21 cells around the player, capped at 320 live instances. No
-    // level-wide per-grass object explosion or per-frame rebuild.
+    // The editor camera is often high above / offset from the grass being
+    // painted. A 21x21 (500-unit radius) crop could contain no painted pixels
+    // even while the old vegetation grid was full. Search outward in rings
+    // so we reach 2400 units but still prefer nearby grass first.
+    // At most 320 real objects survive; never create a level-wide grid.
     unsigned count = 0;
     const float chanceScale = (std::max)(0.15f, (std::min)(1.f, quantity / 20.f));
-    for (int dz = -10; dz <= 10 && count < 320; ++dz)
-    for (int dx = -10; dx <= 10 && count < 320; ++dx) {
+    for (int ring = 0; ring <= 48 && count < 320; ++ring)
+    for (int dz = -ring; dz <= ring && count < 320; ++dz)
+    for (int dx = -ring; dx <= ring && count < 320; ++dx) {
+        if (ring > 0 && std::abs(dx) != ring && std::abs(dz) != ring) continue;
         const int cellX = centerX + dx, cellZ = centerZ + dz;
         if (cellX < 0 || cellZ < 0 || cellX >= MAXTEXTURESIZE / 2 ||
             cellZ >= MAXTEXTURESIZE / 2) continue;
         const int texX = cellX * 2, texZ = cellZ * 2;
         const int offset = 12 + (texX + texZ * MAXTEXTURESIZE) * 4 + 2;
-        const int mask = ReadMemblockByte(memblockId, offset);
+        // Native paint uses 25-unit pixels; one mixed cell spans 2x2 of
+        // those pixels. Reading only its first corner missed sparse strokes.
+        const int nextX = offset + 4;
+        const int nextZ = offset + MAXTEXTURESIZE * 4;
+        const int mask = (std::max)((std::max)(int(ReadMemblockByte(memblockId, offset)),
+                                                  int(ReadMemblockByte(memblockId, nextX))),
+                                    (std::max)(int(ReadMemblockByte(memblockId, nextZ)),
+                                               int(ReadMemblockByte(memblockId, nextZ + 4))));
         if (mask <= 0) continue;
         const unsigned hash = Hash(unsigned(cellX), unsigned(cellZ));
         if (Unit(Hash(unsigned(cellX), unsigned(cellZ), 0x42de301u)) >
