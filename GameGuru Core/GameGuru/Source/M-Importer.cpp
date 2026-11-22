@@ -2479,8 +2479,14 @@ void imgui_importer_loop(void)
             static int pwAssetReportObject = -1;
             static std::string pwAssetReportSource;
             const int currentObject = t.importer.objectnumber;
-            const char* pwModelSourceName = t.importer.objectFileOriginalPath.Get();
-            const std::string currentSource = pwModelSourceName ? pwModelSourceName : "";
+            // The original folder and filename are stored separately by Classic.
+            // Preserve both in the M1 report and snapshot identity so loading a
+            // different model from the same folder does not reuse a stale report.
+            const char* pwOriginalDirectory = t.importer.objectFileOriginalPath.Get();
+            const char* pwObjectFilename = t.importer.objectFilename.Get();
+            const std::string currentSource =
+                std::string(pwOriginalDirectory ? pwOriginalDirectory : "") +
+                (pwObjectFilename ? pwObjectFilename : "");
             ImGui::TextWrapped("Inspect meshes, frame hierarchy, material paths and clips before export.");
             if (ImGui::Button("Inspect loaded model##PWImporter2"))
             {
