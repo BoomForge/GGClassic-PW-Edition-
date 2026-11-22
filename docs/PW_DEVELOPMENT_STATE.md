@@ -6,8 +6,8 @@
 **Repository:** https://github.com/BoomForge/GGClassic-PW-Edition-  
 **Active development branch:** `work/pw-community-integration-20261121`  
 **Draft pull request:** https://github.com/BoomForge/GGClassic-PW-Edition-/pull/1  
-**Verified branch head before this documentation commit:** `5028c8f3a259add074532507490853cf487fb3f3` (follow-up mixed-grass fallback UI and tests; confirm newer HEAD before edits).  
-**Last fully confirmed Windows x64 compile at the time of this handoff update:** [run #44999138941](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44999138941), **success**, for the previous editor revision `9248ed24`. The **first overlap fix** subsequently [compiled successfully in full Windows x64 CI #45009785335](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45009785335) at `e75bf86a`. The **subsequent disappearance fix** has [full Windows build #45011851690](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45011851690) running at `ac7ab53c`; the newest [full Windows build #45012034857](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45012034857) at `5028c8f3` is queued/running. Its [UI regression guards #45011851792](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45011851792) **passed** at `ac7ab53c`; verify latest CI result before delivery. **Recheck Actions before claiming the latest full build passed.** The separate Windows updater EXE is already part of the owner's build; it also [compiled successfully at `9248ed24`](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44999138922).
+**Verified branch head before this documentation commit:** `8103dcc20efd290a09754a48b05862c5b2822dda` (opt-in mixer safety change and third-failure documentation; check GitHub for newer revisions).  
+**Confirmed previous Windows x64 full compile:** [run #45012104941](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45012104941), **success**, for the _still broken in live editor_ disappearance-fix revision `0bd43d92`. This demonstrates compilation does not validate multi-grass visuals. The new **opt-in safety preview** revision has [full Windows x64 build #45013692557](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45013692557) queued/in progress during this edit; check its final result and the latest code commit before installation. Updater is already integrated into the owner's editor. **Recheck Actions before claiming the latest full build passed.** The separate Windows updater EXE is already part of the owner's build; it also [compiled successfully at `9248ed24`](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44999138922).
 
 > **OWNER-CORRECTED DELIVERY FACT (22 Nov 2026): The current installed PW Edition ALREADY INCLUDES AN IN-ENGINE UPDATER.** Never describe this updater as a future feature, or default to downloading source ZIPs and running `START_PW_TEST_BUILD.cmd` every update. The editor's update command launches the installed `Pixelwolf-GGC-Updater.exe` source-building helper. Distinguish this **existing, owner-confirmed capability** from whether the **latest revision** has passed actual installation and gameplay acceptance; CI compilation is not a local runtime test.
 
@@ -22,26 +22,22 @@
 - Support both PNG and DDS without breaking Classic DDS compatibility.
 - Keep `master` protected; implementation is in the active development branch and draft PR until tested. Do not distribute proprietary upstream GameGuru media or binaries without checking rights.
 
-## Current urgent regression — grass disappears when enabling multiple types (22 November 2026)
+## Current blocker — multi-grass makes every blade disappear (22 November 2026, THIRD owner reproduction)
 
-**Owner directly observed two revisions of grass problems:**
-1. The early multi-grass implementation displayed only one species/current custom texture and flickered.
-2. After the overlap/shadow fix, **selecting more than one grass type made ALL grass disappear**. This second regression takes priority; do not call the earlier update successful from CI compilation alone.
+**User's live Windows editor consistently fails:** Simply enabling a second grass style makes all vegetation disappear. The first fix to prevent duplicate Classic/PW drawing, the subsequent `OwnsGrid()` fallback, wider painted-mask sampling and per-instance scaling all passed source checks and full x64 builds yet **DID NOT FIX THE ACTUAL VISIBLE RUNTIME BUG**. Do not report it fixed based on source-only tests. This is a **blocker** for using multiple grass types.
 
-**Root causes traced in source, code changed on active branch (through `5028c8f3`):**
-- The original native Classic grid was previously drawn over mixed instances, causing overlapping textures and likely z-fighting. The earlier fix hid Classic whenever the mix was reported `Ready()`, but **`Ready()` meant only models/textures were loaded, not that a single mixed grass instance had actually been placed**. Thus a valid selected mix with an empty sampled area hid every blade.
-- The mixer sampled only **21×21 terrain cells around the camera** and one pixel per **2×2 paint-mask** cell. Grass painted elsewhere in the editor or in small strokes could be missed. The mix now searches progressively outward up to 48 cells / 2400 world units, checks all four paint-mask pixels, favours nearby cells, and maintains the 320 object cap.
-- Real `InstanceObject` copies mesh data, **not the source object's transform**. The mix previously scaled the *hidden source object* by the native 200%, leaving rendered instances at default size. Each rendered instance now explicitly receives its template's scale and yaw.
-- The new `PWGrassMix::OwnsGrid()` is **true only when at least one actual mixed instance has been placed**. `grass_init` keeps Classic enabled initially, and editor startup, painting refresh, grass loop and post-shadow restoration only hide Classic if `OwnsGrid()` confirms real instances. Empty/invalid mixtures revert to the single-style Classic grid instead of blank terrain.
-- Mixed objects are hidden/restored around cascaded shadow passes, avoiding both render paths drawing in the same pass; multiple chosen meshes retain separate texture atlas image IDs.
-- The mixing settings now show **why Classic grass is being displayed as a fallback** (style not ready vs no mixed instances yet), rather than silently switching the view to blank.
-- Updated static UI checks cover ownership, fallback, mask sampling, 200% per-instance scale/yaw, shadow visibility, per-style textures and fallback feedback. They **passed** for the main disappearance correction in [#45011851792](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45011851792) at `ac7ab53c` and for the documentation revision in [#45011951988](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45011951988). The *latest* UI regression run for `5028c8f3` must still be checked. [Windows import and cleanup CI #45011851736](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45011851736) passed on `ac7ab53c`.
+**Architecture/risk identified:** The PW experimental renderer separately instantiates at most 320 normal objects while Classic renders a full vegetation grid; previous code automatically hid Classic as soon as the mix had even a single allocated instance. An instance having `ObjectExist` and `GetVisible` flags is NOT proof it renders on screen, covers the painted area or uses the correct shader/mesh. Repeating mask/weight/timing patches without a GPU visual test has not fixed it.
 
-**Still unverified:** The **newest** full Windows x64 compilation, visible multi-grass output, saved/reopened project, no flicker, performance and standalone. Passing source tests does **not** mean the reported disappearing-grass fault is accepted as fixed on the owner's PC. If the fallback only restores Classic, the multi-style resource/visibility path still requires runtime diagnosis.
+**Latest immediate corrective action (code through `b3687530`):**
+- **SAFE DEFAULT:** Selecting two or more grass types/weights now **does not automatically activate the broken renderer or hide Classic grass**. The selected style settings continue to be saved in the map. This restores a usable editor rather than repeatedly leaving the town map empty.
+- **Opt-in isolated preview:** `Preview experimental multi-grass` checkbox in the vegetation options, OFF by default on app start and reset on map load, controls whether the original experimental renderer is attempted. Turning OFF resets those objects and keeps Classic vegetation visible.
+- **Diagnostic information:** When preview is ON, the editor reports number of style models, created objects, placed objects, marked-visible objects, and errors for missing paint mask/style model/grass atlas. Marked visible is not proof of GPU raster output. Owner can screenshot these statistics and viewport, then disable preview.
+- `PW-GrassMix.h`: `PreviewEnabled()`, `RenderEnabled()`, `SetPreviewEnabled()`, `Diagnostics()`. `M-Grass.cpp` gates renderer entrypoints and records diagnostics. `M-Terrain.cpp` adds the preview UI. `tools/test_pw_editor_ui_regression.py` guards native-default behaviour.
+- **THIS IS NOT IMPLEMENTATION COMPLETION OF TRUE MULTI-GRASS.** Distinct grass species must actually appear together on a painted area before marking this feature complete. The renderer likely needs a proper native vegetation/shader integration and real graphics-based acceptance, not just static object counts.
 
-**Default delivery:** Use the **owner's already-integrated in-editor `Pixelwolf-GGC-Updater.exe`**, not a manual source ZIP. Once the full build passes, update/launch PW Edition, check the installed commit, paint a small area, compare one native style, two visibly different native styles (50/50 and 25/75), then a custom texture. Move the editor camera near and far, toggle vegetation, save/reopen and Test Level. Capture a screenshot and updater commit if mixing still displays just one type or vanishes.
+**Next steps:** Verify [current full Windows x64 CI](https://github.com/BoomForge/GGClassic-PW-Edition-/actions) and [editor UI guards](https://github.com/BoomForge/GGClassic-PW-Edition-/actions). Then owner applies the source through the **EXISTING IN-EDITOR PW Edition updater** (never default to manual ZIP installs). With preview **OFF**, select two styles and ensure normal Classic grass **stays visible**. Use a disposable test map to opt into preview and capture the diagnostics/viewport. If models and instance visibility flags are nonzero but screen stays blank, investigate the actual mesh/object/material/shader and rendering path instead of the UI, paint mask or weight selection. Preserve the single-style flow while fixing true multi-grass separately.
 
-**Detailed regression notes:** [PW_WORKSPACE_SKY_GRASS_IMPORT.md](PW_WORKSPACE_SKY_GRASS_IMPORT.md).
+**Detail:** [PW_WORKSPACE_SKY_GRASS_IMPORT.md](PW_WORKSPACE_SKY_GRASS_IMPORT.md).
 
 ## Previously added feature: Asset Inspector (source implemented, full CI compile passed; runtime unverified)
 
@@ -74,9 +70,9 @@ Owner request:
 
 | Stage | Verified state |
 | --- | --- |
-| Code committed on active branch | Disappearance-correction and fallback feedback/test code through `5028c8f3`; this handoff is updated after that source commit |
+| Code committed on active branch | Safety gate and preview diagnostics committed through `b3687530`, detailed regression note through `8103dcc2`; this handoff is updated after those commits |
 | Targeted source and UI checks | Passed for the Asset Inspector revision |
-| Entire GameGuru Core Release x64 CI compile | Earlier overlay-fix code **passed** #45009785335; newest disappearance-correction compile #45012034857 **pending** at last check |
+| Entire GameGuru Core Release x64 CI compile | Previous broken multi-grass code **passed** #45012104941; opt-in safety gate compile #45013692557 pending at last check |
 | Compiled editor included as downloadable artifact in that CI run | **No** — artifact list empty |
 | Local Windows editor test / original Steam overlay | **Not verified** for this revision |
 | In-engine updater included in owner's current build | **Yes — owner-confirmed**; integrated source-building updater is already present |
@@ -102,9 +98,11 @@ Use `START_PW_TEST_BUILD.cmd` and the separate `PW-TestInstall\\Guru-MapEditor.e
 
 ### P0 — Fix grass regression, then test the newest editor
 
-- [x] Patch old-grid overlap/shadow visibility, then patch follow-up **all grass disappears** regression: require `OwnsGrid()` with populated instances, use Classic fallback when empty, widen mask coverage and apply per-instance native scale/yaw. Targeted UI regression guards passed.
-- [ ] Confirm full Windows x64 compile of **latest grass disappearance fix** after `ac7ab53c`; inspect latest CI, not the older overlay/Inspector build.
-- [ ] Use **existing in-editor updater**, confirm installed GitHub commit, and check that enabling a second grass type does **not make all grass vanish**. Verify both styles actually appear (fallback to one Classic style is safety, not full acceptance); then custom style, camera/shadow movement, vegetation toggle, save/reopen and Test Level.
+- [x] **Record third observed failure:** earlier overlap/instance/mask fixes compiled but did **not** fix the actual all-grass-disappears bug.
+- [x] Add a **safe default**: selecting multiple grass types no longer automatically hides Classic; experimental PW rendering requires explicit preview opt-in. Add diagnostic resource/instance/visible-flag information in the editor.
+- [ ] **True simultaneous multi-grass is still broken.** Investigate actual native mesh, shader and camera render path with an owner's preview screenshot and diagnostics before claiming resolution.
+- [ ] Confirm full Windows x64 compile **of new safety-gate revision** and current UI regression guards; check latest Actions results.
+- [ ] With existing in-editor updater, install the latest safety revision; in **safe mode (preview OFF)**, confirm selecting two styles no longer blanks vegetation. Optional disposable-map preview diagnostic screenshot is the next evidence for real mixed-renderer repair; single Classic grass fallback is **not** feature acceptance.
 - [ ] If a *single* imported grass style still flickers with mix disabled, examine actual texture transparency and native UV atlas compatibility before changing shader/material processing.
 - [x] Earlier Asset Inspector-inclusive full Windows x64 compile succeeded in run #44994266761.
 - [x] Implement/source-check the **safer local build/staging path** and acceptance checklist; Windows local-script validation passed in run #44999063741. No compiled proprietary artifact has been published.
