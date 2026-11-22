@@ -106,6 +106,24 @@ GameGuru's existing sBone/sFrame/sAnimationSet data is now inspected without mod
 
 **Still missing in Model Importer 2:** Complete materials/UV and axes preflight, in-editor material reassignment, human-readable missing texture resolution/repair, collision/pivot tools integrated into the new workflow, safe transactional native DBO/FPE export and true Mixamo/Blender skeletal playback/retarget validation. Do not call Model Importer 2 complete until those stages are implemented and user-accepted. Character Creator 2 authoring remains to follow the stable shared contract.
 
+## 22 November Serine artifact forensics — input evidence (second failure)
+
+**Owner-supplied native files:** `Serine.fpe` (1 KB), `Serine.dbo` (113,167 bytes), `Serine.BMP` (128x128 BGRA), `SerineAlbidoIdle.png` (512x512), plus an earlier diagnostic batch file. The prior batch only searched `SerineTest.*` and thus missed the actual `Serine.*` files; it was not a functioning diagnostic for this input.
+
+**Verified facts rather than guesses:**
+- `Serine.BMP` is almost uniformly RGB (1,254,1), i.e. the green preview was saved **into the BMP** rather than merely misdisplayed by the Asset Browser. The preview/camera rendering pipeline still requires a Windows visual fix.
+- `Serine.fpe` sets `model = Serine.dbo`, `textured =` blank, `effect = effectbank\\reloaded\\apbr_basic.fx`, `ischaracter = 1`, `animmax = 0`, and `textureref1 = SerineAlbidoIdle.png`. It also references `blank` and `SerineAlbidoIdlei.png`, neither included with the owner's uploaded files.
+- The DBO has a valid-looking `MAGICDBO` binary chunk tree and named hierarchy `Scene_Root/Woman_2_001`; native mesh-header words are consistent with 1,770 vertices and 4,842 indices. This **cannot** be diagnosed as an empty DBO. Actual in-engine rendering and playback remain unverified.
+- Crucially, the DBO's embedded base texture name is **`SerineAlbidoIdle.dds`**, not the PNG file actually included in the user-supplied assets. A separate unresolved embedded name `SerineAlbidoIdlei.png` also occurs. The asset loader's existing DDS->PNG fallback only covered explicit FPE texture overrides; the FPE's **blank textured field** enters the multi-material branch, which previously skipped that fallback.
+
+**Corrective implementation:** `PW-MultiMaterialFallback.h` and `M-Entity.cpp` now detect absent embedded DDS stage-zero references in multi-material DBOs, resolve a same-folder PNG using the existing safe texture-search helper, and load/assign that image to each affected mesh without changing geometry, other material slots or preference for real DDS files. `tools/test_pw_multimaterial_fallback.cpp` exercises the actual Serine-style name and stale artist-folder paths. Isolated CI passing does not mean the Windows GUI issue has been fully resolved.
+
+**Separate reproducibility aid:** An owner-only test ZIP was constructed by copying the uploaded DBO/PNG, changing exactly one equal-length embedded texture filename `SerineAlbidoIdle.dds` to `SerineAlbidoIdle.png`, and supplying two FPE profiles (PBR character vs. basic static). The original geometry is byte-identical otherwise, the original files are not overwritten, and the generated green BMP is deliberately omitted. This can help isolate a shader/character setup problem from a native DBO problem **without claiming model import/thumbnail is fixed**.
+
+**Shutdown regression:** The user also reports that closing PW Edition leaves a Steam/GameGuru process alive until force quit. `M-GridEdit.cpp` now writes exit milestones to `%LOCALAPPDATA%\\Pixelwolf\\GGClassicPW\\shutdown-trace.log` around `common_justbeforeend()` and final shutdown. These are diagnostics, not a demonstrated fix for the ghost process. Need an installed-build process name, a shutdown trace and reproduction using File > Exit vs window X.
+
+**Acceptance still required:** Actual Windows local update; Serine FPE/DBO/PNG placed in one asset folder; expected model geometry visible in editor after selecting/placing; saved thumbnail showing a model instead of solid green; no ghost process on exit; no deletion of licensed/user files.
+
 ## 22 November FBX acceptance blocker — SerineTest green thumbnail/invisible scene entity
 
 **User-observed:** On the Windows PW Edition editor, an FBX imported as `SerineTest` appeared in the bottom Asset Browser under `user - charactercreator`, but displayed a bright green/cyan preview rather than the model and could not be seen or placed reliably in the 3D scene. The Scene Hierarchy displayed an entry with the same name. **This screenshot does not establish whether the underlying DBO file is missing, has no renderable mesh, or has geometry that is invisible/off-camera. Do not claim a complete fix until the actual asset and Windows runtime are tested.**
