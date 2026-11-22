@@ -10,6 +10,7 @@
 #include "PW-MaterialRelink.h" // Model Importer 2 M2: validated slot selection and texture relinking
 #include "PW-GLBBridge.h" // GLB 2.0 import via Blender -> existing FBX pipeline
 #include "PW-ThumbnailCheck.h" // Ensure saved BMP contains visible scene content
+#include "PW-EnvironmentImport.h" // Save previewed models as native sky/grass
 #include "PW-ImportedGeometry.h" // Ensure FBX/GLB export has real mesh/vertex data
 #include "PW-SkeletalAudit.h" // Non-destructive GameGuru skeleton/clip inspection
 #include "PW-SkeletalIntegrity.h" // Native skin weight/bind-pose/keyframe consistency verification
@@ -52,6 +53,11 @@ enum MaterialComponentTEXTURESLOT
 };
 
 // Globals
+// When importing from Terrain Tools, reuse the working model preview but
+// export a native sky/grass style rather than an entity profile.
+int g_pwEnvironmentImportTarget = 0; // 0 entity, 1 sky, 2 grass
+float g_pwEnvironmentScalePct = 100.0f;
+float g_pwEnvironmentYawDeg = 0.0f;
 bool g_bLoadedFBXModel = false;
 int g_iFirstTimeFBXImport = 0;
 int g_iPreferPBR = 0;
@@ -6454,6 +6460,9 @@ void importer_quit_for_reload (LPSTR pOptionalCopyModelFile)
 void importer_quit (void)
 {
 	importer_quit_for_reload(NULL);
+    g_pwEnvironmentImportTarget = 0;
+    g_pwEnvironmentScalePct = 100.0f;
+    g_pwEnvironmentYawDeg = 0.0f;
 }
 
 void ConvertWorldToRelative ( sFrame* pFrame, GGMATRIX* pStoreNewPoseFrames, GGMATRIX* pTraverseMatrix )
@@ -6526,6 +6535,52 @@ static void PW_VerifySavedSkeleton(const char* path,
 #ifdef ENABLEIMGUI
 void importer_save_entity ( char *filename )
 {
+    if (g_pwEnvironmentImportTarget != PWEnvironment::Entity)
+    {
+        // Classic importer already displays the textured source mesh and
+        // has its scale/material/rotation tools. Export that SAME object to
+        // skybank or vegbank, not an ordinary entitybank FPE.
+        std::vector<std::string> importedTextures;
+        for (int n = 1; n < IMPORTERTEXTURESMAX; ++n)
+            if (t.importerTextures[n].imageID > 0 &&
+                t.importerTextures[n].fileName.Len() > 0)
+                importedTextures.push_back(t.importerTextures[n].fileName.Get());
+
+        std::string styleName;
+#if defined(ENABLEIMGUI) && !defined(USEOLDIDE)
+        if (cImportName[0]) styleName = cImportName;
+#endif
+        if (styleName.empty())
+        {
+            styleName = PWImport::BaseName(t.importer.objectFilename.Get());
+            const size_t dot = styleName.find_last_of('.');
+            if (dot != std::string::npos) styleName.resize(dot);
+        }
+        std::string error;
+        const int mode = g_pwEnvironmentImportTarget;
+        const std::string filesRoot = std::string(g.fpscrootdir_s.Get()) + "\\Files";
+        const bool saved = PWEnvironment::Save(
+            mode, styleName.c_str(), t.importer.objectnumber, importedTextures,
+            t.importer.objectFileOriginalPath.Get(), filesRoot,
+            g_pwEnvironmentScalePct, g_pwEnvironmentYawDeg, error);
+        if (!saved)
+        {
+            t.tSaveFile_s = "Error";
+            t.timportersaveon = 0;
+            popup_text((LPSTR)error.c_str());
+            return;
+        }
+        t.tSaveFile_s = styleName.c_str();
+        t.timportersaveon = 0;
+        extern void PWActivateImportedEnvironmentStyleFromImporter(int type, const char* style);
+        PWActivateImportedEnvironmentStyleFromImporter(mode, styleName.c_str());
+        g_pwEnvironmentImportTarget = 0;
+        t.importer.cancel = 1;
+        popup_text(mode == PWEnvironment::Sky
+            ? "Sky imported and added to the sky list."
+            : "Grass imported and added to vegetation styles.");
+        return;
+    }
 	//  Check if user folder exists, if not create it
 	t.strwork = ""; t.strwork = t.strwork + t.importer.startDir + "\\entitybank\\user";
 	if (  PathExist( t.strwork.Get() )  ==  0 ) 
