@@ -1,4 +1,4 @@
-"""Static regression checks for PW Editor V6 (not a substitute for Windows UI testing)."""
+"""Static regression checks for PW Editor V7 (not a substitute for Windows UI testing)."""
 from pathlib import Path
 import unittest
 
@@ -10,7 +10,7 @@ IMPORTER = (ROOT / "GameGuru Core/GameGuru/Source/M-Importer.cpp").read_text(enc
 
 class PWEditorUiRegressions(unittest.TestCase):
     def test_one_bottom_asset_dock(self):
-        self.assertIn('PWEngineDockspaceV6', GRID)
+        self.assertIn('PWEngineDockspaceV7', GRID)
         first = GRID.index("//#### Default dockspace setup")
         last = GRID.index('// Fully nested scene tree;', first)
         docking = GRID[first:last]
@@ -18,6 +18,9 @@ class PWEditorUiRegressions(unittest.TestCase):
             docking.count('DockBuilderDockWindow("Asset Browser##PWAssetBrowser", dock_id_bottom);'), 1)
         self.assertNotIn('DockBuilderDockWindow(TABENTITYNAME', docking)
         self.assertNotIn('DockBuilderDockWindow("Entity Library##ExternalWindow"', docking)
+        self.assertIn('sceneDock->LocalFlags |= ImGuiDockNodeFlags_NoTabBar', docking)
+        self.assertIn('assetDock->LocalFlags |= ImGuiDockNodeFlags_NoTabBar', docking)
+        self.assertNotIn('g_pwBottomAssetDockId = ImGui::GetWindowDockID();', GRID)
 
     def test_no_legacy_current_level_entities_pane(self):
         self.assertIn("g_pwShowLegacyLevelEntityList = false;", GRID)
