@@ -168,7 +168,9 @@ inline void Select(const std::string& file) {
         // ordinary editor model imports.
         const bool oldCache = ::g_bOverrideXCacheWhenUsingImporter;
         ::g_bOverrideXCacheWhenUsingImporter = true;
-        LoadFBX((LPSTR)s.modelSource.c_str(),s.modelId);
+        std::vector<char> writable(s.modelSource.begin(),s.modelSource.end());
+        writable.push_back(0);
+        LoadFBX(writable.data(),s.modelId);
         ::g_bOverrideXCacheWhenUsingImporter = oldCache;
     } else {
         LoadObject((LPSTR)s.modelSource.c_str(),s.modelId);
