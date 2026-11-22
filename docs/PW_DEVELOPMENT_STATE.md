@@ -6,8 +6,8 @@
 **Repository:** https://github.com/BoomForge/GGClassic-PW-Edition-  
 **Active development branch:** `work/pw-community-integration-20261121`  
 **Draft pull request:** https://github.com/BoomForge/GGClassic-PW-Edition-/pull/1  
-**Verified source head before this documentation commit:** `4716fe95a1b37380def7bc434c62ca04e552ece5`  
-**Last verified full Windows x64 CI:** [run #44994266761](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44994266761), **success**, for source `4716fe95`; all compile and staged-file verification steps passed. No workflow artifact was published from that run.
+**Verified branch head before this documentation commit:** `e0dcd44e2eccb9de19ced71b90789562aae298c4` (test-script and CI changes; latest source-level editor functionality remains from `4716fe95`).  
+**Last independently confirmed full Windows x64 CI:** [run #44994266761](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44994266761), **success**, for editor source `4716fe95`; all compile and staged-file verification steps passed. No workflow artifact was published. New checks on subsequent script-only commits may be queued or in progress: always check Actions before citing the most recent result.
 
 > **Important distinction:** Successful CI compilation is not a verified Steam overlay, runtime-tested editor, release ZIP, or functioning in-engine updater. Do **not** tell the owner to use the updater for this revision until a testable package is assembled, smoke-tested and verified. Avoid claiming a feature works merely because its source was committed.
 
@@ -41,7 +41,7 @@ Owner request:
 
 | Stage | Verified state |
 | --- | --- |
-| Code committed on active branch | Yes, through source `4716fe95` |
+| Code committed on active branch | Yes, through `e0dcd44e` before this handoff edit (latest editor code was already compiled at `4716fe95`) |
 | Targeted source and UI checks | Passed for the Asset Inspector revision |
 | Entire GameGuru Core Release x64 CI compile | **Passed** — run #44994266761 |
 | Compiled editor included as downloadable artifact in that CI run | **No** — artifact list empty |
@@ -51,12 +51,28 @@ Owner request:
 
 A successful CI run resolves the previous *build failure*. It does **not** mean the user has a downloadable new update.
 
+## Local Windows test-build preparation (22 November 2026)
+
+**Source-only implementation and checks (not an owner-tested build):**
+- Updated [\`tools/pw-local-test.ps1\`](../tools/pw-local-test.ps1) to validate that Steam source contains Files and GameGuru.exe; reject unsafe destinations (Steam, repository root/unrelated subfolders, build output, test-directory reparse point); check required PW files and the compiled editor branding before staging; record the source commit and editor SHA-256; verify the staged editor hash. \`-SkipBuild\` requires a matching source-commit marker rather than silently reusing an unrelated binary.
+- Updated [local build instructions](PW_LOCAL_WINDOWS_TEST_BUILD.md) and the generated \`PW-TESTING-README.txt\` to prioritise Asset Inspector, FBX thumbnail/placement, sky/grass texture-only cloning, scene save/undo/docking and explicit GLB deferral.
+- Existing root [\`START_PW_TEST_BUILD.cmd\`](../START_PW_TEST_BUILD.cmd) remains the one-click launcher: clone/download the current branch, install local VS2022 C++/MFC prerequisites, double-click and select your licensed Steam Classic folder. Script compiles on the **owner's Windows PC** and stages an isolated \`PW-TestInstall\` copy. No licensed engine binaries/Steam media are published as CI artifacts.
+- [Windows local-script CI](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/workflows/pw-local-build-script-validation.yml) checks PowerShell syntax and rejects harmful destinations using synthetic placeholder Steam files. Initial negative-path test run #44999006585 **failed due to the harness preserving an expected non-zero child exit code**, even though the rejection assertions printed success; the harness was corrected at \`e0dcd44e\`. **Re-check latest CI rather than claiming the corrected test passed before it finishes.**
+- This is **not** evidence of a successful local Steam overlay, editor launch or visual preview. It is a safer path to obtain those results without distributing the proprietary executable.
+
+### Local next-step instructions
+
+1. Fetch the current development branch and double-click \`START_PW_TEST_BUILD.cmd\`; select the *licensed Steam GameGuru Classic* folder. Use a machine with Visual Studio 2022 Desktop C++/MFC dependencies. **Do not use the old in-engine updater for this test.**
+2. Start \`PW-TestInstall\Guru-MapEditor.exe\` **directly**, not Steam's Play action. Consult \`PW-TestInstall\PW-TESTING-README.txt\`, which records the built commit, editor SHA-256 and detailed Inspector / import checks.
+3. Bring back the first failed step, exact error and tested source commit. Fix reproducible faults in the branch, rerun CI, then repeat the local test. Only consider updater acceptance after passing actual editor/runtime tests.
+
 ## Next actions, in priority order
 
 ### P0 — Deliver and test this revision safely
 
 - [x] Full Windows x64 compile of source including Asset Inspector succeeded in run #44994266761.
-- [ ] Establish a **safe, retrievable Windows test build** for the owner. Check the existing local build/overlay instructions in [PW_LOCAL_WINDOWS_TEST_BUILD.md](PW_LOCAL_WINDOWS_TEST_BUILD.md) and `tools/pw-local-test.ps1`. Do not blindly deploy to the Steam installation or publish restricted binaries. If CI artifact delivery is considered, first assess licensing and GitHub artifact distribution exposure.
+- [x] Implement/source-check the **safer local build/staging path** and acceptance checklist (Windows CI of latest harness revision must be rechecked). No compiled proprietary artifact has been published.
+- [ ] **Owner-side build and launch still required:** run `START_PW_TEST_BUILD.cmd` on the licensed Windows PC, then launch `PW-TestInstall\Guru-MapEditor.exe` and confirm identity/runtime. Do not install over Steam or publish proprietary binaries.
 - [ ] Run **local editor smoke test**: launch map editor, confirm toolbar/Classic UI and docked bottom browser; open Asset Inspector; browse nested folders; preview actual PNG/DDS and stock models; rotate/zoom; test missing files; insert stock FPE and an FBX; verify placement in front of camera, undo, hierarchy, map save/reopen.
 - [ ] Confirm FBX thumbnail generation, texture-path handling and scene placement; verify no failed imports create ghost assets.
 - [ ] Confirm cloned skybox and grass textures with multiple grass styles survive save/reopen and exported game. Confirm existing native mesh/UV behaviour.
