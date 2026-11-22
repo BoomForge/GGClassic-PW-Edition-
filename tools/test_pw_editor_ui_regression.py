@@ -109,6 +109,8 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('PWGrassMix::Save(', maps)
         self.assertIn('PWGrassMix::Load(', maps)
         self.assertIn('AddFileToBlock(1, "pw_grassmix.cfg")', maps)
+        self.assertIn('static void PWCollectMixedGrassStyleDependencies()', maps)
+        self.assertGreaterEqual(maps.count('PWCollectMixedGrassStyleDependencies();'), 4)
         self.assertIn('PWTextureStyle::CreateFromTexture(', env)
         self.assertIn('Choose Sky Texture', env)
         self.assertIn('Choose Grass Texture', env)
