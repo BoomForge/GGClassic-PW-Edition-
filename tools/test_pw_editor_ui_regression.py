@@ -125,6 +125,25 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertNotIn('GLB\\0*.glb', GRID)
         self.assertNotIn('bPermittedFormat = true;\n                            if (stricmp(pExtension, ".glb")', GRID)
 
+    def test_asset_inspector_keeps_docked_browser_and_uses_real_previews(self):
+        inspector = (ROOT / "GameGuru Core/GameGuru/Include/PW-AssetInspector.h").read_text(encoding="utf-8")
+        self.assertIn('Asset Inspector...##PWOpenAssetInspector', GRID)
+        self.assertIn('PWAssetInspector::Draw();', GRID)
+        self.assertIn('PWAssetInspector::RenderPending();', GRID)
+        self.assertIn('ImGuiWindowFlags_NoDocking', inspector)
+        self.assertIn('DrawTree(s.root,"Files",0);', inspector)
+        self.assertIn('ImGui::Image((ImTextureID)view', inspector)
+        self.assertIn('ImGui::IsMouseDragging(0)', inspector)
+        self.assertIn('io.MouseWheel', inspector)
+        self.assertIn('LoadFBX(', inspector)
+        self.assertIn('LoadObject(', inspector)
+        self.assertIn('editor_constructionselection();', inspector)
+        self.assertIn('gridedit_addentitytomap();', inspector)
+        self.assertIn('NewXValue(CameraPositionX(),CameraAngleY(),distance)', inspector)
+        self.assertIn('NewZValue(CameraPositionZ(),CameraAngleY(),distance)', inspector)
+        self.assertIn('entity_adduniqueentity(false);', inspector)
+        self.assertNotIn('DockBuilderDockWindow("Asset Inspector', GRID)
+
     def test_shutdown_trace_records_cleanup_milestones(self):
         self.assertIn('PWShutdownTrace("file-exit accepted")', GRID)
         self.assertIn('PWShutdownTrace("finish entered; before common_justbeforeend")', GRID)
