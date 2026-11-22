@@ -8,6 +8,7 @@
 #include "gameguru.h"
 #include "PW-LoadTrace.h" // Pixelwolf Edition: optional load profiling
 #include "PW-ImportedGeometry.h" // Validate selected imported asset before cursor placement
+#include "PW-GrassMix.h" // Keep original grass grid hidden while mixed styles render
 #include "M-WelcomeSystem.h"
 #include "M-Widget.h"
 #include "direct.h"
@@ -929,7 +930,11 @@ void mapeditorexecutable_init ( void )
 	t.terrain.grassupdateafterterrain = 1;
 	grass_loop();
 	t.terrain.grassupdateafterterrain = 0;
-	ShowVegetationGrid();
+    // Startup must not re-enable Classic's one-style vegetation over PW mix.
+    if (PWGrassMix::Active() && PWGrassMix::Ready())
+        HideVegetationGrid();
+    else
+        ShowVegetationGrid();
 	visuals_justshaderupdate();
 
 	// Moved last so we can load levels before main loop.
