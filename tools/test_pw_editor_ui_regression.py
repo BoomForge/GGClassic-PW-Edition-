@@ -125,18 +125,19 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertNotIn('GLB\\0*.glb', GRID)
         self.assertNotIn('bPermittedFormat = true;\n                            if (stricmp(pExtension, ".glb")', GRID)
 
-    def test_mixed_grass_does_not_overlap_classic_or_flicker_during_shadow_pass(self):
+    def test_mixed_grass_overlay_keeps_classic_and_shades_secondary_styles(self):
         terrain = (ROOT / "GameGuru Core/GameGuru/Source/M-Terrain.cpp").read_text(encoding="utf-8")
         grass = (ROOT / "GameGuru Core/GameGuru/Source/M-Grass.cpp").read_text(encoding="utf-8")
         mix = (ROOT / "GameGuru Core/GameGuru/Include/PW-GrassMix.h").read_text(encoding="utf-8")
 
-        # Three independent Classic restoration sites exist: editor rebuild,
-        # painted vegetation refresh, and the post-shadow render pass.
-        # Never hide Classic grass just because styles loaded successfully.
-        # A mixed renderer owns the region only AFTER some real blades exist.
-        self.assertGreaterEqual(terrain.count("PWGrassMix::OwnsGrid()"), 3)
+        # In the preview, PW only adds non-native species: never replace
+        # a known-working native grass grid with an unverified mesh renderer.
         self.assertIn("SetVegetationGridVisible(true);", grass)
-        self.assertIn("if (PWGrassMix::OwnsGrid())", GRID)
+        self.assertIn("ShowVegetationGrid();", GRID)
+        self.assertIn("ShowVegetationGrid();", terrain)
+        self.assertIn("ShowVegetationGrid();", grass)
+        self.assertNotIn("if (PWGrassMix::OwnsGrid())\n                        HideVegetationGrid();", terrain)
+        self.assertIn("PWGrassMix::SetInstancesVisible(PWGrassMix::OwnsGrid());", terrain)
         self.assertIn("Mix has no populated objects; Classic grass remains visible.", terrain)
         self.assertIn("Mix assets unavailable or not prepared.", terrain)
         self.assertIn("bool OwnsGrid();", mix)
@@ -158,7 +159,7 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('out << " | issue: " << lastIssue;', grass)
         self.assertIn("bool OwnsGrid() {", grass)
         self.assertIn("if (render[i].used > 0) return true;", grass)
-        self.assertIn("if (PWGrassMix::OwnsGrid())", grass)
+        self.assertIn("if (pwMixed)", grass)
         self.assertNotIn("PWGrassMix::Active() && PWGrassMix::Ready()", terrain)
         self.assertNotIn("SetVegetationGridVisible(!PWGrassMix::Active())", grass)
 
@@ -173,7 +174,7 @@ class PWEditorUiRegressions(unittest.TestCase):
         # must be hidden too, then restored only while the mixed renderer owns
         # the painted grass region.
         self.assertIn("PWGrassMix::SetInstancesVisible(false);", terrain)
-        self.assertIn("PWGrassMix::SetInstancesVisible(true);", terrain)
+        self.assertIn("PWGrassMix::SetInstancesVisible(PWGrassMix::OwnsGrid());", terrain)
         self.assertIn("void SetInstancesVisible(bool visible);", mix)
         self.assertIn("if (visible && j < rs.used)", grass)
 
@@ -183,6 +184,15 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn("LoadObject((LPSTR)model.c_str(), rs.source);", grass)
         self.assertIn("LoadImage((LPSTR)atlas.c_str(), rs.image);", grass)
         self.assertIn("TextureObject(rs.source, rs.image);", grass)
+        # Classic's generated grid receives its own effect; independent
+        # ordinary objects need an actual entity shader or may be invisible
+        # in DX11 despite ObjectExist/GetVisible claiming success.
+        self.assertIn("loadinternaleffectunique(", grass)
+        self.assertIn("SetObjectEffect(rs.source, rs.effect);", grass)
+        self.assertIn('SetEffectConstantV(rs.effect, "EntityEffectControl", g.characterkitvector);', grass)
+        self.assertIn("if (rs.effect > 0) deleteinternaleffect(rs.effect);", grass)
+        self.assertIn("PWStyleImport::Same(slots[i].style, g.vegstyle_s.Get())", grass)
+        self.assertIn("Overlay models: ", grass)
         self.assertIn("InstanceObject(id, rs.source);", grass)
         # Classic grass templates are 200% scaled. InstanceObject creates
         # independent transforms; the scale/yaw must reach each visible instance.
