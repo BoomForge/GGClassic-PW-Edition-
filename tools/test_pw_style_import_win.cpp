@@ -23,7 +23,7 @@ int main() {
     writeFile(sky + "\\skyspec.txt");
     writeFile(sky + "\\Misty Valley.DBO");
     writeFile(grass + "\\veg.DBO");
-    writeFile(grass + "\\grass.dds");
+    writeFile(grass + "\\grass.png");
     std::string name, error;
     assert(PWStyleImport::Install(sky + "\\skyspec.txt", root + "\\skybank",
                                   PWStyleImport::Kind::Sky, name, error));
@@ -33,14 +33,14 @@ int main() {
                                    PWStyleImport::Kind::Sky, name, error));
     assert(PWStyleImport::Install(grass + "\\veg.DBO", root + "\\vegbank",
                                   PWStyleImport::Kind::Grass, name, error));
-    assert(PWStyleImport::RegularFile(root + "\\vegbank\\Summer Grass\\grass.dds"));
+    assert(PWStyleImport::RegularFile(root + "\\vegbank\\Summer Grass\\grass.png"));
     for (const std::string& p : {
         sky + "\\skyspec.txt", sky + "\\Misty Valley.DBO",
-        grass + "\\veg.DBO", grass + "\\grass.dds",
+        grass + "\\veg.DBO", grass + "\\grass.png",
         root + "\\skybank\\Misty Valley\\skyspec.txt",
         root + "\\skybank\\Misty Valley\\Misty Valley.DBO",
         root + "\\vegbank\\Summer Grass\\veg.DBO",
-        root + "\\vegbank\\Summer Grass\\grass.dds" }) DeleteFileA(p.c_str());
+        root + "\\vegbank\\Summer Grass\\grass.png" }) DeleteFileA(p.c_str());
     RemoveDirectoryA(sky.c_str()); RemoveDirectoryA(grass.c_str());
     RemoveDirectoryA((root + "\\skybank\\Misty Valley").c_str());
     RemoveDirectoryA((root + "\\vegbank\\Summer Grass").c_str());
