@@ -56,6 +56,8 @@ jobs:
             if (-not (Test-Path -LiteralPath (Join-Path $fake 'GameGuru.exe'))) {
               throw 'Synthetic Steam source disappeared'
             }
+            # The last expected rejection leaves LASTEXITCODE=1; clear it after assertions.
+            $global:LASTEXITCODE = 0
             Write-Host 'Dangerous test destinations were rejected before build/copy.'
           } finally {
             Remove-Item -LiteralPath $fake -Recurse -Force -ErrorAction SilentlyContinue
