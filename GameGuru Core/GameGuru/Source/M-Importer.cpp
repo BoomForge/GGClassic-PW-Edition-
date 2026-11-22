@@ -9,6 +9,7 @@
 #include "PW-AssetManifest.h" // Shared Model Importer 2 / Character Creator 2 preflight
 #include "PW-MaterialRelink.h" // Model Importer 2 M2: validated slot selection and texture relinking
 #include "PW-GLBBridge.h" // GLB 2.0 import via Blender -> existing FBX pipeline
+#include "PW-ThumbnailCheck.h" // Ensure saved BMP contains visible scene content
 #include "PW-ImportedGeometry.h" // Ensure FBX/GLB export has real mesh/vertex data
 #include "PW-SkeletalAudit.h" // Non-destructive GameGuru skeleton/clip inspection
 #include "PW-SkeletalIntegrity.h" // Native skin weight/bind-pose/keyframe consistency verification
@@ -7489,9 +7490,9 @@ void importer_save_entity ( char *filename )
 	GG_GetRealPath(pRealSavethumb, 1);
 	t.strwork = ""; t.strwork = t.strwork + t.importer.objectFileOriginalPath + t.importer.objectFilename;
 	cstr pSourceBMP = cstr ( cstr(Left ( t.strwork.Get(), strlen(t.strwork.Get())-4)) + ".bmp" );
-	if ( FileExist ( pSourceBMP.Get() ) ) 
+    if (FileExist(pSourceBMP.Get()) && PWThumbnail::HasContent(pSourceBMP.Get()))
 	{
-		// if BMP already existed in source area, use that one
+        // Skip preexisting blank/green BMPs; they cannot be used as previews.
 		if ( FileExist ( pRealSavethumb ) == 1 ) DeleteAFile ( pRealSavethumb );
 		CopyFileA ( pSourceBMP.Get(), pRealSavethumb, FALSE );
 	}
@@ -7509,6 +7510,13 @@ void importer_save_entity ( char *filename )
             if (FileExist(pRealSavethumb) == 1) DeleteAFile(pRealSavethumb);
             SaveImage(pRealSavethumb, g.importermenuimageoffset + 50);
             DeleteImage(g.importermenuimageoffset + 50);
+            // A BMP can exist while containing only the green clear colour.
+            if (!PWThumbnail::HasContent(pRealSavethumb))
+            {
+                OutputDebugStringA("PW IMPORT THUMBNAIL: blank/solid-colour capture rejected.\n");
+                DeleteFileA(pRealSavethumb);
+                popup_text("Model saved, but thumbnail capture was blank. No invalid preview was retained.");
+            }
         }
         else
         {
@@ -8606,9 +8614,9 @@ void importer_save_entity ( char *filename )
 	// Save/Generate Thumbnail BMP
 	t.strwork = ""; t.strwork = t.strwork + t.importer.objectFileOriginalPath + t.importer.objectFilename;
 	cstr pSourceBMP = cstr ( cstr(Left ( t.strwork.Get(), strlen(t.strwork.Get())-4)) + ".bmp" );
-	if ( FileExist ( pSourceBMP.Get() ) ) 
+    if (FileExist(pSourceBMP.Get()) && PWThumbnail::HasContent(pSourceBMP.Get()))
 	{
-		// if BMP already existed in source area, use that one
+        // Skip preexisting blank/green BMPs; they cannot be used as previews.
 		if ( FileExist ( t.tSaveThumb_s.Get()) == 1 ) DeleteAFile ( t.tSaveThumb_s.Get() );
 		CopyFile ( pSourceBMP.Get(), t.tSaveThumb_s.Get(), FALSE );
 	}
