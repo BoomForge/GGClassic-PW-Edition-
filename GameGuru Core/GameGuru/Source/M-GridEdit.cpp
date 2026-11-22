@@ -149,6 +149,29 @@ int refresh_gui_docking = 0;
 // New dockspace identity migrates the default layout once without continually
 // overwriting user adjustments saved in uiv3.layout.
 static const char* g_pwEngineDockspaceName = "PWEngineDockspaceV6";
+
+// PW Edition: persistent checkpoints to distinguish an unhandled window-close
+// from a blocked common_justbeforeend() / Steam cleanup. No forced process kill.
+static void PWShutdownTrace(const char* stage)
+{
+    char local[MAX_PATH] = {};
+    DWORD len = GetEnvironmentVariableA("LOCALAPPDATA", local, MAX_PATH);
+    if (!len || len >= MAX_PATH || !stage) return;
+    const std::string pwDir = std::string(local) + "\\Pixelwolf";
+    const std::string pwLogs = pwDir + "\\GGClassicPW";
+    CreateDirectoryA(pwDir.c_str(), nullptr);
+    CreateDirectoryA(pwLogs.c_str(), nullptr);
+    const std::string file = pwLogs + "\\shutdown-trace.log";
+    FILE* out = nullptr;
+    if (fopen_s(&out, file.c_str(), "ab") != 0 || !out) return;
+    SYSTEMTIME now = {};
+    GetLocalTime(&now);
+    fprintf(out, "%04d-%02d-%02d %02d:%02d:%02d.%03d pid=%lu stage=%s\r\n",
+        now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute,
+        now.wSecond, now.wMilliseconds, (unsigned long)GetCurrentProcessId(), stage);
+    fclose(out);
+}
+
 // Authoritative bottom dock ID: the full asset library is never a floating window.
 static ImGuiID g_pwBottomAssetDockId = 0;
 static bool g_pwSceneHierarchyOpen = true;
@@ -2066,6 +2089,7 @@ void mapeditorexecutable_loop(void)
 					int iRet = AskSaveBeforeNewAction();
 					if (iRet != 2)
 					{
+                        PWShutdownTrace("file-exit accepted");
 						g_bCascadeQuitFlag = true;
 					}
 				}
@@ -8138,8 +8162,14 @@ void mapeditorexecutable_loop(void)
 
 void mapeditorexecutable_finish(void)
 {
+#ifdef ENABLEIMGUI
+    PWShutdownTrace("finish entered; before common_justbeforeend");
+#endif
 	// End map editor program (moved above chdir and pref writes)
 	common_justbeforeend();
+#ifdef ENABLEIMGUI
+    PWShutdownTrace("common_justbeforeend returned; before prefs");
+#endif
 
 	// Come out of Files folder
 	SetCurrentDirectoryA(g.fpscrootdir_s.Get());
@@ -8180,6 +8210,9 @@ void mapeditorexecutable_finish(void)
 	//		GGVR_DeleteHolographicSpace;
 	#endif
 
+#ifdef ENABLEIMGUI
+    PWShutdownTrace("prefs saved; before ExitProcess");
+#endif
 	// final exit
 	ExitProcess ( 0 );
 }
