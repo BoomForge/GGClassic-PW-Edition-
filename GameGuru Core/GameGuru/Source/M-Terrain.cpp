@@ -1265,16 +1265,33 @@ void imgui_terrain_loop(void)
                                 ImGui::Text("%s: %.0f%%", slot.style.c_str(),
                                     100.f * slot.weight / total);
                         }
-                        ImGui::TextDisabled("Bounded render: up to 320 visible mixed grass pieces.");
-                        // Resource preparation and a populated painted area
-                        // are different conditions: never silently hide grass.
-                        if (!PWGrassMix::Ready())
-                            ImGui::TextDisabled("Mix loading or missing a style: Classic grass stays visible.");
-                        else if (!PWGrassMix::OwnsGrid())
-                            ImGui::TextDisabled("No mixed grass placed near this view; showing Classic grass.");
+                        ImGui::TextDisabled("Experimental mixer: 320 objects maximum; not native grid coverage.");
                     }
                     else
                         ImGui::TextDisabled("Select at least two enabled types to mix. One type uses Classic grass.");
+
+                    // This alternate renderer has compiled successfully but
+                    // repeatedly failed visual acceptance. Never activate it
+                    // just by selecting a second style; preserve native grass.
+                    bool pwPreview = PWGrassMix::PreviewEnabled();
+                    if (ImGui::Checkbox("Preview experimental multi-grass##PWSafeGrassPreview", &pwPreview))
+                    {
+                        PWGrassMix::SetPreviewEnabled(pwPreview);
+                        pwMixChanged = true;
+                    }
+                    if (!PWGrassMix::PreviewEnabled())
+                        ImGui::TextDisabled("Safe mode: Classic grass remains visible; selected mix is saved.");
+                    else
+                    {
+                        ImGui::TextDisabled("Diagnostic preview only. If grass vanishes, turn this off.");
+                        const std::string pwGrassDiag = PWGrassMix::Diagnostics();
+                        ImGui::TextUnformatted(pwGrassDiag.c_str());
+                        ImGui::TextDisabled("Visible flags do not prove blades were drawn on screen.");
+                        if (!PWGrassMix::Ready())
+                            ImGui::TextDisabled("Mix assets unavailable or not prepared.");
+                        else if (!PWGrassMix::OwnsGrid())
+                            ImGui::TextDisabled("Mix has no populated objects; Classic grass remains visible.");
+                    }
                     if (pwMixChanged)
                     {
                         PWGrassMix::Dirty();
