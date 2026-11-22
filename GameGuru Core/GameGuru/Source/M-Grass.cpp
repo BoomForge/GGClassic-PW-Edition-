@@ -234,7 +234,12 @@ void grass_setgrassimage ( void )
 	}
 	else
 	{
-		LoadImage ( cstr(cstr("vegbank\\")+g.vegstyle_s+"\\grass.dds").Get(),t.tGrassImg );
+        // PW Edition: user grass styles may provide an ordinary PNG atlas
+        // instead of DDS. Preserve DDS-first Classic compatibility.
+        cstr grassFile = cstr(cstr("vegbank\\") + g.vegstyle_s + "\\grass.dds");
+        if (FileExist(grassFile.Get()) == 0)
+            grassFile = cstr(cstr("vegbank\\") + g.vegstyle_s + "\\grass.png");
+        LoadImage(grassFile.Get(), t.tGrassImg);
 	}
 	extern bool bResourcesSet, bGridMade;
 	#ifdef ENABLEIMGUI
