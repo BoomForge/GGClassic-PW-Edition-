@@ -166,11 +166,10 @@ inline void Select(const std::string& file) {
         // Match the working native FBX importer conversion path; restore the
         // global cache preference immediately so preview does not affect
         // ordinary editor model imports.
-        extern bool g_bOverrideXCacheWhenUsingImporter;
-        const bool oldCache = g_bOverrideXCacheWhenUsingImporter;
-        g_bOverrideXCacheWhenUsingImporter = true;
+        const bool oldCache = ::g_bOverrideXCacheWhenUsingImporter;
+        ::g_bOverrideXCacheWhenUsingImporter = true;
         LoadFBX((LPSTR)s.modelSource.c_str(),s.modelId);
-        g_bOverrideXCacheWhenUsingImporter = oldCache;
+        ::g_bOverrideXCacheWhenUsingImporter = oldCache;
     } else {
         LoadObject((LPSTR)s.modelSource.c_str(),s.modelId);
     }
