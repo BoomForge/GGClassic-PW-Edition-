@@ -2945,23 +2945,6 @@ void mapeditorexecutable_loop(void)
 		// its dedicated entity-property zoom/edit mode.
 		if (ImGui::Begin("Inspector##PWInspector", NULL, iGenralWindowsFlags | ImGuiWindowFlags_NoMove))
 		{
-            // Environment assets reuse the working textured model importer.
-            // These settings affect the saved *style* (not unrelated entities).
-            extern int g_pwEnvironmentImportTarget;
-            extern float g_pwEnvironmentScalePct;
-            extern float g_pwEnvironmentYawDeg;
-            extern char g_pwEnvironmentName[128];
-            if (g_pwEnvironmentImportTarget != 0)
-            {
-                ImGui::Text("%s", g_pwEnvironmentImportTarget == 1
-                    ? "Import Sky Mesh" : "Import Grass Mesh");
-                ImGui::TextWrapped("The main importer previews your model with assigned textures.");
-                ImGui::InputText("Style name##PWEnv", g_pwEnvironmentName, sizeof(g_pwEnvironmentName));
-                ImGui::SliderFloat("Size %%##PWEnv", &g_pwEnvironmentScalePct, 25.f, 300.f);
-                ImGui::SliderFloat("Yaw##PWEnv", &g_pwEnvironmentYawDeg, -180.f, 180.f);
-                ImGui::TextWrapped("Save in the model importer. Size and yaw apply when this environment style is loaded.");
-                ImGui::Separator();
-            }
 			const int selected = t.widget.pickedEntityIndex;
 			if (selected > 0 && selected <= g.entityelementlist &&
 				t.entityelement[selected].bankindex > 0 && t.entityelement[selected].obj > 0)
