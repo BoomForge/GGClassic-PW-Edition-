@@ -8,6 +8,7 @@
 #include "Common-Keys.h"
 #include "PW-LoadTrace.h" // PW Edition: loading measurements
 #include "PW-GrassMix.h" // Weighted grass mix sidecar inside FPM archive
+#include "PW-StyleImport.h" // Validate named vegetation styles used by standalone collection
 #include "PW-FPMCache.h" // PW Edition: optional verified per-session FPM cache
 
 #ifdef ENABLEIMGUI
@@ -37,6 +38,23 @@ bool g_bAllowBackwardCompatibleConversion = false;
 bool restore_old_map = false;
 int savestandalone_e = 1;
 #endif
+
+// Include EVERY enabled grass-mix style in standalone/media collections,
+// not just the currently selected native vegetation style.
+static void PWCollectMixedGrassStyleDependencies()
+{
+    if (!PWGrassMix::Active()) return;
+    for (int i = 0; i < PWGrassMix::MaxStyles; ++i)
+    {
+        const PWGrassMix::Slot& slot = PWGrassMix::slots[i];
+        if (!slot.enabled || slot.weight <= 0.0f ||
+            !PWStyleImport::SafeName(slot.style))
+            continue;
+        const std::string folderName = std::string("vegbank\\") + slot.style;
+        cstr path = folderName.c_str();
+        addfoldertocollection(path.Get());
+    }
+}
 
 //PE: Moved here cstr is crashing when called from M-MPSteam.cpp in 64 bit version.
 void mp_save_workshop_files_needed(void)
@@ -168,6 +186,7 @@ void mp_save_workshop_files_needed(void)
 		addfoldertocollection(cstr(cstr("terrainbank\\") + g.terrainstyle_s).Get());
 	}
 	addfoldertocollection(cstr(cstr("vegbank\\") + g.vegstyle_s).Get());
+	PWCollectMixedGrassStyleDependencies();
 
 	//  choose all entities and associated files
 	for (t.e = 1; t.e <= g.entityelementlist; t.e++)
@@ -1394,6 +1413,7 @@ void mapfile_collectfoldersandfiles ( cstr levelpathfolder )
 	addfoldertocollection(cstr(cstr("terrainbank\\")+g.terrainstyle_s).Get() );
 	addtocollection("skybank\\cloudportal.dds");
 	addfoldertocollection(cstr(cstr("vegbank\\")+g.vegstyle_s).Get() );
+	PWCollectMixedGrassStyleDependencies();
 
 	// pre-add the skins folder - can optimize later to find only skins we used (118MB)
 	addfoldertocollection("charactercreatorplus\\skins" );
@@ -2203,6 +2223,7 @@ int mapfile_savestandalone_stage2b ( void )
 		addfoldertocollection(cstr(cstr("terrainbank\\")+g.terrainstyle_s).Get() );
 		addtocollection("skybank\\cloudportal.dds");
 		addfoldertocollection(cstr(cstr("vegbank\\")+g.vegstyle_s).Get() );
+	PWCollectMixedGrassStyleDependencies();
 
 		// start for loop
 		t.e = 1;
@@ -3598,6 +3619,7 @@ int mapfile_savestandalone_stage2b ( void )
 		//addfoldertocollection("skybank\\night"); // no need for NIGHT until we have day/night cycles
 		addfoldertocollection(cstr(cstr("terrainbank\\")+g.terrainstyle_s).Get() );
 		addfoldertocollection(cstr(cstr("vegbank\\")+g.vegstyle_s).Get() );
+	PWCollectMixedGrassStyleDependencies();
 
 		//add lutbank
 		addfoldertocollection("lutbank\\");
