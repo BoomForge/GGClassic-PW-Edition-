@@ -107,6 +107,13 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 - [ ] **Build and stability baseline:** compile the fork using Visual Studio 2022 x64 with the original legally owned GameGuru media and required dependencies; test editor launch, tiny FPS level, play/stop, save/reopen and standalone game.
 - [ ] **Loading-time investigation:** profiling hooks are committed and individually Windows-tested, but the full PW Edition engine has not been benchmarked. Measure cold startup, first test, repeat test, return to editor, and standalone load for an empty world and a populated small town. Then optimise the measured bottleneck and verify before/after results.
 
+### Model Importer 2 M2.1 — material inspection and safe relinking (22 November 2026)
+
+- [x] Added an opt-in **Materials & Relinking** section to the existing ImGui importer: inspect/select a Classic texture slot, view its path and stage metadata, identify missing files and show source/converter-folder replacement candidates.
+- [x] Added **Browse and replace selected slot**: load a DDS/PNG/TGA/JPEG/BMP into a fresh image ID first, then update the selected existing importer slot and reapply Classic's preview pipeline. A failed load keeps the original assignment; shared old images are retained.
+- [x] Added portable C++ material-relink helper tests to the Windows skeletal-import audit workflow.
+- [ ] M2 remaining: mesh-specific UV/material-stage editing, axis/pivot preview, full export tests and real Windows editor acceptance. Weapon/socket binding is still a separate later rigging feature. See [M2 implementation notes](docs/PW_MODEL_IMPORTER_CHARACTER_CREATOR_REBUILD.md#22-november-milestone--model-importer-2-m21-safe-material-slot-relinking).
+
 ### Model Importer 2 and Character Creator 2 — approved direction
 
 - [ ] **Weapon sockets and attachment binding (explicitly requested 22 Nov):** Attach imported weapons/props to named character hand bones (and optional back/hip sockets), configure local grip transforms, preview while animating, preserve editable attachment profiles and verify in GameGuru save/reopen and game exports. Share the binding system between Importer 2 and Character Creator 2; handle Mixamo/Bip01 naming and missing bones. This is **not** the already implemented cross-level weapon/ammo state work. See [weapon-binding acceptance gate](docs/PW_MODEL_IMPORTER_CHARACTER_CREATOR_REBUILD.md#weapon-binding-acceptance-gate-not-yet-implemented).
