@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-MultiMaterialFallback.h" // Repair embedded DBO material DDS when only PNG was exported
 
 #ifdef ENABLEIMGUI
 #include "..\Imgui\imgui.h"
@@ -3107,9 +3108,48 @@ void entity_loadtexturesandeffect ( void )
 		t.texaltdid=0 ; t.entityprofile[t.entid].texaltdid=t.texaltdid;
 		bMultiMaterialObject = true;
 
+		// PW Edition: imported DBO stages can retain a .dds name even when
+        // the importer saved the actual model texture as PNG. When that DDS
+        // does not exist beside the FPE, relink only the matching PNG stage.
+        // This is necessary for Serine-style multi-material models where the
+        // FPE 'textured' field is intentionally blank and the ordinary single
+        // texture fallback is never reached.
+        sObject* pObject = GetObjectData(t.entobj);
+        if (pObject && pObject->ppMeshList)
+        {
+            const std::string pwFolder = std::string(t.entdir_s.Get()) + t.entpath_s.Get();
+            const auto pwExists = [](const std::string& candidate) -> bool {
+                const DWORD flags = GetFileAttributesA(candidate.c_str());
+                return flags != INVALID_FILE_ATTRIBUTES && (flags & FILE_ATTRIBUTE_DIRECTORY) == 0;
+            };
+            int pwFallbacks = 0;
+            for (int mesh = 0; mesh < pObject->iMeshCount; ++mesh)
+            {
+                sMesh* m = pObject->ppMeshList[mesh];
+                if (!m || !m->pTextures || !m->dwTextureCount) continue;
+                const char* embedded = m->pTextures[0].pName;
+                const std::string png = PWMultiMaterialFallback::ResolveMissingDDS(
+                    pwFolder, embedded ? embedded : "", pwExists);
+                if (png.empty()) continue;
+                int imageID = loadinternaltextureex((LPSTR)png.c_str(), 1, t.tfullorhalfdivide);
+                if (imageID > 0)
+                {
+                    SetBaseTextureStage(m, 0, imageID);
+                    ++pwFallbacks;
+                }
+            }
+            if (pwFallbacks)
+            {
+                char pwLine[320] = {};
+                sprintf_s(pwLine, sizeof(pwLine),
+                    "PW ENTITY MATERIAL: recovered %d missing DDS stages from PNG (%s)",
+                    pwFallbacks, t.ent_s.Get());
+                timestampactivity(0, pwLine);
+            }
+        }
+
 		// if multi material, check if we have any texture overrides (new)
-		sObject* pObject = GetObjectData (t.entobj);
-		for (int iMeshIndex = 0; iMeshIndex < pObject->iMeshCount; iMeshIndex++)
+		for (int iMeshIndex = 0; pObject && iMeshIndex < pObject->iMeshCount; iMeshIndex++)
 		{
 			// texoverride_s has maximum of 100 slots
 			if (iMeshIndex < 100)
