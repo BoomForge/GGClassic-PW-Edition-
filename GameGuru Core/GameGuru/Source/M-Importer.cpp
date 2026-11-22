@@ -6640,6 +6640,19 @@ void importer_save_entity ( char *filename )
 		t.importer.objectFPE.model = t.tSaveFile_s;
 	}
 
+    // PW Edition: no FPE or thumbnail for a failed model with no vertices.
+    const PWImportedGeometry::Report pwSaveModel = PWImportedGeometry::Inspect(
+        ObjectExist(t.importer.objectnumber) ? GetObjectData(t.importer.objectnumber) : nullptr);
+    if (!pwSaveModel.usable)
+    {
+        OutputDebugStringA(("PW IMPORT SAVE BLOCKED: " + pwSaveModel.error + "\n").c_str());
+        popup_text("Import not saved: model contains no renderable geometry.");
+        t.tSaveFile_s = "Error";
+        t.timportersaveon = 0;
+        if (filename) SetDir(tOldDir.Get());
+        return;
+    }
+
 	// Just before save object, ensure all texture references don't include root path
 	sObject* pObject = GetObjectData ( t.importer.objectnumber );
 	if ( pObject )
@@ -7102,7 +7115,22 @@ void importer_save_entity ( char *filename )
 	// Save Object
 	if ( strcmp ( Lower(Right(t.tSaveFile_s.Get(),4)) , ".dbo" ) == 0 ) 
 	{
-		if ( FileExist (t.tSaveFile_s.Get()) == 1 ) DeleteAFile ( t.tSaveFile_s.Get() ) ;
+        const std::string pwTargetDBO = t.tSaveFile_s.Get();
+        const std::string pwBackupDBO = pwTargetDBO + ".pw-save-backup";
+        bool pwHaveBackup = false;
+        if (FileExist(t.tSaveFile_s.Get()) == 1)
+        {
+            if (!CopyFileA(pwTargetDBO.c_str(), pwBackupDBO.c_str(), TRUE))
+            {
+                popup_text("Import not saved: could not back up existing DBO.");
+                t.tSaveFile_s = "Error";
+                t.timportersaveon = 0;
+                if (filename) SetDir(tOldDir.Get());
+                return;
+            }
+            pwHaveBackup = true;
+            DeleteAFile(t.tSaveFile_s.Get());
+        }
 		ScaleObject (  t.importer.objectnumber,100,100,100 );
 		PWSkeletalAudit::Snapshot pwSkeletonBefore;
 		PWSkeletalIntegrity::Audit pwDeepBefore;
@@ -7114,6 +7142,24 @@ void importer_save_entity ( char *filename )
 				pwDeepBefore=PWSkeletalIntegrity::Inspect(pwObjectBefore);
 		}
 		SaveObject (  t.tSaveFile_s.Get(),t.importer.objectnumber );
+        WIN32_FILE_ATTRIBUTE_DATA pwSavedFileAttributes = {};
+        const bool pwValidOutput = GetFileAttributesExA(t.tSaveFile_s.Get(), GetFileExInfoStandard,
+            &pwSavedFileAttributes) != 0 && pwSavedFileAttributes.nFileSizeHigh == 0
+            && pwSavedFileAttributes.nFileSizeLow > 128;
+        if (!pwValidOutput)
+        {
+            OutputDebugStringA("PW IMPORT SAVE FAILED: DBO missing or empty after SaveObject.\n");
+            if (FileExist(t.tSaveFile_s.Get()) == 1) DeleteAFile(t.tSaveFile_s.Get());
+            if (pwHaveBackup) CopyFileA(pwBackupDBO.c_str(), pwTargetDBO.c_str(), FALSE);
+            popup_text("Import not saved: generated DBO missing or empty. Existing file restored if available.");
+            ScaleObject(t.importer.objectnumber, t.importer.objectScaleForEditing,
+                t.importer.objectScaleForEditing, t.importer.objectScaleForEditing);
+            t.tSaveFile_s = "Error";
+            t.timportersaveon = 0;
+            if (filename) SetDir(tOldDir.Get());
+            return;
+        }
+        if (pwHaveBackup) DeleteFileA(pwBackupDBO.c_str());
 		PW_VerifySavedSkeleton(t.tSaveFile_s.Get(),pwSkeletonBefore,pwDeepBefore);
 		ScaleObject (  t.importer.objectnumber,t.importer.objectScaleForEditing,t.importer.objectScaleForEditing,t.importer.objectScaleForEditing );
 	}
