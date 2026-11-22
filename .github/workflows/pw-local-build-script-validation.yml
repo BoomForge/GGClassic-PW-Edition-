@@ -33,10 +33,33 @@ jobs:
           }
           if (-not (Test-Path 'START_PW_TEST_BUILD.cmd')) { throw 'Missing local launcher' }
           $script=Get-Content 'tools/pw-local-test.ps1' -Raw
-          if ($script -notmatch 'PW-TestInstall' -or $script -notmatch 'outside SteamGameDir') {
-            throw 'Missing test install isolation checks'
+          if ($script -notmatch 'PW-TestInstall' -or $script -notmatch 'outside SteamGameDir' -or
+              $script -notmatch 'repository or PW-Build' -or $script -notmatch 'SHA256' -or
+              $script -notmatch 'PW Edition branding marker') {
+            throw 'Missing test install isolation or built-output integrity checks'
           }
-          Write-Host 'Local build script syntax and isolation guards verified. No EXE built, copied or run.'
+          Write-Host 'Local build script syntax and output guards verified. No GameGuru EXE built, copied or run.'
+      - name: Reject destructive destination paths before building or copying assets
+        shell: pwsh
+        run: |
+          # Use synthetic empty placeholders, never actual licensed Steam media.
+          $fake = Join-Path $env:RUNNER_TEMP ('pw-synthetic-steam-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path (Join-Path $fake 'Files') -Force | Out-Null
+          Set-Content -LiteralPath (Join-Path $fake 'GameGuru.exe') -Value 'Not a real GameGuru binary'
+          $checkout = (Resolve-Path .).Path
+          $blocked = @($fake, $checkout, (Join-Path $checkout 'tools'), (Join-Path $checkout 'PW-Build'))
+          try {
+            foreach ($target in $blocked) {
+              & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '.\tools\pw-local-test.ps1' -SteamGameDir $fake -TestDir $target -SkipBuild *> $null
+              if ($LASTEXITCODE -eq 0) { throw "Unsafe TestDir was accepted: $target" }
+            }
+            if (-not (Test-Path -LiteralPath (Join-Path $fake 'GameGuru.exe'))) {
+              throw 'Synthetic Steam source disappeared'
+            }
+            Write-Host 'Dangerous test destinations were rejected before build/copy.'
+          } finally {
+            Remove-Item -LiteralPath $fake -Recurse -Force -ErrorAction SilentlyContinue
+          }
       - name: Validate Steam import-link metadata with MSVC
         shell: pwsh
         run: |
