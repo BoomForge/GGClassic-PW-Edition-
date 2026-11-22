@@ -184,6 +184,8 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn("LoadObject((LPSTR)model.c_str(), rs.source);", grass)
         self.assertIn("LoadImage((LPSTR)atlas.c_str(), rs.image);", grass)
         self.assertIn("TextureObject(rs.source, rs.image);", grass)
+        self.assertLess(grass.index("SetObjectEffect(rs.source, rs.effect);"),
+                        grass.index("TextureObject(rs.source, rs.image);"))
         # Classic's generated grid receives its own effect; independent
         # ordinary objects need an actual entity shader or may be invisible
         # in DX11 despite ObjectExist/GetVisible claiming success.
