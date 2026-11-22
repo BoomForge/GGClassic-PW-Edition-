@@ -3,6 +3,7 @@
 //----------------------------------------------------
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-EnvironmentStyleSettings.h"
 
 
 void sky_init ( void )
@@ -303,10 +304,15 @@ void sky_skyspec_init ( void )
 			}
 
 			// Common settings for sky object
-			ScaleObject ( t.skyobj,750,750,750 );
+            // Normal Classic skies remain at 750% with no extra yaw;
+            // imported sky meshes may specify size and orientation.
+            const PWEnvironmentStyle::Settings pwStyle =
+                PWEnvironmentStyle::Read(std::string("skybank\\") + t.skyname_s.Get());
+            const float skyScale = 750.f * pwStyle.percent / 100.f;
+			ScaleObject(t.skyobj, skyScale, skyScale, skyScale);
 			SetObjectTextureMode ( t.skyobj,2,0 );
 			SetObjectMask ( t.skyobj,2+1 ); // DX11 actually hidden when lightray renders
-			YRotateObject ( t.skyobj,t.terrain.sunrotation_f );
+            YRotateObject(t.skyobj, t.terrain.sunrotation_f + pwStyle.yaw);
 			SetObjectEffect ( t.skyobj,t.terrain.effectstartindex+4 );
 
 			// Fade default
