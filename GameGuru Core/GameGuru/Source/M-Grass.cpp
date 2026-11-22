@@ -788,7 +788,7 @@ void Load(const std::string& levelFolder) {
         const std::string style = line.substr(b + 1);
         float weight = 0.f;
         if (style.empty() || !PWStyleImport::SafeName(style) ||
-            std::sscanf(line.substr(a + 1, b - a - 1).c_str(), "%f", &weight) != 1)
+            ::sscanf_s(line.substr(a + 1, b - a - 1).c_str(), "%f", &weight) != 1)
             continue;
         slots[i].enabled = line[0] == '1';
         slots[i].weight = std::max(0.f, std::min(100.f, weight));
