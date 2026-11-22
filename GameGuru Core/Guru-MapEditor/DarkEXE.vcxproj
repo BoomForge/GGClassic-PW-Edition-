@@ -375,6 +375,12 @@
     <Copy SourceFiles="$(MSBuildProjectDirectory)\..\GameGuru\Shaders and Scripts\scriptbank\global.lua;$(MSBuildProjectDirectory)\..\GameGuru\Shaders and Scripts\scriptbank\pw_transition_state.lua"
           DestinationFolder="$(OutDir)Files\scriptbank" SkipUnchangedFiles="true" />
   </Target>
+  <!-- Model Importer 2: Blender-driven GLB bridge, no Blender binary bundled. -->
+  <Target Name="CopyPWEditionGLBBridge" AfterTargets="Build" Condition="'$(Platform)' == 'x64'">
+    <MakeDir Directories="$(OutDir)Files\PWTools" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\GameGuru\Shaders and Scripts\PWTools\pw_glb_to_fbx.py"
+          DestinationFolder="$(OutDir)Files\PWTools" SkipUnchangedFiles="true" />
+  </Target>
   <!-- Stage opt-in shader alongside the updater and Lua companions. -->
   <Target Name="CopyPWEditionShader" AfterTargets="Build" Condition="'$(Platform)' == 'x64'">
     <MakeDir Directories="$(OutDir)Files\effectbank\reloaded" />
