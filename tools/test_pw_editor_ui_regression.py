@@ -125,6 +125,38 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertNotIn('GLB\\0*.glb', GRID)
         self.assertNotIn('bPermittedFormat = true;\n                            if (stricmp(pExtension, ".glb")', GRID)
 
+    def test_mixed_grass_does_not_overlap_classic_or_flicker_during_shadow_pass(self):
+        terrain = (ROOT / "GameGuru Core/GameGuru/Source/M-Terrain.cpp").read_text(encoding="utf-8")
+        grass = (ROOT / "GameGuru Core/GameGuru/Source/M-Grass.cpp").read_text(encoding="utf-8")
+        mix = (ROOT / "GameGuru Core/GameGuru/Include/PW-GrassMix.h").read_text(encoding="utf-8")
+
+        # Three independent Classic restoration sites exist: editor rebuild,
+        # painted vegetation refresh, and the post-shadow render pass.
+        self.assertGreaterEqual(
+            terrain.count("if (PWGrassMix::Active() && PWGrassMix::Ready())"), 3
+        )
+        self.assertIn("SetVegetationGridVisible(!PWGrassMix::Active());", grass)
+        self.assertIn("if (PWGrassMix::Active() && PWGrassMix::Ready())", GRID)
+
+        # Classic hides its vegetation during the shadow pass. Mixed objects
+        # must be hidden too, then restored only while the mixed renderer owns
+        # the painted grass region.
+        self.assertIn("PWGrassMix::SetInstancesVisible(false);", terrain)
+        self.assertIn("PWGrassMix::SetInstancesVisible(true);", terrain)
+        self.assertIn("void SetInstancesVisible(bool visible);", mix)
+        self.assertIn("if (visible && j < rs.used)", grass)
+
+        # Each grass choice loads its own actual mesh/texture, not the current
+        # one-style atlas from the native vegetation renderer.
+        self.assertIn('std::string("vegbank\\\\") + slots[i].style', grass)
+        self.assertIn("LoadObject((LPSTR)model.c_str(), rs.source);", grass)
+        self.assertIn("LoadImage((LPSTR)atlas.c_str(), rs.image);", grass)
+        self.assertIn("TextureObject(rs.source, rs.image);", grass)
+        self.assertIn("InstanceObject(id, rs.source);", grass)
+
+        # Hiding vegetation in the editor also releases PW-created instances.
+        self.assertIn("PWGrassMix::ResetInstances();", terrain)
+
     def test_asset_inspector_keeps_docked_browser_and_uses_real_previews(self):
         inspector = (ROOT / "GameGuru Core/GameGuru/Include/PW-AssetInspector.h").read_text(encoding="utf-8")
         self.assertIn('Asset Inspector...##PWOpenAssetInspector', GRID)
