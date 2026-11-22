@@ -1,48 +1,40 @@
-# Pixelwolf Edition: docked workspace, importer previews and custom sky/grass styles
+# PW Edition — Sky, Grass and Weighted Grass-Mix Import
 
-**Implementation:** 22 November 2026, development branch `work/pw-community-integration-20261121`. Source changes require a fresh compiled Windows x64 editor. Not merged into master or user-accepted.
+**Status 22 November 2026:** development branch implementation. Must pass full Windows build, FBX/sky/grass runtime visual acceptance and standalone level tests before calling complete. This replaces the earlier folder-copy-only user workflow.
 
-## Docked editor
+## Environment import: same preview as the model importer
 
-- The Scene Hierarchy, central 3D editor, Asset Browser and Inspector are parts of one ImGui dockspace. The default center/bottom split is **inside** the side panels rather than an overlapping popup.
-- A revised `PWEngineDockspaceV7` layout migrates from previously saved floating layout IDs. The center and bottom dock nodes use no-tab-bar flags to prevent them being dragged away independently while retaining their splitter resize.
-- The browser no longer overwrites its authoritative bottom dock ID with a dock ID learned from a mistakenly detached window.
-- The original editor theme and toolbar icons should remain unaffected. Full Windows visual acceptance is still required.
+Open **Terrain Tools > Customize Sky > Import Sky Style...** or **Terrain Tools > Customize Vegetation > Import Grass Style...**.
 
-## Imported-model thumbnail
+Pick an FBX, DBO or X model. PW Edition now opens the existing GameGuru model importer, which displays the textured 3D mesh and retains its existing material editing and adjustment tools. While the model importer is active, the persistent **Inspector** provides a style-name box, **Size (%)** slider and **Yaw** slider. Save using the importer’s existing Save action. For the sky/grass modes this exports a native style folder rather than an ordinary entitybank FPE. Invalid or duplicate style names and missing textures fail instead of overwriting another asset.
 
-- The docked DX11 preview no longer switches into Classic's 64×64 legacy bitmap before attempting a 128×128 camera-surface capture. The non-ImGui Classic path keeps its original 64×64 bitmap.
-- The importer won't recycle a solid-colour or unreadable source BMP into a new asset.
-- After saving a newly generated BMP, a lightweight content check rejects all-green/flat-colour captures instead of preserving misleading thumbnails. It cannot guarantee good framing, correct shader appearance or thumbnail correctness for every model.
-- Owner must test an untouched Serine FBX, saved BMP and Asset Browser refresh after a fresh build. A blank BMP means capture still needs visual/runtime debugging.
+- **Sky:** native `Files/skybank/<name>/<name>.dbo`, `skyspec.txt`, relevant textures and `pw_style_settings.txt`. The existing sky renderer reads optional scale/yaw and otherwise uses its usual defaults.
+- **Grass:** native `Files/vegbank/<name>/veg.dbo`, `grass.png` or `grass.dds` albedo atlas, relevant source textures and `pw_style_settings.txt`. The existing vegetation renderer reads optional scale/yaw with legacy fallback.
 
-## Import custom sky style
+The existing importer is still responsible for mesh/texture validation and preview. This is not a general-purpose HDRI/cubemap converter and does not support arbitrary terrain shaders. FBX remains enabled. **GLB is disabled** in the file picker, legacy picker and importer entry gate; the experimental bridge source remains in the repository but is not a user-facing supported format.
 
-Open **Terrain Tools → Customize Sky → Import Sky Style...**, then choose the **`skyspec.txt`** file in a compatible Classic sky folder. The folder must also include a sky mesh matching its name, such as `Misty Valley/Misty Valley.DBO` or `Misty Valley/Misty Valley.X`, and its required textures/specification. The editor copies supported assets into `Files/skybank/<style>`, refreshes the sky style list and selects the new sky.
+## Multiple painted grass types
 
-This is Classic style-folder import, **not** arbitrary HDRI or six-image cubemap conversion. The existing Classic skyspec/shader pipeline still determines sky appearance.
+In **Terrain Tools > Customize Vegetation > Mix Multiple Grass Types**, choose up to **four** styles. Each row has:
 
-## Import custom grass style
+- Enable/disable
+- Style selector from the current vegetation bank
+- **Spread weight (%)** from 0 to 100
 
-Open **Terrain Tools → Customize Vegetation → Import Grass Style...**, then choose **`veg.DBO`** or **`veg.X`** in a compatible vegetation style folder with **`grass.dds` or `grass.png`**. The editor copies supported files to `Files/vegbank/<style>`, refreshes the bank, selects the style and reloads the existing vegetation mesh and texture.
+The mix normalises the active weights. For example, 25 and 75 distribute painted grass into approximately one-quarter of the first style and three-quarters of the second, using deterministic seeded cell selection. Every mixed instance uses its chosen **actual vegetation mesh and atlas**, not a material colour blend. With zero or one active style, GameGuru's native single-style vegetation grid remains the renderer.
 
-A single standalone PNG grass image is not yet converted into a Classic-style grass package. Users can author the standard folder in a 3D editor or supply an existing Classic-compatible style folder.
+Because Classic's native vegetation grid supports only one mesh/atlas, PW Edition adds a *bounded* camera-centred object-instancing renderer for mixed grass. It samples the existing painted vegetation mask and limits visible vegetation to **320 mixed instances** within the nearby grid. This is an initial performance-protected path, **not** equivalent to the performance/culling/shadow behaviour of the original native renderer. It needs GPU profiling, correct transparency/wind tests, rotation/ground-contact review and standalone map testing. Grass density also depends on the painted mask and existing vegetation-quantity setting.
 
-## Safety/limits
+The choices are stored in the optional `pw_grassmix.cfg` entry inside the FPM map archive and restored when an FPM is loaded. Older FPMs without this entry keep legacy one-type grass. Importing custom source grass styles and distributing game asset bank dependencies with standalone exports require separate acceptance tests.
 
-- No automatic overwrite of existing sky/vegetation styles.
-- Installer copies files into a staging folder inside the destination bank then renames into place; failed copies clean up their staging files.
-- Only regular flat folders, with style names containing letters/numbers/spaces/hyphen/underscore, and regular model/texture/specification files are supported. Rejects nested folders, reparse links, unsupported extensions, >256 files or >512 MiB. Long paths beyond the legacy `MAX_PATH` limit are rejected.
-- Files are copied; source asset folders are untouched.
-- Style preflight validates the expected file names and presence, but **does not** validate mesh geometry, shader compatibility or a running GameGuru render.
+## Validation required
 
-## Acceptance gates
+1. Full Windows x64 editor compile and relaunch; confirm both import buttons show the actual 3D preview and applied textures.
+2. Import a non-empty FBX sky dome, change size/yaw, save, select and test it in editor and Test Level.
+3. Import a textured FBX grass mesh (PNG or DDS), save to native vegetation style and paint it successfully.
+4. Select two to four styles, change weights, test visibly different mesh distributions around painted regions; ensure non-painted regions stay bare.
+5. Save/reopen an FPM and verify the same enabled styles, weights and object distribution.
+6. Check RAM/VRAM, CPU frame time, transparency, fog, wind, LOD/shadows and project transitions with the 320-instance cap. The old/native single-style path must remain unaffected.
+7. Confirm GLB no longer appears as an advertised option and direct GLB attempts give a clear unsupported message.
 
-1. Complete Windows x64 editor build with branch head.
-2. Show resizing center/bottom splitter without floating/moving either window, including reopening a saved project and editor restart.
-3. Import Serine FBX, save DBO/FPE/BMP, confirm thumbnail depicts character, then save/reopen and place asset.
-4. Import a known working Classic sky folder, use it in a level, save/reopen and play Test Level.
-5. Import a known working Classic grass folder, paint grass, save/reopen and test standalone game; ensure existing styles still work.
-6. Confirm cancellation, missing required files, duplicate folder names and permission failures leave existing assets unchanged.
-
-**Status:** source implementation; synthetic Windows tests and full build must be checked on the corresponding commit before claiming passes. This is not an installer release.
+Until those tests pass, **do not distribute this as a verified installer**.
