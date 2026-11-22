@@ -137,6 +137,8 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertGreaterEqual(terrain.count("PWGrassMix::OwnsGrid()"), 3)
         self.assertIn("SetVegetationGridVisible(true);", grass)
         self.assertIn("if (PWGrassMix::OwnsGrid())", GRID)
+        self.assertIn("No mixed grass placed near this view; showing Classic grass.", terrain)
+        self.assertIn("Mix loading or missing a style: Classic grass stays visible.", terrain)
         self.assertIn("bool OwnsGrid();", mix)
         self.assertIn("bool OwnsGrid() {", grass)
         self.assertIn("if (render[i].used > 0) return true;", grass)
