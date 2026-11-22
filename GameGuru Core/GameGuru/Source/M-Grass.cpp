@@ -297,7 +297,7 @@ void grass_loop ( void )
     // Weighted PW mix uses real per-style model instances chosen from the
     // same painted vegetation mask, instead of a cosmetic blend slider.
     static bool pwWasMixed = false;
-    const bool pwMixed = PWGrassMix::Active() && t.visuals.vegetationmode != 0
+    const bool pwMixed = PWGrassMix::RenderEnabled() && t.visuals.vegetationmode != 0
         && t.hardwareinfoglobals.nograss == 0;
     if (pwMixed)
     {
@@ -746,6 +746,7 @@ static RenderStyle render[MaxStyles];
 static unsigned builtRevision = 0;
 static int lastCameraCellX = -999999, lastCameraCellZ = -999999;
 static bool ready = false;
+static bool previewEnabled = false; // SAFETY: off by default until verified on the owner's GPU.
 static int allocatedBase = 0;
 static int FindFreeId() {
     if (!allocatedBase)
@@ -763,8 +764,10 @@ static int FindFreeImageId() {
     return 0;
 }
 bool Ready() { return ready; }
+bool PreviewEnabled() { return previewEnabled; }
+bool RenderEnabled() { return previewEnabled && Active(); }
 bool OwnsGrid() {
-    if (!ready || !Active()) return false;
+    if (!ready || !RenderEnabled()) return false;
     for (int i = 0; i < MaxStyles; ++i)
         if (render[i].used > 0) return true;
     return false;
@@ -783,6 +786,30 @@ void ResetInstances() {
     lastCameraCellX = lastCameraCellZ = -999999;
     builtRevision = 0;
     allocatedBase = 0;
+}
+void SetPreviewEnabled(bool enabled) {
+    if (previewEnabled == enabled) return;
+    previewEnabled = enabled;
+    // Clear stale objects whenever preview changes. The next grass_loop()
+    // rebuilds them only if the owner has explicitly opted in.
+    ResetInstances();
+    Dirty();
+}
+std::string Diagnostics() {
+    int sources = 0, allocated = 0, placed = 0, markedVisible = 0;
+    for (int i = 0; i < MaxStyles; ++i) {
+        const RenderStyle& rs = render[i];
+        if (rs.source && ObjectExist(rs.source)) ++sources;
+        allocated += int(rs.instances.size());
+        placed += int(rs.used);
+        for (size_t j = 0; j < rs.used && j < rs.instances.size(); ++j)
+            if (ObjectExist(rs.instances[j]) && GetVisible(rs.instances[j]) == 1)
+                ++markedVisible;
+    }
+    std::ostringstream out;
+    out << "Models: " << sources << " | objects: " << allocated
+        << " | placed: " << placed << " | visible flags: " << markedVisible;
+    return out.str();
 }
 void SetInstancesVisible(bool visible) {
     // Classic hides vegetation during cascade-shadow rendering. Our own
@@ -815,6 +842,9 @@ void Save(const std::string& levelFolder) {
         out << (slots[i].enabled ? 1 : 0) << "|" << slots[i].weight << "|" << slots[i].style << "\n";
 }
 void Load(const std::string& levelFolder) {
+    // Loading another map must never silently reactivate unverified mixed
+    // rendering just because its project contains a grass-mix configuration.
+    previewEnabled = false;
     ResetInstances();
     for (int i = 0; i < MaxStyles; ++i) slots[i] = Slot();
     std::ifstream in(ConfigPath(levelFolder), std::ios::binary);
@@ -893,7 +923,7 @@ static bool EnsureInstance(RenderStyle& rs, size_t index) {
 }
 void Refresh(float cameraX, float cameraZ, int terrainId, bool superflat,
              float flatHeight, int memblockId, float quantity) {
-    if (!MemblockExist(memblockId)) return;
+    if (!RenderEnabled() || !MemblockExist(memblockId)) return;
     if (!ready || builtRevision != revision) {
         if (!Prepare()) {
             ResetInstances();
