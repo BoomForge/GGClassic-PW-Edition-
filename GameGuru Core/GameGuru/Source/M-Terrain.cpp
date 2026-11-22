@@ -3,6 +3,7 @@
 //----------------------------------------------------
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-GrassMix.h"
 #include "..\..\Dark Basic Public Shared\Dark Basic Pro SDK\Shared\Objects\ShadowMapping\cShadowMaps.h"
 #include "DirectXTex.h"
 #include "wincodec.h"
@@ -1186,6 +1187,104 @@ void imgui_terrain_loop(void)
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("Choose veg.DBO or veg.X from a Classic vegetation folder containing grass.dds or grass.png.");
                 ImGui::TextDisabled("Installs to vegbank and refreshes available grasses.");
+
+                if (ImGui::CollapsingHeader("Mix Multiple Grass Types", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    // Native Classic only supports one model per grass grid.
+                    // The PW mix creates deterministic, bounded instances of
+                    // each enabled mesh over the already-painted vegetation mask.
+                    static bool pwMixFirstOpen = true;
+                    if (pwMixFirstOpen)
+                    {
+                        pwMixFirstOpen = false;
+                        if (PWGrassMix::Count() == 0 && PWGrassMix::slots[0].style.empty()
+                            && g.vegstyle_s.Len() > 0)
+                        {
+                            PWGrassMix::slots[0].style = g.vegstyle_s.Get();
+                            PWGrassMix::slots[0].enabled = true;
+                            PWGrassMix::slots[0].weight = 100.f;
+                        }
+                    }
+                    bool pwMixChanged = false;
+                    for (int i = 0; i < PWGrassMix::MaxStyles; ++i)
+                    {
+                        PWGrassMix::Slot& slot = PWGrassMix::slots[i];
+                        ImGui::PushID(i);
+                        ImGui::Separator();
+                        ImGui::Text("Grass %d", i + 1);
+                        if (ImGui::Checkbox("Use", &slot.enabled)) pwMixChanged = true;
+                        ImGui::SameLine();
+                        const char* preview = slot.style.empty() ? "Select grass model" : slot.style.c_str();
+                        if (ImGui::BeginCombo("Type", preview))
+                        {
+                            for (int bank = 1; bank <= g.vegstylemax; ++bank)
+                            {
+                                const char* styleName = t.vegstylebank_s[bank].Get();
+                                if (!styleName || !*styleName) continue;
+                                const bool selected = PWStyleImport::Same(slot.style, styleName);
+                                if (ImGui::Selectable(styleName, selected))
+                                {
+                                    slot.style = styleName;
+                                    slot.enabled = true;
+                                    if (slot.weight <= 0.f) slot.weight = 25.f;
+                                    pwMixChanged = true;
+                                }
+                                if (selected) ImGui::SetItemDefaultFocus();
+                            }
+                            ImGui::EndCombo();
+                        }
+                        if (ImGui::SliderFloat("Spread weight (%)", &slot.weight, 0.f, 100.f, "%.0f"))
+                            pwMixChanged = true;
+                        ImGui::PopID();
+                    }
+                    float total = 0.f;
+                    for (int i = 0; i < PWGrassMix::MaxStyles; ++i)
+                        if (PWGrassMix::slots[i].enabled && !PWGrassMix::slots[i].style.empty())
+                            total += PWGrassMix::slots[i].weight;
+                    if (PWGrassMix::Active() && total > 0.f)
+                    {
+                        ImGui::TextUnformatted("Spread across the painted grass areas:");
+                        for (int i = 0; i < PWGrassMix::MaxStyles; ++i)
+                        {
+                            const PWGrassMix::Slot& slot = PWGrassMix::slots[i];
+                            if (slot.enabled && slot.weight > 0.f && !slot.style.empty())
+                                ImGui::Text("%s: %.0f%%", slot.style.c_str(),
+                                    100.f * slot.weight / total);
+                        }
+                        ImGui::TextDisabled("Bounded render: up to 320 visible mixed grass pieces.");
+                    }
+                    else
+                        ImGui::TextDisabled("Select at least two enabled types to mix. One type uses Classic grass.");
+                    if (pwMixChanged)
+                    {
+                        PWGrassMix::Dirty();
+                        bUpdateVeg = true;
+                        iLastUpdateVeg = 0;
+                        g.projectmodified = 1;
+                        // With one type, restore Classic's fast vegetation grid.
+                        if (PWGrassMix::Count() == 1)
+                        {
+                            for (int n = 0; n < PWGrassMix::MaxStyles; ++n)
+                            {
+                                const PWGrassMix::Slot& slot = PWGrassMix::slots[n];
+                                if (!slot.enabled || slot.weight <= 0.f || slot.style.empty()) continue;
+                                for (int bank = 1; bank <= g.vegstylemax; ++bank)
+                                {
+                                    if (!PWStyleImport::Same(slot.style, t.vegstylebank_s[bank].Get())) continue;
+                                    g.vegstyleindex = bank;
+                                    g.vegstyle_s = t.vegstylebank_s[bank];
+                                    t.visuals.vegetationindex = bank;
+                                    t.visuals.vegetation_s = t.vegstylebank_s[bank];
+                                    t.gamevisuals.vegetationindex = bank;
+                                    t.gamevisuals.vegetation_s = t.vegstylebank_s[bank];
+                                    grass_changevegstyle();
+                                    break;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
 
 				ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX(), ImGui::GetCursorPosY() + 3));
 				ImGui::Text("Display Vegetation:");
