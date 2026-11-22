@@ -6,6 +6,9 @@ on:
     paths:
       - "GameGuru Core/GameGuru/Include/PW-AssetManifest.h"
       - "GameGuru Core/GameGuru/Include/PW-ImportedGeometry.h"
+      - "GameGuru Core/GameGuru/Include/PW-MultiMaterialFallback.h"
+      - "GameGuru Core/GameGuru/Source/M-Entity.cpp"
+      - "tools/test_pw_multimaterial_fallback.cpp"
       - "tools/test_pw_imported_geometry.cpp"
       - "GameGuru Core/GameGuru/Include/PW-MaterialRelink.h"
       - "tools/test_pw_material_relink.cpp"
@@ -17,6 +20,9 @@ on:
       - "GameGuru Core/GameGuru/Include/PW-SkeletalAudit.h"
       - "GameGuru Core/GameGuru/Include/PW-AssetManifest.h"
       - "GameGuru Core/GameGuru/Include/PW-ImportedGeometry.h"
+      - "GameGuru Core/GameGuru/Include/PW-MultiMaterialFallback.h"
+      - "GameGuru Core/GameGuru/Source/M-Entity.cpp"
+      - "tools/test_pw_multimaterial_fallback.cpp"
       - "tools/test_pw_imported_geometry.cpp"
       - "GameGuru Core/GameGuru/Include/PW-MaterialRelink.h"
       - "tools/test_pw_material_relink.cpp"
@@ -42,7 +48,7 @@ jobs:
           $vs = & $vswhere -latest -products '*' -property installationPath
           if (-not $vs) { throw 'VS2022 installation not found' }
           $vcvars = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
-          $command = 'call "' + $vcvars + '" -arch=x64 >nul && cl.exe /nologo /EHsc /W4 /std:c++14 /I "GameGuru Core\GameGuru\Include" tools\test_pw_skeletal_audit.cpp /Fe:pw-skeletal-audit.exe && pw-skeletal-audit.exe && cl.exe /nologo /EHsc /W4 /std:c++14 /I "GameGuru Core\GameGuru\Include" tools\test_pw_skeletal_integrity.cpp /Fe:pw-skeletal-integrity.exe && pw-skeletal-integrity.exe && cl.exe /nologo /EHsc /W4 /std:c++14 /I "GameGuru Core\GameGuru\Include" tools\test_pw_asset_manifest.cpp /Fe:pw-asset-manifest.exe && pw-asset-manifest.exe && cl.exe /nologo /EHsc /W4 /std:c++14 /I "GameGuru Core\GameGuru\Include" tools\test_pw_material_relink.cpp /Fe:pw-material-relink.exe && pw-material-relink.exe && cl.exe /nologo /EHsc /W4 /std:c++14 /I "GameGuru Core\GameGuru\Include" tools\test_pw_imported_geometry.cpp /Fe:pw-imported-geometry.exe && pw-imported-geometry.exe'
+          $command = 'call "' + $vcvars + '" -arch=x64 >nul && cl.exe /nologo /EHsc /W4 /std:c++14 /I "GameGuru Core\GameGuru\Include" tools\test_pw_skeletal_audit.cpp /Fe:pw-skeletal-audit.exe && pw-skeletal-audit.exe && cl.exe /nologo /EHsc /W4 /std:c++14 /I "GameGuru Core\GameGuru\Include" tools\test_pw_skeletal_integrity.cpp /Fe:pw-skeletal-integrity.exe && pw-skeletal-integrity.exe && cl.exe /nologo /EHsc /W4 /std:c++14 /I "GameGuru Core\GameGuru\Include" tools\test_pw_asset_manifest.cpp /Fe:pw-asset-manifest.exe && pw-asset-manifest.exe && cl.exe /nologo /EHsc /W4 /std:c++14 /I "GameGuru Core\GameGuru\Include" tools\test_pw_material_relink.cpp /Fe:pw-material-relink.exe && pw-material-relink.exe && cl.exe /nologo /EHsc /W4 /std:c++14 /I "GameGuru Core\GameGuru\Include" tools\test_pw_imported_geometry.cpp /Fe:pw-imported-geometry.exe && pw-imported-geometry.exe && cl.exe /nologo /EHsc /W4 /std:c++14 /I "GameGuru Core\GameGuru\Include" tools\test_pw_multimaterial_fallback.cpp /Fe:pw-multimaterial-fallback.exe && pw-multimaterial-fallback.exe'
           cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) { throw 'Skeletal import audit test failed' }
       - name: Parse Model Importer 2 manifest with a real JSON reader
