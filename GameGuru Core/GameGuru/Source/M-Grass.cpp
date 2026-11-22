@@ -356,10 +356,9 @@ void grass_loop ( void )
 	}
     if (pwMixed)
     {
-        if (PWGrassMix::OwnsGrid())
-            HideVegetationGrid();
-        else
-            ShowVegetationGrid(); // Leave the painted area visible until PW actually populates it.
+        // Experimental mixed objects are drawn ALONGSIDE the native grass.
+        // Never replace a working native grid with these unverified objects.
+        ShowVegetationGrid();
     }
 }
 
@@ -737,6 +736,7 @@ unsigned revision = 1;
 struct RenderStyle {
     int source = 0;
     int image = 0;
+    int effect = 0; // Own standard entity shader; raw vegetation DBO has none.
     float scale = 200.f;
     float yaw = 0.f;
     std::vector<int> instances;
@@ -781,6 +781,7 @@ void ResetInstances() {
         rs.instances.clear();
         if (rs.source && ObjectExist(rs.source)) DeleteObject(rs.source);
         if (rs.image && ImageExist(rs.image)) DeleteImage(rs.image);
+        if (rs.effect > 0) deleteinternaleffect(rs.effect);
         rs = RenderStyle();
     }
     ready = false;
@@ -809,8 +810,11 @@ std::string Diagnostics() {
                 ++markedVisible;
     }
     std::ostringstream out;
-    out << "Models: " << sources << " | objects: " << allocated
+    out << "Overlay models: " << sources << " | objects: " << allocated
         << " | placed: " << placed << " | visible flags: " << markedVisible;
+    for (int i = 0; i < MaxStyles; ++i)
+        if (slots[i].enabled && slots[i].weight > 0.f && !slots[i].style.empty())
+            out << " | " << slots[i].style << ": " << render[i].used;
     if (!lastIssue.empty()) out << " | issue: " << lastIssue;
     else if (ready && placed == 0) out << " | issue: no painted samples populated";
     return out.str();
@@ -877,6 +881,10 @@ static bool Prepare() {
     for (int i = 0; i < MaxStyles; ++i) {
         if (!slots[i].enabled || slots[i].weight <= 0.f || slots[i].style.empty())
             continue;
+        // Classic still renders the selected native species. Do not place
+        // a second copy of the same species on top of it in overlay preview.
+        if (PWStyleImport::Same(slots[i].style, g.vegstyle_s.Get()))
+            continue;
         const std::string dir = std::string("vegbank\\") + slots[i].style;
         std::string model = dir + "\\veg.DBO";
         if (FileExist((LPSTR)model.c_str()) == 0) model = dir + "\\veg.X";
@@ -912,6 +920,18 @@ static bool Prepare() {
             return false;
         }
         TextureObject(rs.source, rs.image);
+        // Native vegetation calls UpdateGrassShader() for its own generated
+        // grids. These are independent regular 3D objects, and without a
+        // conventional object effect they can be marked visible but render
+        // no pixels in the DX11 editor. Importer uses the same basic shader.
+        char basicEffect[] = "effectbank\\reloaded\\entity_basic.fx";
+        char pbrEffect[] = "effectbank\\reloaded\\apbr_basic.fx";
+        rs.effect = loadinternaleffectunique(g.gpbroverride == 1 ? pbrEffect : basicEffect, 1);
+        if (rs.effect <= 0) {
+            lastIssue = "could not load object shader for " + slots[i].style;
+            return false;
+        }
+        SetObjectEffect(rs.source, rs.effect);
         const PWEnvironmentStyle::Settings opt = PWEnvironmentStyle::Read(dir);
         rs.scale = 200.f * opt.percent / 100.f;
         rs.yaw = opt.yaw;
@@ -921,6 +941,12 @@ static bool Prepare() {
         if (rs.yaw != 0.f) YRotateObject(rs.source, rs.yaw);
         SetObjectTransparency(rs.source, 6);
         SetObjectMask(rs.source, 1);
+        // Entity basic effect clips badly without its standard importer
+        // control value. Own the effect so this cannot alter other entities.
+        MakeVector4(g.characterkitvector);
+        SetVector4(g.characterkitvector, 500000, 1, 0, 0);
+        SetEffectConstantV(rs.effect, "EntityEffectControl", g.characterkitvector);
+        DeleteVector4(g.characterkitvector);
         HideObject(rs.source);
     }
     ready = true;
