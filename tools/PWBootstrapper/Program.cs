@@ -21,6 +21,7 @@ internal static class Program
     const string Branch = "work/pw-community-integration-20261121";
     private static readonly object OutputLock = new();
     private static readonly Queue<string> RecentBuildOutput = new();
+    private static readonly List<string> BuildErrors = new();
     private static StreamWriter? BuildLog;
     private static string BuildLogPath = "";
 
@@ -42,13 +43,28 @@ internal static class Program
             BuildLog?.WriteLine(line);
             if (RecentBuildOutput.Count >= 50) RecentBuildOutput.Dequeue();
             RecentBuildOutput.Enqueue(line);
+            // Preserve the actual MSBuild diagnostics; the last output lines are
+            // normally compiler progress and warnings, not the reason for failure.
+            if (line.Contains(": error ", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains(": fatal error ", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains(" error LNK", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains(" error MSB", StringComparison.OrdinalIgnoreCase))
+            {
+                var diagnostic = line.Trim();
+                if (BuildErrors.Count < 32 && !BuildErrors.Contains(diagnostic))
+                    BuildErrors.Add(diagnostic);
+            }
         }
     }
 
     private static string BuildErrorSummary()
     {
         lock (OutputLock)
-            return string.Join(Environment.NewLine, RecentBuildOutput.TakeLast(18));
+        {
+            if (BuildErrors.Count > 0)
+                return string.Join(Environment.NewLine, BuildErrors.Take(8));
+            return string.Join(Environment.NewLine, RecentBuildOutput.TakeLast(12));
+        }
     }
 
     static readonly string[] FilesToInstall =
@@ -1047,6 +1063,6 @@ try {
         if (p.ExitCode != 0)
             throw new IOException("Build failed (exit " + p.ExitCode + ") before installing any files.\n" +
                                   "Command: " + Path.GetFileName(command) + "\n" +
-                                  "Last output:\n" + BuildErrorSummary());
+                                  "Compiler diagnostics:\n" + BuildErrorSummary());
     }
 }
