@@ -1,40 +1,81 @@
-# PW Edition — Sky, Grass and Weighted Grass-Mix Import
+# PW Edition — Texture-Only Sky and Grass Import + Weighted Grass Mix
 
-**Status 22 November 2026:** development branch implementation. Must pass full Windows build, FBX/sky/grass runtime visual acceptance and standalone level tests before calling complete. This replaces the earlier folder-copy-only user workflow.
+**Corrected by owner: 22 November 2026.** This replaces the earlier
+FBX/DBO/X environment-import workflow. Source is committed to the development
+branch; Windows x64 full compile and visual/runtime acceptance for this
+revision are still required.
 
-## Environment import: same preview as the model importer
+## Single-image environment import (user-approved workflow)
 
-Open **Terrain Tools > Customize Sky > Import Sky Style...** or **Terrain Tools > Customize Vegetation > Import Grass Style...**.
+In **Terrain Tools > Customize Sky**, select an existing native sky style as
+the template and click **Import Sky Style...**. Select **only an image**.
+The engine automatically:
 
-Pick an FBX, DBO or X model. PW Edition now opens the existing GameGuru model importer, which displays the textured 3D mesh and retains its existing material editing and adjustment tools. While the model importer is active, the persistent **Inspector** provides a style-name box, **Size (%)** slider and **Yaw** slider. Save using the importer’s existing Save action. For the sky/grass modes this exports a native style folder rather than an ordinary entitybank FPE. Invalid or duplicate style names and missing textures fail instead of overwriting another asset.
+1. Clones the selected sky's pre-existing GameGuru geometry, skyspec/shader
+   settings, and compatible supporting files into a new skybank style.
+2. Copies the selected image into that new style as `pw_sky_texture.<ext>`.
+3. Applies that texture to the cloned sky object when the sky loads.
+4. Generates a safe, unique style name derived from the image file name and
+   selects the new style.
 
-- **Sky:** native `Files/skybank/<name>/<name>.dbo`, `skyspec.txt`, relevant textures and `pw_style_settings.txt`. The existing sky renderer reads optional scale/yaw and otherwise uses its usual defaults.
-- **Grass:** native `Files/vegbank/<name>/veg.dbo`, `grass.png` or `grass.dds` albedo atlas, relevant source textures and `pw_style_settings.txt`. The existing vegetation renderer reads optional scale/yaw with legacy fallback.
+In **Terrain Tools > Customize Vegetation**, select an existing native grass
+style as the template and click **Import Grass Style...**. Select **only an
+image**. The engine automatically clones the selected vegetation mesh and
+configuration, copies the selected texture as `grass.<ext>`, saves the new
+vegbank style and makes it active.
 
-The existing importer is still responsible for mesh/texture validation and preview. This is not a general-purpose HDRI/cubemap converter and does not support arbitrary terrain shaders. FBX remains enabled. **GLB is disabled** in the file picker, legacy picker and importer entry gate; the experimental bridge source remains in the repository but is not a user-facing supported format.
+**There is no imported mesh, FBX/GLB/DBO/X selection, model-importer screen,
+manual texture-material setup, or scale/yaw slider in either workflow.**
+The user supplies the image; the currently selected in-engine style determines
+the geometry, UVs, shading and default scale/orientation. The engine never
+overwrites the original style. PNG, DDS, JPG, JPEG, BMP and TGA are accepted.
+Images still need to be compatible with the chosen native template's UV atlas
+layout to look correct; the engine does not reconstruct UVs or invent geometry
+from arbitrary images.
 
-## Multiple painted grass types
+Implementation:
+- `PW-TerrainStyleUI.h`: image-only picker and automatic activate/refresh.
+- `PW-TextureStyleClone.h`: bounded, validated staging/copy of native style,
+  generated collision-safe names, template file preservation, and image copy.
+- `M-Sky.cpp`: applies custom selected image to the cloned sky geometry.
+- `M-Grass.cpp`: loads selected texture format in native and mixed grass paths.
+- `tools/test_pw_style_import_win.cpp`: clone/texture/naming/security checks.
 
-In **Terrain Tools > Customize Vegetation > Mix Multiple Grass Types**, choose up to **four** styles. Each row has:
+## Multiple painted grass types — unchanged
 
-- Enable/disable
-- Style selector from the current vegetation bank
-- **Spread weight (%)** from 0 to 100
+In **Terrain Tools > Customize Vegetation > Mix Multiple Grass Types**,
+choose up to **four** existing grass styles. Each row has enable/disable,
+style selector, and **Spread weight (%)** from 0 to 100.
 
-The mix normalises the active weights. For example, 25 and 75 distribute painted grass into approximately one-quarter of the first style and three-quarters of the second, using deterministic seeded cell selection. Every mixed instance uses its chosen **actual vegetation mesh and atlas**, not a material colour blend. With zero or one active style, GameGuru's native single-style vegetation grid remains the renderer.
+The mix normalises the active weights, picks a style per painted grass sample
+with deterministic seeded distribution, and renders each style's actual
+existing mesh and texture atlas. With zero or one active style, the native
+single-style vegetation grid remains in use. The bounded multi-style path
+uses up to 320 camera-near instances as an initial performance safeguard.
+The weights and choices are saved in optional `pw_grassmix.cfg` inside the
+FPM. Older maps continue to use Classic single-style grass.
 
-Because Classic's native vegetation grid supports only one mesh/atlas, PW Edition adds a *bounded* camera-centred object-instancing renderer for mixed grass. It samples the existing painted vegetation mask and limits visible vegetation to **320 mixed instances** within the nearby grid. This is an initial performance-protected path, **not** equivalent to the performance/culling/shadow behaviour of the original native renderer. It needs GPU profiling, correct transparency/wind tests, rotation/ground-contact review and standalone map testing. Grass density also depends on the painted mask and existing vegetation-quantity setting.
+This is distribution control, **not** a user-side mesh import or shader-only
+colour blend.
 
-The choices are stored in the optional `pw_grassmix.cfg` entry inside the FPM map archive and restored when an FPM is loaded. Older FPMs without this entry keep legacy one-type grass. Importing custom source grass styles and distributing game asset bank dependencies with standalone exports require separate acceptance tests.
+## Required acceptance before an install is called ready
 
-## Validation required
+1. Compile full Windows x64 editor at the latest branch head.
+2. Select a stock sky, import one PNG, verify the original sky is unchanged,
+   and verify the new sky uses the same geometry with the selected image.
+3. Repeat sky creation from an alternate builtin sky and with DDS/JPG; inspect
+   UV orientation, lighting, day/night behaviour, save/reopen and standalone.
+4. Select a stock vegetation style, import a PNG/JPG atlas and verify the new
+   grass retains its pre-existing geometry and actually uses the image.
+5. Test two to four different cloned/native grass styles at varied weights;
+   painted areas only, save/reopen and standalone.
+6. Check transparency, wind, shadowing, fog, FPS and VRAM (especially with
+   the 320-instance mixed-grass cap).
+7. Verify no FBX/mesh controls appear for **sky/grass texture import**.
+   GLB remains disabled in the separate **entity model importer**.
+8. Test cancellation, invalid texture files, missing built-in template,
+   duplicate image names and no loss of stock assets.
 
-1. Full Windows x64 editor compile and relaunch; confirm both import buttons show the actual 3D preview and applied textures.
-2. Import a non-empty FBX sky dome, change size/yaw, save, select and test it in editor and Test Level.
-3. Import a textured FBX grass mesh (PNG or DDS), save to native vegetation style and paint it successfully.
-4. Select two to four styles, change weights, test visibly different mesh distributions around painted regions; ensure non-painted regions stay bare.
-5. Save/reopen an FPM and verify the same enabled styles, weights and object distribution.
-6. Check RAM/VRAM, CPU frame time, transparency, fog, wind, LOD/shadows and project transitions with the 320-instance cap. The old/native single-style path must remain unaffected.
-7. Confirm GLB no longer appears as an advertised option and direct GLB attempts give a clear unsupported message.
-
-Until those tests pass, **do not distribute this as a verified installer**.
+**Status:** source implementation staged; targeted Windows tests and full
+runtime editor/game verification remain necessary. Do not describe this
+as a tested installer yet.
