@@ -58,6 +58,7 @@ enum MaterialComponentTEXTURESLOT
 int g_pwEnvironmentImportTarget = 0; // 0 entity, 1 sky, 2 grass
 float g_pwEnvironmentScalePct = 100.0f;
 float g_pwEnvironmentYawDeg = 0.0f;
+char g_pwEnvironmentName[128] = "";
 bool g_bLoadedFBXModel = false;
 int g_iFirstTimeFBXImport = 0;
 int g_iPreferPBR = 0;
@@ -6463,6 +6464,7 @@ void importer_quit (void)
     g_pwEnvironmentImportTarget = 0;
     g_pwEnvironmentScalePct = 100.0f;
     g_pwEnvironmentYawDeg = 0.0f;
+    g_pwEnvironmentName[0] = 0;
 }
 
 void ConvertWorldToRelative ( sFrame* pFrame, GGMATRIX* pStoreNewPoseFrames, GGMATRIX* pTraverseMatrix )
@@ -6546,9 +6548,9 @@ void importer_save_entity ( char *filename )
                 t.importerTextures[n].fileName.Len() > 0)
                 importedTextures.push_back(t.importerTextures[n].fileName.Get());
 
-        std::string styleName;
+        std::string styleName = g_pwEnvironmentName;
 #if defined(ENABLEIMGUI) && !defined(USEOLDIDE)
-        if (cImportName[0]) styleName = cImportName;
+        if (styleName.empty() && cImportName[0]) styleName = cImportName;
 #endif
         if (styleName.empty())
         {
