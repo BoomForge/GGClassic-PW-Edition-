@@ -44,6 +44,8 @@ inline int Pick(float unit) {
 }
 inline void Dirty() { ++revision; }
 void ResetInstances();
+bool Ready();
+void InvalidateMask();
 void Refresh(float cameraX, float cameraZ, int terrainId, bool superflat, float flatHeight,
              int memblockId, float quantity);
 void Save(const std::string& levelFolder);
