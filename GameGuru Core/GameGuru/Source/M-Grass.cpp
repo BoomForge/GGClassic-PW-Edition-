@@ -145,7 +145,10 @@ void grass_init ( void )
 
 	RefreshGridExistArray();
 	UpdateBlitzTerrain(CameraPositionX(0), CameraPositionZ(0), t.terrain.TerrainID, g.postprocessimageoffset + 5);
-	SetVegetationGridVisible(true);
+    // Do not briefly draw the original one-style vegetation grid on top of a
+    // selected PW mix while the replacement instances are being prepared.
+    // grass_loop() will explicitly restore Classic on invalid/missing assets.
+	SetVegetationGridVisible(!PWGrassMix::Active());
 
 }
 
@@ -347,8 +350,13 @@ void grass_loop ( void )
 			UpdateBlitzTerrain ( CameraPositionX(0),CameraPositionZ(0),t.terrain.TerrainID,g.postprocessimageoffset+5 );
 		}
 	}
-    if (pwMixed && PWGrassMix::Ready())
-        HideVegetationGrid();
+    if (pwMixed)
+    {
+        if (PWGrassMix::Ready())
+            HideVegetationGrid();
+        else
+            ShowVegetationGrid(); // Graceful single-style fallback on a bad mix.
+    }
 }
 
 void grass_clearregion ( void )
