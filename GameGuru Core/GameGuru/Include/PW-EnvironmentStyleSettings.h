@@ -18,10 +18,10 @@ inline Settings Read(const std::string& styleFolder) {
     std::string line;
     while (in && std::getline(in, line)) {
         float number = 0.f;
-        if (std::sscanf(line.c_str(), "scale=%f", &number) == 1 &&
+        if (::sscanf_s(line.c_str(), "scale=%f", &number) == 1 &&
             number >= 1.f && number <= 400.f)
             result.percent = number;
-        else if (std::sscanf(line.c_str(), "rotation=%f", &number) == 1 &&
+        else if (::sscanf_s(line.c_str(), "rotation=%f", &number) == 1 &&
                  number >= -180.f && number <= 180.f)
             result.yaw = number;
     }
