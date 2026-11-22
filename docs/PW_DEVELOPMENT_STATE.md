@@ -6,10 +6,10 @@
 **Repository:** https://github.com/BoomForge/GGClassic-PW-Edition-  
 **Active development branch:** `work/pw-community-integration-20261121`  
 **Draft pull request:** https://github.com/BoomForge/GGClassic-PW-Edition-/pull/1  
-**Verified branch head before this documentation commit:** `e0dcd44e2eccb9de19ced71b90789562aae298c4` (test-script and CI changes; latest source-level editor functionality remains from `4716fe95`).  
-**Last independently confirmed full Windows x64 CI:** [run #44994266761](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44994266761), **success**, for editor source `4716fe95`; all compile and staged-file verification steps passed. No workflow artifact was published. New checks on subsequent script-only commits may be queued or in progress: always check Actions before citing the most recent result.
+**Verified branch head before this documentation commit:** `9248ed241ab81916a96158858c03c4ac91924068` (latest checked development branch head).  
+**Last independently confirmed full Windows x64 CI:** [run #44999138941](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44999138941), **success**, at `9248ed24`. The separate [Windows updater EXE CI #44999138922](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44999138922) also **succeeded** at that revision. Full-editor CI intentionally does not publish proprietary engine binaries; check newer runs before updating these results.
 
-> **Important distinction:** Successful CI compilation is not a verified Steam overlay, runtime-tested editor, release ZIP, or functioning in-engine updater. Do **not** tell the owner to use the updater for this revision until a testable package is assembled, smoke-tested and verified. Avoid claiming a feature works merely because its source was committed.
+> **OWNER-CORRECTED DELIVERY FACT (22 Nov 2026): The current installed PW Edition ALREADY INCLUDES AN IN-ENGINE UPDATER.** Never describe this updater as a future feature, or default to downloading source ZIPs and running `START_PW_TEST_BUILD.cmd` every update. The editor's update command launches the installed `Pixelwolf-GGC-Updater.exe` source-building helper. Distinguish this **existing, owner-confirmed capability** from whether the **latest revision** has passed actual installation and gameplay acceptance; CI compilation is not a local runtime test.
 
 ## Product intent and hard requirements
 
@@ -37,19 +37,32 @@ Owner request:
 
 **Not verified:** That the popup opens on the owner's Windows editor; 3D geometry/texture fidelity; mouse orbit/zoom; insertion location; undo; save/reopen; raw FBX material copying/relinking; local installer. Do not turn a successful CI build into a runtime acceptance claim.
 
+## Existing in-engine updater — REQUIRED continuity (owner correction, 22 November 2026)
+
+**User-confirmed installed capability:** The owner's **current PW Edition build already has an updater inside the editor**. It has been the normal route for retrieving, compiling, and installing incremental PW Edition updates. Do not require a fresh ZIP/manual local build just because a new conversation starts.
+
+**Code-backed workflow and distinction:**
+- The editor exposes a PW Edition update command (PW Edition / Help update UI) that launches the installed **`Pixelwolf-GGC-Updater.exe`**. This source-building Windows x64 bootstrapper is already integrated into the current PW installation; it is **not** the older `pw-updater.ps1` release-only helper.
+- [`tools/PWBootstrapper/Program.cs`](../tools/PWBootstrapper/Program.cs) checks the GitHub development branch, pins a source commit, downloads the source, compiles the GameGuru editor **locally using the owner's licensed Steam media and VS2022/Build Tools**, verifies that the new EXE is PW-branded, requests confirmation, backs up installed files, validates hashes, and offers to launch the editor. The updater itself can be refreshed from the **updater-only** GitHub release channel. No publicly downloadable proprietary GameGuru editor binary is required.
+- The legacy `pw-updater.ps1` implements **stable versioned engine release ZIP** updates and is a *separate, currently secondary path*. The lack of a stable engine ZIP does not mean the built-in source-building updater is missing or unusable.
+- **Default for future changes:** commit source changes; verify the relevant GitHub Actions builds; use the **already installed in-editor updater** to compile/install the next revision with its prompts and backups; then confirm the installed source commit and editor behaviour. **Do not tell the owner to download a ZIP or run `START_PW_TEST_BUILD.cmd` for each ordinary update.**
+- **Fallback / safety:** the independent `START_PW_TEST_BUILD.cmd` / `tools/pw-local-test.ps1` route creates a separate test installation for diagnosing regressions or a broken updater. The built-in updater can replace files in the selected local installation after approval, so backups, version verification and actual launch testing remain important. A previously reported updater failure was a real compile error; newer source fixed the identified C++ errors and improved diagnostics, but subsequent errors must be examined from the full updater log.
+- References: [current source-building updater](PW_WINDOWS_UPDATER_EXE.md), [separate legacy stable-release helper](PW_EDITION_UPDATER.md). **The in-engine updater's presence is owner-confirmed**, while the exact newest revision's local installation remains to be checked.
+
 ## Current delivery and build truth
 
 | Stage | Verified state |
 | --- | --- |
 | Code committed on active branch | Yes, through `e0dcd44e` before this handoff edit (latest editor code was already compiled at `4716fe95`) |
 | Targeted source and UI checks | Passed for the Asset Inspector revision |
-| Entire GameGuru Core Release x64 CI compile | **Passed** — run #44994266761 |
+| Entire GameGuru Core Release x64 CI compile | **Passed** — run #44999138941 at `9248ed24` |
 | Compiled editor included as downloadable artifact in that CI run | **No** — artifact list empty |
 | Local Windows editor test / original Steam overlay | **Not verified** for this revision |
-| Updater install and restart, end-to-end | **Not verified** |
+| In-engine updater included in owner's current build | **Yes — owner-confirmed**; integrated source-building updater is already present |
+| Latest revision installed and accepted using in-engine updater | **Not independently verified**; requires local update result, installed commit and runtime test |
 | Production-ready release / PR merged to master | **No** — PR #1 is draft |
 
-A successful CI run resolves the previous *build failure*. It does **not** mean the user has a downloadable new update.
+CI compilation resolves the previous reported compiler failure; the **built-in source-building updater already exists** and does not require a publicly distributed GameGuru engine artifact. Passing CI does not guarantee the newest local update or runtime will succeed.
 
 ## Local Windows test-build preparation (22 November 2026)
 
@@ -60,11 +73,9 @@ A successful CI run resolves the previous *build failure*. It does **not** mean 
 - [Windows local-script CI](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/workflows/pw-local-build-script-validation.yml) checks PowerShell syntax and rejects harmful destinations using synthetic placeholder Steam files. The first negative-path test harness left an expected non-zero child exit code (run #44999006585); the correction at `e0dcd44e` **passed** Windows PowerShell syntax, destructive-destination rejection and Steam import-metadata checks in [CI run #44999063741](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44999063741). This is not a local editor or Steam acceptance test.
 - This is **not** evidence of a successful local Steam overlay, editor launch or visual preview. It is a safer path to obtain those results without distributing the proprietary executable.
 
-### Local next-step instructions
+### Fallback isolated-test instructions (NOT the default update method)
 
-1. Fetch the current development branch and double-click `START_PW_TEST_BUILD.cmd`; select the *licensed Steam GameGuru Classic* folder. Use a machine with Visual Studio 2022 Desktop C++/MFC dependencies. **Do not use the old in-engine updater for this test.**
-2. Start `PW-TestInstall\Guru-MapEditor.exe` **directly**, not Steam's Play action. Consult `PW-TestInstall\PW-TESTING-README.txt`, which records the built commit, editor SHA-256 and detailed Inspector / import checks.
-3. Bring back the first failed step, exact error and tested source commit. Fix reproducible faults in the branch, rerun CI, then repeat the local test. Only consider updater acceptance after passing actual editor/runtime tests.
+Use `START_PW_TEST_BUILD.cmd` and the separate `PW-TestInstall\\Guru-MapEditor.exe` **only for safe isolation, or when the integrated updater is failing**. For ordinary ongoing revisions, the **existing in-editor PW Edition updater** remains the expected first route, with approval prompts and backups. The generated `PW-TESTING-README.txt` documents the manual test route.
 
 ## Next actions, in priority order
 
@@ -72,11 +83,12 @@ A successful CI run resolves the previous *build failure*. It does **not** mean 
 
 - [x] Full Windows x64 compile of source including Asset Inspector succeeded in run #44994266761.
 - [x] Implement/source-check the **safer local build/staging path** and acceptance checklist; Windows local-script validation passed in run #44999063741. No compiled proprietary artifact has been published.
-- [ ] **Owner-side build and launch still required:** run `START_PW_TEST_BUILD.cmd` on the licensed Windows PC, then launch `PW-TestInstall\Guru-MapEditor.exe` and confirm identity/runtime. Do not install over Steam or publish proprietary binaries.
+- [x] **In-engine updater already exists in the owner's current installation** (owner-confirmed and source-backed). Do not rebuild or manually ZIP-install the editor as the routine update process.
+- [ ] **Next local acceptance:** use the existing PW Edition in-editor updater to build/install the new revision with its backup/confirmation flow, launch PW Edition and verify the installed commit. If the updater errors, inspect its logs before falling back to the separate local test-build route.
 - [ ] Run **local editor smoke test**: launch map editor, confirm toolbar/Classic UI and docked bottom browser; open Asset Inspector; browse nested folders; preview actual PNG/DDS and stock models; rotate/zoom; test missing files; insert stock FPE and an FBX; verify placement in front of camera, undo, hierarchy, map save/reopen.
 - [ ] Confirm FBX thumbnail generation, texture-path handling and scene placement; verify no failed imports create ghost assets.
 - [ ] Confirm cloned skybox and grass textures with multiple grass styles survive save/reopen and exported game. Confirm existing native mesh/UV behaviour.
-- [ ] Only after local acceptance, test updater on a **disposable** PW installation, including integrity checks, error handling, rollback and optional restart.
+- [ ] Independently validate the **existing updater's reliability** on a disposable PW install, including integrity checks, backups/rollback and optional restart. This does not mean the updater is missing from the current editor.
 
 ### P1 — Remaining editor workflow fixes
 
@@ -103,7 +115,7 @@ See [README.md](../README.md), [technical roadmap](PIXELWOLF_CLASSIC_ROADMAP.md)
 4. Do the requested engineering work on a development branch, run available checks, and report specific commits, CI results and any untested limitations.
 5. **Before ending a development turn with meaningful changes, update this handoff** with the latest verified state, blockers and next three concrete actions. If changes require a roadmap update, update its specific line as well; do not duplicate every long changelog here.
 6. **Read the handoff back from GitHub after writing**, to verify persistence. Avoid claiming writes or builds succeeded until tool results confirm them.
-7. Do not reintroduce owner-rejected behaviour: undocked duplicate browser, altered Classic icons, GLB presented as working, or mesh-based custom grass/skyboxes.
+7. Do not reintroduce owner-rejected behaviour: undocked duplicate browser, altered Classic icons, GLB presented as working, or mesh-based custom grass/skyboxes. **Never forget the already-integrated updater, or default to manual ZIP installation.**
 8. When owner requests "continue GG Classic" in a fresh chat, use the repository first and proceed from the next uncompleted gate; ask only for genuinely missing inputs that block actual work.
 
 ### Suggested resume message
