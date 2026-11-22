@@ -531,13 +531,10 @@ void imgui_terrain_loop(void)
 			t.terrain.grassupdateafterterrain = 1;
 			grass_loop();
 			t.terrain.grassupdateafterterrain = 0;
-            // Never re-show Classic's one-atlas grid over the PW multi-style instances.
-            // The old grid and our mixed blades occupy the same painted terrain,
-            // so rendering both causes z-fighting and makes one texture dominate.
-            if (PWGrassMix::OwnsGrid())
-                HideVegetationGrid();
-            else
-                ShowVegetationGrid();
+            // The native Classic species always remains the reliable base.
+            // PW's separate secondary species are overlay objects, not a
+            // replacement for the original vegetation renderer.
+            ShowVegetationGrid();
 			visuals_justshaderupdate();
 			iLastUpdateVeg = Timer();
 		}
@@ -577,13 +574,10 @@ void imgui_terrain_loop(void)
 			t.terrain.grassupdateafterterrain = 1;
 			grass_loop();
 			t.terrain.grassupdateafterterrain = 0;
-            // Never re-show Classic's one-atlas grid over the PW multi-style instances.
-            // The old grid and our mixed blades occupy the same painted terrain,
-            // so rendering both causes z-fighting and makes one texture dominate.
-            if (PWGrassMix::OwnsGrid())
-                HideVegetationGrid();
-            else
-                ShowVegetationGrid();
+            // The native Classic species always remains the reliable base.
+            // PW's separate secondary species are overlay objects, not a
+            // replacement for the original vegetation renderer.
+            ShowVegetationGrid();
 
 			//visuals_justshaderupdate();
 			bReadyToUpdateVeg = false;
@@ -1265,7 +1259,8 @@ void imgui_terrain_loop(void)
                                 ImGui::Text("%s: %.0f%%", slot.style.c_str(),
                                     100.f * slot.weight / total);
                         }
-                        ImGui::TextDisabled("Experimental mixer: 320 objects maximum; not native grid coverage.");
+                        ImGui::TextDisabled("Classic remains the first species; preview adds other species.");
+                        ImGui::TextDisabled("Overlay preview limited to 320 instances; ratios are experimental.");
                     }
                     else
                         ImGui::TextDisabled("Select at least two enabled types to mix. One type uses Classic grass.");
@@ -1283,7 +1278,7 @@ void imgui_terrain_loop(void)
                         ImGui::TextDisabled("Safe mode: Classic grass remains visible; selected mix is saved.");
                     else
                     {
-                        ImGui::TextDisabled("Diagnostic preview only. If grass vanishes, turn this off.");
+                        ImGui::TextDisabled("Secondary grass overlay preview. Classic base remains visible.");
                         const std::string pwGrassDiag = PWGrassMix::Diagnostics();
                         ImGui::TextUnformatted(pwGrassDiag.c_str());
                         ImGui::TextDisabled("Visible flags do not prove blades were drawn on screen.");
@@ -4447,16 +4442,10 @@ void terrain_shadowupdate ( void )
                 if (t.game.gameloop != 0)
 				#endif
                 {
-                    if (PWGrassMix::OwnsGrid())
-                    {
-                        HideVegetationGrid();
-                        PWGrassMix::SetInstancesVisible(true);
-                    }
-                    else
-                    {
-                        ShowVegetationGrid();
-                        PWGrassMix::SetInstancesVisible(false);
-                    }
+                    // Restore Classic's grid AND the secondary grass overlay
+                    // after the shadow pass; never hide Classic in mixed mode.
+                    ShowVegetationGrid();
+                    PWGrassMix::SetInstancesVisible(PWGrassMix::OwnsGrid());
                 }
                 else PWGrassMix::SetInstancesVisible(false);
 			}
