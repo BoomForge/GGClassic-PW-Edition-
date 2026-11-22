@@ -913,8 +913,8 @@ void imgui_terrain_loop(void)
                 if (ImGui::Button("Import Sky Style..."))
                     delay_terrain_execute = 2;
                 if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Choose skyspec.txt from a Classic sky folder containing its matching DBO or X model.");
-                ImGui::TextDisabled("Installs to skybank and refreshes available skies.");
+                    ImGui::SetTooltip("Choose one image. PW Edition clones the selected native sky style and applies this texture automatically.");
+                ImGui::TextDisabled("Automatically creates and selects a new sky style using the existing sky dome.");
 				ImGui::Indent(-10);
 				ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX(), ImGui::GetCursorPosY() + 3));
 
@@ -1185,8 +1185,8 @@ void imgui_terrain_loop(void)
                 if (ImGui::Button("Import Grass Style..."))
                     delay_terrain_execute = 3;
                 if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Choose veg.DBO or veg.X from a Classic vegetation folder containing grass.dds or grass.png.");
-                ImGui::TextDisabled("Installs to vegbank and refreshes available grasses.");
+                    ImGui::SetTooltip("Choose one image. PW Edition clones the selected native grass style and applies this texture automatically.");
+                ImGui::TextDisabled("Automatically creates and selects a new grass style using the existing grass mesh.");
 
                 if (ImGui::CollapsingHeader("Mix Multiple Grass Types", ImGuiTreeNodeFlags_DefaultOpen))
                 {
