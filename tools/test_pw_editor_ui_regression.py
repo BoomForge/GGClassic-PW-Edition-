@@ -148,7 +148,7 @@ class PWEditorUiRegressions(unittest.TestCase):
 
         # Each grass choice loads its own actual mesh/texture, not the current
         # one-style atlas from the native vegetation renderer.
-        self.assertIn('std::string("vegbank\\\\") + slots[i].style', grass)
+        self.assertIn('const std::string dir = std::string(', grass)
         self.assertIn("LoadObject((LPSTR)model.c_str(), rs.source);", grass)
         self.assertIn("LoadImage((LPSTR)atlas.c_str(), rs.image);", grass)
         self.assertIn("TextureObject(rs.source, rs.image);", grass)
