@@ -57,8 +57,12 @@ namespace PWImport
                                    Exists exists)
     {
         if (reference.empty()) return "";
-        // The FBX may refer to a former absolute location; honour it if present.
-        if (exists(reference)) return reference;
+        // Only trust an existing reference as-is when it is rooted. Unrooted
+        // names otherwise resolve against GameGuru's temporary working folder,
+        // which may contain a stale texture from a previous import.
+        const bool absolute = reference[0] == '/' || reference[0] == '\\' ||
+                              (reference.size() > 1 && reference[1] == ':');
+        if (absolute && exists(reference)) return reference;
         const std::string base = BaseName(reference);
         if (base.empty()) return "";
         const std::string folder = Folder(originalFolder);

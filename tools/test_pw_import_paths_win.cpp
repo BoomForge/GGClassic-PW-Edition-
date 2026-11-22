@@ -32,6 +32,10 @@ int main()
     // Missing PNG falls back to existing DDS (never removes DDS support).
     assert(PWImport::FindTexture("C:\\Models\\Hero", "Z:\\missing\\hair_D.png", exists) == "C:\\Models\\Hero\\hair_D.dds");
     assert(PWImport::FindTexture("C:\\Models\\Hero", "C:\\elsewhere\\Face_normal.jpg", exists) == "C:\\Models\\Hero\\Face_normal.tga");
+    // Never pick an unrooted texture found in the temporary CWD ahead of
+    // the texture next to the owner's model.
+    assert(PWImport::FindTexture("C:\\Models\\Hero", "body_color.png", exists)
+        == "C:\\Models\\Hero\\body_color.png");
     assert(PWImport::FindTexture("C:\\Models\\Hero", "no_match.png", exists).empty());
     assert(PWImport::FindTexture("C:\\Models\\Hero", "", exists).empty());
 
