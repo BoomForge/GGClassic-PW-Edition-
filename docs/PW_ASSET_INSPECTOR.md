@@ -20,9 +20,11 @@ The build failure reported by the updater was not caused by warning C4267/C4305.
 
 The updater now retains compiler error lines for its failure dialog instead of displaying only the final warnings.
 
+**Updated build verification (22 November 2026):** The Inspector-inclusive full Windows x64 CI build **passed** at source commit `4716fe95` in [run #44994266761](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44994266761). All full-compile and staged-file checks passed, but the workflow published **no downloadable build artifact**. Source compilation does not establish local runtime correctness, Steam overlay success, or an updater release.
+
 The Asset Inspector is **source-implemented but not yet confirmed in a local interactive editor session**. Required user acceptance:
 
-1. Full Windows x64 compile on the latest commit.
+1. [x] Full Windows x64 compile at source `4716fe95` passed (run #44994266761); recheck on later source changes.
 2. Open Asset Inspector and verify the persistent docked browser and Classic icons do not change.
 3. Browse several nested entitybank folders, inspect PNG/DDS images and FPE/DBO/X/FBX models.
 4. Drag-to-rotate and wheel-to-zoom without changing the scene camera.
