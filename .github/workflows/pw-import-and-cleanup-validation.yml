@@ -8,6 +8,14 @@ on:
       - "GameGuru Core/GameGuru/Include/PW-ThumbnailCheck.h"
       - "GameGuru Core/GameGuru/Include/PW-StyleImport.h"
       - "GameGuru Core/GameGuru/Include/PW-TerrainStyleUI.h"
+      - "GameGuru Core/GameGuru/Include/PW-EnvironmentImport.h"
+      - "GameGuru Core/GameGuru/Include/PW-EnvironmentStyleSettings.h"
+      - "GameGuru Core/GameGuru/Include/PW-GrassMix.h"
+      - "GameGuru Core/GameGuru/Source/M-Grass.cpp"
+      - "GameGuru Core/GameGuru/Source/M-Sky.cpp"
+      - "GameGuru Core/GameGuru/Source/M-MapFile.cpp"
+      - "tools/test_pw_grass_mix.cpp"
+      - "tools/test_pw_environment_style.cpp"
       - "GameGuru Core/GameGuru/Source/M-Terrain.cpp"
       - "GameGuru Core/GameGuru/Source/M-GridEdit.cpp"
       - "tools/test_pw_style_import_win.cpp"
@@ -49,6 +57,10 @@ jobs:
           if errorlevel 1 exit /b 1
           cl.exe /nologo /std:c++14 /EHsc /W4 /WX /I "GameGuru Core\GameGuru\Include" "tools\test_pw_thumbnail_check.cpp" /Fe:pw-thumbnail-test.exe
           if errorlevel 1 exit /b 1
+          cl.exe /nologo /std:c++14 /EHsc /W4 /WX /I "GameGuru Core\GameGuru\Include" "tools\test_pw_grass_mix.cpp" /Fe:pw-grass-mix-test.exe
+          if errorlevel 1 exit /b 1
+          cl.exe /nologo /std:c++14 /EHsc /W4 /WX /I "GameGuru Core\GameGuru\Include" "tools\test_pw_environment_style.cpp" /Fe:pw-environment-style-test.exe
+          if errorlevel 1 exit /b 1
           cl.exe /nologo /std:c++14 /EHsc /W3 /I "GameGuru Core\Dark Basic Public Shared\Include" "tools\test_pw_occluder_thread_win.cpp" "GameGuru Core\Dark Basic Public Shared\Dark Basic Pro SDK\DarkSDKMore\CPU3D\cThread.cpp" /Fe:pw-occluder-test.exe
           if errorlevel 1 exit /b 1
       - name: Run importer path and repeated thread cleanup
@@ -62,6 +74,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Sky/grass style installer tests failed' }
           ./pw-thumbnail-test.exe
           if ($LASTEXITCODE -ne 0) { throw 'Thumbnail BMP content checks failed' }
+          ./pw-grass-mix-test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Weighted grass mix checks failed' }
+          ./pw-environment-style-test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Environment style settings checks failed' }
           python "GameGuru Core/GameGuru/Shaders and Scripts/PWTools/pw_glb_to_fbx.py" --self-test
           if ($LASTEXITCODE -ne 0) { throw 'Blender bridge script self-check failed' }
           ./pw-occluder-test.exe
