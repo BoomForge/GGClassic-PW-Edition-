@@ -135,6 +135,18 @@ Acceptance criteria:
 
 All four requests require source implementation, standalone tests and actual Windows gameplay acceptance. Their presence on the roadmap is not proof of a fix.
 
+## Editor UX request — safely remove custom assets (22 November 2026)
+
+**User observation:** After the `SerineTest` FBX import produced a green thumbnail and an unusable entity, the owner manually deleted the imported files because there is no convenient in-editor asset deletion. This should be fixed independently of the FBX import defect.
+
+- [ ] Add **Delete imported asset…** to the bottom Asset Browser for verified user-created entities under `Files/entitybank/user/`; do not allow deleting original built-in, Steam, DLC, purchased or shared asset packs through this option.
+- [ ] Show a confirmation dialog with the exact entity and planned file operations, offer safe recovery (Recycle Bin or undoable quarantine), and never remove arbitrary files using unvalidated relative paths.
+- [ ] Refuse to delete entities referenced by the current scene; ideally check all known map dependencies. Do not remove shared textures or files still referenced by other entities.
+- [ ] After safe deletion, remove stale thumbnails/selection entries and refresh the browser without requiring editor restart; test cancellation, deleted/missing files, active scene references and large folders.
+- [ ] Treat unsuccessful FBX/GLB imports as failed operations, with diagnostic messages, rather than publishing ghost model entries that require manual clean-up.
+
+**Status:** tracked, not implemented. The separate imported-geometry validation is implemented in source and its automated tests pass, but in-editor deletion and local runtime acceptance remain pending.
+
 ## Implementation rules
 
 1. Protect the upstream-compatible `master` branch. Use separate branches and PRs for improvements.
