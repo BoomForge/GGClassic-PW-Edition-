@@ -531,12 +531,20 @@ void imgui_terrain_loop(void)
 			t.terrain.grassupdateafterterrain = 1;
 			grass_loop();
 			t.terrain.grassupdateafterterrain = 0;
-			ShowVegetationGrid();
+            // Never re-show Classic's one-atlas grid over the PW multi-style instances.
+            // The old grid and our mixed blades occupy the same painted terrain,
+            // so rendering both causes z-fighting and makes one texture dominate.
+            if (PWGrassMix::Active() && PWGrassMix::Ready())
+                HideVegetationGrid();
+            else
+                ShowVegetationGrid();
 			visuals_justshaderupdate();
 			iLastUpdateVeg = Timer();
 		}
-		else 
+		else
 		{
+            // The toggle must hide PW-owned objects as well as Classic's grid.
+            PWGrassMix::ResetInstances();
 			HideVegetationGrid();
 			iLastUpdateVeg = Timer();
 		}
@@ -569,7 +577,13 @@ void imgui_terrain_loop(void)
 			t.terrain.grassupdateafterterrain = 1;
 			grass_loop();
 			t.terrain.grassupdateafterterrain = 0;
-			ShowVegetationGrid();
+            // Never re-show Classic's one-atlas grid over the PW multi-style instances.
+            // The old grid and our mixed blades occupy the same painted terrain,
+            // so rendering both causes z-fighting and makes one texture dominate.
+            if (PWGrassMix::Active() && PWGrassMix::Ready())
+                HideVegetationGrid();
+            else
+                ShowVegetationGrid();
 
 			//visuals_justshaderupdate();
 			bReadyToUpdateVeg = false;
@@ -4401,10 +4415,18 @@ void terrain_shadowupdate ( void )
 			if (  t.hardwareinfoglobals.nograss == 0 ) 
 			{
 				#ifdef ENABLEIMGUI
-				if (  t.game.gameloop  !=  0 || bEnableVeg )  ShowVegetationGrid (  );
+                if (t.game.gameloop != 0 || bEnableVeg)
 				#else
-				  if (t.game.gameloop != 0)  ShowVegetationGrid();
+                if (t.game.gameloop != 0)
 				#endif
+                {
+                    // Cascaded shadows temporarily hide the native grid.
+                    // Do NOT restore it when PW's mixed grass is on screen.
+                    if (PWGrassMix::Active() && PWGrassMix::Ready())
+                        HideVegetationGrid();
+                    else
+                        ShowVegetationGrid();
+                }
 			}
 
 			//  show water in editor
