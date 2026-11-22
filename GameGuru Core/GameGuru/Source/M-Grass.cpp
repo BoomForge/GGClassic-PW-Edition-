@@ -8,6 +8,7 @@
 #include "PW-StyleImport.h"
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -755,9 +756,15 @@ void ResetInstances() {
     ready = false;
     lastCameraCellX = lastCameraCellZ = -999999;
     builtRevision = 0;
+    allocatedBase = 0;
+}
+static std::string ConfigPath(const std::string& folder) {
+    if (folder.empty()) return "pw_grassmix.cfg";
+    return folder + ((folder.back() == '\\' || folder.back() == '/') ? "" : "\\")
+        + "pw_grassmix.cfg";
 }
 void Save(const std::string& levelFolder) {
-    const std::string cfg = levelFolder + "pw_grassmix.cfg";
+    const std::string cfg = ConfigPath(levelFolder);
     if (!Active()) { DeleteFileA(cfg.c_str()); return; }
     std::ofstream out(cfg, std::ios::binary | std::ios::trunc);
     if (!out) return;
@@ -768,7 +775,7 @@ void Save(const std::string& levelFolder) {
 void Load(const std::string& levelFolder) {
     ResetInstances();
     for (int i = 0; i < MaxStyles; ++i) slots[i] = Slot();
-    std::ifstream in(levelFolder + "pw_grassmix.cfg", std::ios::binary);
+    std::ifstream in(ConfigPath(levelFolder), std::ios::binary);
     std::string line;
     if (!std::getline(in, line) || line != "PW_GRASS_MIX_V1") {
         ++revision; return;
