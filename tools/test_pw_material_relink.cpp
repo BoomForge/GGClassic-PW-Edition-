@@ -19,8 +19,6 @@ int main() {
     assert(PWMaterialRelink::SupportedTexture("a.bmp"));
     assert(!PWMaterialRelink::SupportedTexture("a.fbx"));
     assert(!PWMaterialRelink::SupportedTexture(""));
-    assert(PWMaterialRelink::SourceFolder("C:\\models\\hero.fbx") == "C:\\models\\");
-    assert(PWMaterialRelink::SourceFolder("hero.fbx").empty());
 
     const std::set<std::string> assets {
         "C:\\models\\body.dds",
@@ -30,20 +28,25 @@ int main() {
     };
     const auto exists = [&assets](const std::string& s) { return assets.count(s) != 0; };
     assert(PWMaterialRelink::Suggest(
-        "Z:\\removed\\body.png", "C:\\models\\hero.fbx",
+        "Z:\\removed\\body.png", "C:\\models\\",
         "C:\\ggc\\importer\\temp\\", exists) == "C:\\models\\body.png");
     assert(PWMaterialRelink::Suggest(
-        "Z:\\removed\\body.jpg", "C:\\models\\hero.fbx",
+        "Z:\\removed\\body.jpg", "C:\\models\\",
         "C:\\ggc\\importer\\temp\\", exists) == "C:\\models\\body.dds");
     assert(PWMaterialRelink::Suggest(
-        "eyes.png", "C:\\models\\hero.fbx",
+        "eyes.png", "C:\\models\\",
         "C:\\ggc\\importer\\temp\\", exists) == "C:\\ggc\\importer\\temp\\eyes.png");
     assert(PWMaterialRelink::Suggest(
-        "missing.jpg", "C:\\models\\hero.fbx",
+        "missing.jpg", "C:\\models\\",
         "C:\\ggc\\importer\\temp\\", exists).empty());
     assert(PWMaterialRelink::Suggest(
-        "", "C:\\models\\hero.fbx",
+        "", "C:\\models\\",
         "C:\\ggc\\importer\\temp\\", exists).empty());
+
+    // The GameGuru source path is a directory, often already slash-terminated.
+    assert(PWMaterialRelink::Suggest(
+        "body.jpg", "C:\\models",
+        "C:\\ggc\\importer\\temp\\", exists) == "C:\\models\\body.dds");
     std::cout << "PW Model Importer 2 M2 material relink preflight: PASS\n";
     return 0;
 }
