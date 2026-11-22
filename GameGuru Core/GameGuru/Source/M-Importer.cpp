@@ -7565,7 +7565,25 @@ void import_generate_thumb(void)
 	}
 	bool b6002 = false; if (ObjectExist(6002) == 1) { b6002 = GetVisible(6002); HideObject(6002); }
 	bool b6003 = false; if (ObjectExist(6003) == 1) { b6003 = GetVisible(6003); HideObject(6003); }
+    // The model must be included in this isolated capture even if the
+    // previous importer panel had hidden it for collision editing.
+    const bool pwWasModelVisible = ObjectExist(t.importer.objectnumber)
+        && GetVisible(t.importer.objectnumber);
+    if (ObjectExist(t.importer.objectnumber))
+        ShowObject(t.importer.objectnumber);
+#if defined(ENABLEIMGUI) && !defined(USEOLDIDE)
+    // Match the established PW scene-thumbnail routine (M-GridEdit.cpp):
+    // render camera 0 without ImGui overlays before grabbing its surface.
+    extern bool bImGuiInTestGame;
+    const bool pwWasImGuiSuspended = bImGuiInTestGame;
+    bImGuiInTestGame = true;
+    FastSync();
+    bImGuiInTestGame = pwWasImGuiSuspended;
+#else
 	Sync();
+#endif
+    if (!pwWasModelVisible && ObjectExist(t.importer.objectnumber))
+        HideObject(t.importer.objectnumber);
 	if (b6002 == true) ShowObject(6002);
 	if (b6003 == true) ShowObject(6003);
 	RotateObject(t.importerGridObject[8], 0, 0, 0);
@@ -7579,27 +7597,25 @@ void import_generate_thumb(void)
 	extern DBPRO_GLOBAL CCameraManager m_CameraManager;
 	DBPRO_GLOBAL tagCameraData* m_mycam;
 	m_mycam = m_CameraManager.GetData(0);
-	float thumbnail_dimenions = 128;
-	if (m_mycam && m_mycam->pCameraToImageSurface)
-	{
-        // PW Edition: the DX11 importer is drawn into the docked editor camera
-        // viewport, NOT the full desktop-sized display. Cropping using the
-        // full display dimensions captured mostly terrain / green emptiness.
-        float dw = (float)GetChildWindowWidth(-1);
-        float dh = (float)GetChildWindowHeight(-1);
-        if (dw < thumbnail_dimenions || dh < thumbnail_dimenions)
-        {
-            dw = (float)GetDisplayWidth();
-            dh = (float)GetDisplayHeight();
-        }
-		float gi_rectw = (dw*0.5) -(thumbnail_dimenions*0.5);
-		float gi_recth = (dh*0.5) -(thumbnail_dimenions*0.5);
-		extern GlobStruct* g_pGlob;
-		LPGGSURFACE	pTmpSurface = g_pGlob->pCurrentBitmapSurface;
-		g_pGlob->pCurrentBitmapSurface = m_mycam->pCameraToImageSurface;
-		GrabImage(g.importermenuimageoffset + 50, gi_rectw, gi_recth, gi_rectw + thumbnail_dimenions, gi_recth + thumbnail_dimenions, 0);
-		g_pGlob->pCurrentBitmapSurface = pTmpSurface;
-	}
+    const float thumbnail_dimensions = 128.0f;
+    if (m_mycam && m_mycam->pCameraToImageSurface &&
+        m_mycam->viewPort3D.Width >= thumbnail_dimensions &&
+        m_mycam->viewPort3D.Height >= thumbnail_dimensions)
+    {
+        // Use the actual camera render-target viewport, just like the
+        // existing scene thumbnail capture in M-GridEdit.cpp. Child window
+        // or desktop sizes can point into the solid green clear region.
+        const float grabX = m_mycam->viewPort3D.Width * 0.5f - thumbnail_dimensions * 0.5f;
+        const float grabY = m_mycam->viewPort3D.Height * 0.5f - thumbnail_dimensions * 0.5f;
+        extern GlobStruct* g_pGlob;
+        LPGGSURFACE previous = g_pGlob->pCurrentBitmapSurface;
+        g_pGlob->pCurrentBitmapSurface = m_mycam->pCameraToImageSurface;
+        GrabImage(g.importermenuimageoffset + 50, grabX, grabY,
+            grabX + thumbnail_dimensions, grabY + thumbnail_dimensions, 0);
+        g_pGlob->pCurrentBitmapSurface = previous;
+    }
+    else
+        OutputDebugStringA("PW IMPORT THUMBNAIL: camera viewport/surface missing or smaller than 128px.\\n");
 #else
 	GrabImage(g.importermenuimageoffset + 50, 0, 0, 64, 64, 3);
 #endif
