@@ -7,8 +7,7 @@ revision are still required.
 
 ## Single-image environment import (user-approved workflow)
 
-In **Terrain Tools > Customize Sky**, select an existing native sky style as
-the template and click **Import Sky Style...**. Select **only an image**.
+In **Terrain Tools > Customize Sky**, keep the current native sky style (or let the engine choose a valid default) and click **Import Sky Style...**. Select **only an image**.
 The engine automatically:
 
 1. Clones the selected sky's pre-existing GameGuru geometry, skyspec/shader
@@ -18,16 +17,15 @@ The engine automatically:
 4. Generates a safe, unique style name derived from the image file name and
    selects the new style.
 
-In **Terrain Tools > Customize Vegetation**, select an existing native grass
-style as the template and click **Import Grass Style...**. Select **only an
+In **Terrain Tools > Customize Vegetation**, use the current native grass style (or let the engine choose a compatible default) and click **Import Grass Style...**. Select **only an
 image**. The engine automatically clones the selected vegetation mesh and
 configuration, copies the selected texture as `grass.<ext>`, saves the new
 vegbank style and makes it active.
 
 **There is no imported mesh, FBX/GLB/DBO/X selection, model-importer screen,
 manual texture-material setup, or scale/yaw slider in either workflow.**
-The user supplies the image; the currently selected in-engine style determines
-the geometry, UVs, shading and default scale/orientation. The engine never
+The user supplies only the image; the current native style, or an automatically
+chosen compatible in-engine template, determines the geometry, UVs, shading and default scale/orientation. The engine never
 overwrites the original style. PNG, DDS, JPG, JPEG, BMP and TGA are accepted.
 Images still need to be compatible with the chosen native template's UV atlas
 layout to look correct; the engine does not reconstruct UVs or invent geometry
