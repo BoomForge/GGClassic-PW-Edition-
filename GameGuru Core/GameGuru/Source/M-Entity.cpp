@@ -3131,7 +3131,10 @@ void entity_loadtexturesandeffect ( void )
                 const std::string png = PWMultiMaterialFallback::ResolveMissingDDS(
                     pwFolder, embedded ? embedded : "", pwExists);
                 if (png.empty()) continue;
-                int imageID = loadinternaltextureex((LPSTR)png.c_str(), 1, t.tfullorhalfdivide);
+                cstr pwTextureFile;
+                pwTextureFile = png.c_str();
+                int imageID = pw_load_entity_texture_with_png_fallback(
+                    pwTextureFile, 1, t.tfullorhalfdivide);
                 if (imageID > 0)
                 {
                     SetBaseTextureStage(m, 0, imageID);
