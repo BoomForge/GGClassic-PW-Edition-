@@ -24182,18 +24182,33 @@ void process_entity_library(void)
                                                                 PWImportedGeometry::Inspect(
                                                                     t.entid > 0 && ObjectExist(pwBankObject)
                                                                         ? GetObjectData(pwBankObject) : nullptr);
-                                                            if (!pwAsset.usable)
+                                                            const float pwX = ObjectExist(pwBankObject)
+                                                                ? ObjectSizeX(pwBankObject, 2) : 0.0f;
+                                                            const float pwY = ObjectExist(pwBankObject)
+                                                                ? ObjectSizeY(pwBankObject, 2) : 0.0f;
+                                                            const float pwZ = ObjectExist(pwBankObject)
+                                                                ? ObjectSizeZ(pwBankObject, 2) : 0.0f;
+                                                            if (!pwAsset.usable ||
+                                                                !PWImportedGeometry::SensibleExtent(pwX, pwY, pwZ))
                                                             {
                                                                 t.tasset = 0;
                                                                 t.gridentity = 0;
                                                                 t.inputsys.constructselection = 0;
                                                                 popup_text("Asset could not be placed: FPE model has no usable geometry. Reimport FBX and check DBO output.");
-                                                                OutputDebugStringA(("PW ASSET PLACEMENT BLOCKED: " +
-                                                                    std::string(t.addentityfile_s.Get()) + ": " +
-                                                                    pwAsset.error + "\n").c_str());
+                                                                char pwDiagnostic[512] = {};
+                                                                sprintf_s(pwDiagnostic, sizeof(pwDiagnostic),
+                                                                    "PW ASSET PLACEMENT BLOCKED: %s | vertices=%llu | bounds=%0.4f,%0.4f,%0.4f",
+                                                                    t.addentityfile_s.Get(), pwAsset.vertices, pwX, pwY, pwZ);
+                                                                timestampactivity(0, pwDiagnostic);
+                                                                OutputDebugStringA(pwDiagnostic);
                                                             }
                                                             else
                                                             {
+                                                                char pwDiagnostic[384] = {};
+                                                                sprintf_s(pwDiagnostic, sizeof(pwDiagnostic),
+                                                                    "PW ASSET PLACEABLE: %s | vertices=%llu | bounds=%0.4f,%0.4f,%0.4f",
+                                                                    t.addentityfile_s.Get(), pwAsset.vertices, pwX, pwY, pwZ);
+                                                                timestampactivity(0, pwDiagnostic);
                                                                 t.tasset = t.entid;
                                                                 t.gridentity = t.entid;
                                                                 t.inputsys.constructselection = t.entid;
