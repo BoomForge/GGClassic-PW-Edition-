@@ -930,11 +930,9 @@ void mapeditorexecutable_init ( void )
 	t.terrain.grassupdateafterterrain = 1;
 	grass_loop();
 	t.terrain.grassupdateafterterrain = 0;
-    // Startup must not re-enable Classic's one-style vegetation over PW mix.
-    if (PWGrassMix::OwnsGrid())
-        HideVegetationGrid();
-    else
-        ShowVegetationGrid();
+    // The PW mix preview overlays secondary species; the native grid is
+    // always the safe base, including during editor startup.
+    ShowVegetationGrid();
 	visuals_justshaderupdate();
 
 	// Moved last so we can load levels before main loop.
