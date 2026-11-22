@@ -7474,18 +7474,24 @@ void importer_save_entity ( char *filename )
 	}
 	else
 	{
-		if (GetImageExistEx(g.importermenuimageoffset + 50)) 
-		{
-			//Already generated so.
-			SaveImage(pRealSavethumb, g.importermenuimageoffset + 50);
-		}
-		else 
-		{
-			if (FileExist(pRealSavethumb) == 1) DeleteAFile(pRealSavethumb);
-			import_generate_thumb();
-			SaveImage(pRealSavethumb, g.importermenuimageoffset + 50);
-		}
-		DeleteImage(g.importermenuimageoffset + 50);
+        // PW Edition: the earlier cached thumbnail can contain terrain or a
+        // half-initialised green importer frame. Always render a fresh model
+        // preview after the native DBO has been verified and before the FPE
+        // appears in the asset browser.
+        if (GetImageExistEx(g.importermenuimageoffset + 50))
+            DeleteImage(g.importermenuimageoffset + 50);
+        import_generate_thumb();
+        if (GetImageExistEx(g.importermenuimageoffset + 50))
+        {
+            if (FileExist(pRealSavethumb) == 1) DeleteAFile(pRealSavethumb);
+            SaveImage(pRealSavethumb, g.importermenuimageoffset + 50);
+            DeleteImage(g.importermenuimageoffset + 50);
+        }
+        else
+        {
+            OutputDebugStringA("PW IMPORT THUMBNAIL: fresh preview generation failed; no fake image saved.\n");
+            popup_text("Model was saved, but thumbnail rendering failed; check the model importer preview.");
+        }
 	}
 
 	t.aspect_f=GetDesktopWidth() ; t.aspect_f=t.aspect_f/GetDesktopHeight();
