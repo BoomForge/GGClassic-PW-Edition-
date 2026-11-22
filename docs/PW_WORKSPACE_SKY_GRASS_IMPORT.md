@@ -103,6 +103,17 @@ colour blend.
 - Next diagnostic evidence to request: after updating, check that selecting two styles with experimental preview OFF leaves Classic grass visible; optionally turn preview ON in a disposable test map, capture a screenshot of the statistics and viewport, then turn it OFF. If stats say instances are placed/visible yet the scene is blank, focus on camera, object/material/shader or native vegetation API integration; don't keep modifying only mask weights and instance counts.
 - **Project priority remains a real integrated multi-style grass renderer.** This safety gate intentionally does not satisfy that feature.
 
+## Fourth owner observation — grass visible, but still only one type (22 November 2026)
+
+**Observed:** After the prior safety gate, grass renders again, but selecting multiple types still shows one type. This is **expected for safe mode** because `Preview experimental multi-grass` is OFF by default and Classic's native vegetation grid supports one style. Saved weighted selections alone did not mean the additional style was rendered.
+
+**Next source attempt (through `a8b68916`, Windows compile pending at write time):**
+- The independently generated PW grass objects lacked an assigned **entity shader**, unlike both the Classic native grid and GameGuru's standard entity importer. In DX11 such objects can exist and be marked visible while rendering no pixels. On each *secondary* source model, use `loadinternaleffectunique` for an entity-basic/PBR-basic shader, `SetObjectEffect`, restore the per-style atlas **after** effect assignment (GameGuru's importer warns it can reset texture stages), configure the standard importer `EntityEffectControl` value, and release the effect when clearing instances.
+- The preview is now an **overlay**: the single reliable Classic species remains visible through editor startup, vegetation refresh, the main grass loop and shadow pass; PW creates separately textured additional styles instead of hiding/replacing Classic. It deliberately **skips duplicating the selected native species** to reduce overlap and z-fighting.
+- The on-screen diagnostics list per-style instance counts. A nonzero count and visible flag still do not prove correct rendering; only the user's visual test does.
+- The preview toggle remains **OFF by default**, safe for the owner's existing project. Opting in enables experimental secondary-style overlay on a disposable map. The 320-object budget and original native density mean the 50/50 or 25/75 values are **not yet visually guaranteed** as true final mixed proportions; do not claim weighted mixing is accepted.
+- Full Windows x64 CI and static regression checks must pass; then user uses the **existing built-in updater**, enables *Preview experimental multi-grass*, chooses two very visually different styles, and inspects both viewport and per-style diagnostics. If count for second style is nonzero but it remains invisible, investigate shader/vertex layout/effect constants/camera and texture atlas. Do not label the feature complete until real visual proof.
+
 ## Required acceptance before an install is called ready
 
 1. Compile full Windows x64 editor at the latest branch head.
