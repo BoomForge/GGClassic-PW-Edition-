@@ -91,7 +91,6 @@ extern int g_trialStampDaysLeft;
 int g_tstoreprojectmodifiedstatic = 0;
 
 #ifdef ENABLEIMGUI
-#include "PW-AssetInspector.h"
 void process_entity_library(void);
 void process_entity_library_v2(void);
 // can prevent app from quitting out while in test game
@@ -23474,6 +23473,7 @@ float ImGuiGetMouseY(void)
 }
 
 #ifdef ENABLEIMGUI
+#include "PW-AssetInspector.h"
 void process_entity_library(void)
 {
 	// The PW asset library is a permanent dock, not an optional external dialog.
