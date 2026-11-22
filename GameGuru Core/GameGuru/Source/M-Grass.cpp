@@ -295,7 +295,7 @@ void grass_loop ( void )
             t.terrain.TerrainID, t.terrain.superflat == 1,
             TERRAIN_SUPERFLAT_HEIGHT, t.terrain.grassmemblock,
             t.visuals.VegQuantity_f);
-        if (PWGrassMix::Ready()) HideVegetationGrid(); // Native grid supports only one species.
+        // Hide the native one-style grid after the terrain update below.
     }
     else if (pwWasMixed)
     {
@@ -343,6 +343,8 @@ void grass_loop ( void )
 			UpdateBlitzTerrain ( CameraPositionX(0),CameraPositionZ(0),t.terrain.TerrainID,g.postprocessimageoffset+5 );
 		}
 	}
+    if (pwMixed && PWGrassMix::Ready())
+        HideVegetationGrid();
 }
 
 void grass_clearregion ( void )
