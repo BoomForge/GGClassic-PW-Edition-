@@ -4,6 +4,14 @@
 #include "stdafx.h"
 #include "gameguru.h"
 #include "PW-EnvironmentStyleSettings.h"
+#include "PW-GrassMix.h"
+#include "PW-StyleImport.h"
+#include <array>
+#include <cmath>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
 
 
 // Global
@@ -22,6 +30,7 @@ extern bool bUpdateVeg;
 
 void grass_init ( void )
 {
+    PWGrassMix::ResetInstances(); // release previous map's owned instances
 	//  init our resource values
 	t.tGrassObj=t.terrain.objectstartindex+6;
 	t.tGrassImg=t.terrain.imagestartindex+8;
@@ -275,6 +284,24 @@ void grass_setgrassgridandfade ( void )
 
 void grass_loop ( void )
 {
+    // Weighted PW mix uses real per-style model instances chosen from the
+    // same painted vegetation mask, instead of a cosmetic blend slider.
+    static bool pwWasMixed = false;
+    const bool pwMixed = PWGrassMix::Active() && t.visuals.vegetationmode != 0;
+    if (pwMixed)
+    {
+        PWGrassMix::Refresh(CameraPositionX(0), CameraPositionZ(0),
+            t.terrain.TerrainID, t.terrain.superflat == 1,
+            TERRAIN_SUPERFLAT_HEIGHT, t.terrain.grassmemblock,
+            t.visuals.VegQuantity_f);
+        HideVegetationGrid(); // Classic can draw only one native grass type.
+    }
+    else if (pwWasMixed)
+    {
+        PWGrassMix::ResetInstances();
+        ShowVegetationGrid();
+    }
+    pwWasMixed = pwMixed;
 
 	// early exit if no veg used
 	if ( t.visuals.vegetationmode == 0  )  return;
@@ -399,6 +426,7 @@ void grass_updategrassfrombitmap ( void )
 	
 	//this was only required because images are loading in RGBA, when they should be BGRA (as it was with DX9!!)
 	//ConvertVegMemblock ( t.terrain.grassmemblock );
+    PWGrassMix::Dirty();
 
 	// slopes and water can't exist in superflat mode, so only delete invalid grass in terrain mode
 	if ( t.terrain.superflat == 0  )  DeleteInvalidGrass (  t.terrain.TerrainID,t.terrain.waterliney_f,1.0 );
@@ -506,6 +534,7 @@ void grass_buildblankgrass_fornew ( void )
 
 void grass_free ( void )
 {
+    PWGrassMix::ResetInstances();
 	//  We used to DeleteVegetationGrid (  here to clear away veg. Now to save time during testing we HideVegetationGrid (  instead. ) )
 	HideVegetationGrid (  );
 }
@@ -675,3 +704,182 @@ void grass_paint(void)
 	}
 }
 
+
+
+// -------------------------------------------------------------------------
+// Pixelwolf weighted multi-grass renderer (bounded draw budget).
+// Classic's native vegetation module has one model+atlas only. This renderer
+// instances the actual enabled grass-style meshes against its painted mask;
+// it does NOT claim that a shader-only texture blend changes grass species.
+// -------------------------------------------------------------------------
+namespace PWGrassMix {
+Slot slots[MaxStyles];
+unsigned revision = 1;
+struct RenderStyle {
+    int source = 0;
+    int image = 0;
+    std::vector<int> instances;
+    size_t used = 0;
+};
+static RenderStyle render[MaxStyles];
+static unsigned builtRevision = 0;
+static int lastCameraCellX = -999999, lastCameraCellZ = -999999;
+static bool ready = false;
+static int allocatedBase = 0;
+static int FindFreeId() {
+    if (!allocatedBase)
+        allocatedBase = g.importermenuobjectoffset + 4000;
+    for (int attempt = 0; attempt < 16000; ++attempt) {
+        const int id = allocatedBase++;
+        if (id > 0 && !ObjectExist(id)) return id;
+    }
+    return 0;
+}
+static int FindFreeImageId() {
+    int id = g.importermenuimageoffset + 4000;
+    for (int n = 0; n < 16000; ++n, ++id)
+        if (!ImageExist(id)) return id;
+    return 0;
+}
+void ResetInstances() {
+    for (int i = 0; i < MaxStyles; ++i) {
+        RenderStyle& rs = render[i];
+        for (int id : rs.instances) if (ObjectExist(id)) DeleteObject(id);
+        rs.instances.clear();
+        if (rs.source && ObjectExist(rs.source)) DeleteObject(rs.source);
+        if (rs.image && ImageExist(rs.image)) DeleteImage(rs.image);
+        rs = RenderStyle();
+    }
+    ready = false;
+    lastCameraCellX = lastCameraCellZ = -999999;
+    builtRevision = 0;
+}
+void Save(const std::string& levelFolder) {
+    const std::string cfg = levelFolder + "pw_grassmix.cfg";
+    if (!Active()) { DeleteFileA(cfg.c_str()); return; }
+    std::ofstream out(cfg, std::ios::binary | std::ios::trunc);
+    if (!out) return;
+    out << "PW_GRASS_MIX_V1\n";
+    for (int i = 0; i < MaxStyles; ++i)
+        out << (slots[i].enabled ? 1 : 0) << "|" << slots[i].weight << "|" << slots[i].style << "\n";
+}
+void Load(const std::string& levelFolder) {
+    ResetInstances();
+    for (int i = 0; i < MaxStyles; ++i) slots[i] = Slot();
+    std::ifstream in(levelFolder + "pw_grassmix.cfg", std::ios::binary);
+    std::string line;
+    if (!std::getline(in, line) || line != "PW_GRASS_MIX_V1") {
+        ++revision; return;
+    }
+    for (int i = 0; i < MaxStyles && std::getline(in, line); ++i) {
+        const size_t a = line.find('|'), b = line.find('|', a == std::string::npos ? 0 : a + 1);
+        if (a == std::string::npos || b == std::string::npos) continue;
+        const std::string style = line.substr(b + 1);
+        float weight = 0.f;
+        if (style.empty() || !PWStyleImport::SafeName(style) ||
+            std::sscanf(line.substr(a + 1, b - a - 1).c_str(), "%f", &weight) != 1)
+            continue;
+        slots[i].enabled = line[0] == '1';
+        slots[i].weight = std::max(0.f, std::min(100.f, weight));
+        slots[i].style = style;
+    }
+    ++revision;
+}
+static bool Prepare() {
+    ResetInstances();
+    for (int i = 0; i < MaxStyles; ++i) {
+        if (!slots[i].enabled || slots[i].weight <= 0.f || slots[i].style.empty())
+            continue;
+        const std::string dir = std::string("vegbank\\") + slots[i].style;
+        std::string model = dir + "\\veg.DBO";
+        if (FileExist((LPSTR)model.c_str()) == 0) model = dir + "\\veg.X";
+        if (FileExist((LPSTR)model.c_str()) == 0) return false;
+        std::string atlas = dir + "\\grass.dds";
+        if (FileExist((LPSTR)atlas.c_str()) == 0) atlas = dir + "\\grass.png";
+        if (FileExist((LPSTR)atlas.c_str()) == 0) return false;
+        RenderStyle& rs = render[i];
+        rs.source = FindFreeId();
+        rs.image = FindFreeImageId();
+        if (!rs.source || !rs.image) return false;
+        LoadObject((LPSTR)model.c_str(), rs.source);
+        if (!ObjectExist(rs.source)) return false;
+        LoadImage((LPSTR)atlas.c_str(), rs.image);
+        if (!ImageExist(rs.image)) return false;
+        TextureObject(rs.source, rs.image);
+        const PWEnvironmentStyle::Settings opt = PWEnvironmentStyle::Read(dir);
+        const float scale = 200.f * opt.percent / 100.f;
+        ScaleObject(rs.source, scale, scale, scale);
+        if (opt.yaw != 0.f) YRotateObject(rs.source, opt.yaw);
+        SetObjectTransparency(rs.source, 6);
+        SetObjectMask(rs.source, 1);
+        HideObject(rs.source);
+    }
+    ready = true;
+    builtRevision = revision;
+    return true;
+}
+static bool EnsureInstance(RenderStyle& rs, size_t index) {
+    while (rs.instances.size() <= index) {
+        const int id = FindFreeId();
+        if (!id) return false;
+        InstanceObject(id, rs.source);
+        if (!ObjectExist(id)) return false;
+        SetObjectTransparency(id, 6);
+        SetObjectMask(id, 1);
+        rs.instances.push_back(id);
+    }
+    return true;
+}
+void Refresh(float cameraX, float cameraZ, int terrainId, bool superflat,
+             float flatHeight, int memblockId, float quantity) {
+    if (!MemblockExist(memblockId)) return;
+    if (!ready || builtRevision != revision) {
+        if (!Prepare()) {
+            ResetInstances();
+            // Keep old Classic renderer visible if a mix references bad assets;
+            // caller continues to handle its native grass grid.
+            return;
+        }
+    }
+    const int centerX = static_cast<int>(std::floor(cameraX / 50.f));
+    const int centerZ = static_cast<int>(std::floor(cameraZ / 50.f));
+    if (lastCameraCellX == centerX && lastCameraCellZ == centerZ) return;
+    lastCameraCellX = centerX; lastCameraCellZ = centerZ;
+    for (int i = 0; i < MaxStyles; ++i) render[i].used = 0;
+
+    // 21x21 cells around the player, capped at 320 live instances. No
+    // level-wide per-grass object explosion or per-frame rebuild.
+    unsigned count = 0;
+    const float chanceScale = std::max(0.15f, std::min(1.f, quantity / 20.f));
+    for (int dz = -10; dz <= 10 && count < 320; ++dz)
+    for (int dx = -10; dx <= 10 && count < 320; ++dx) {
+        const int cellX = centerX + dx, cellZ = centerZ + dz;
+        if (cellX < 0 || cellZ < 0 || cellX >= MAXTEXTURESIZE / 2 ||
+            cellZ >= MAXTEXTURESIZE / 2) continue;
+        const int texX = cellX * 2, texZ = cellZ * 2;
+        const int offset = 12 + (texX + texZ * MAXTEXTURESIZE) * 4 + 2;
+        const int mask = ReadMemblockByte(memblockId, offset);
+        if (mask <= 0) continue;
+        const unsigned hash = Hash(unsigned(cellX), unsigned(cellZ));
+        if (Unit(Hash(unsigned(cellX), unsigned(cellZ), 0x42de301u)) >
+            (mask / 255.f) * chanceScale) continue;
+        const int style = Pick(Unit(hash));
+        if (style < 0 || !render[style].source) continue;
+        RenderStyle& rs = render[style];
+        if (!EnsureInstance(rs, rs.used)) continue;
+        const int inst = rs.instances[rs.used++];
+        const float x = (cellX + 0.5f) * 50.f +
+            (Unit(Hash(unsigned(cellX), unsigned(cellZ), 0xabc123u)) - 0.5f) * 36.f;
+        const float z = (cellZ + 0.5f) * 50.f +
+            (Unit(Hash(unsigned(cellX), unsigned(cellZ), 0xdde091u)) - 0.5f) * 36.f;
+        const float y = superflat ? flatHeight : BT_GetGroundHeight(terrainId, x, z);
+        PositionObject(inst, x, y, z);
+        YRotateObject(inst, Unit(Hash(unsigned(cellX), unsigned(cellZ), 0xd123a0u)) * 360.f);
+        ShowObject(inst);
+        ++count;
+    }
+    for (int i = 0; i < MaxStyles; ++i)
+        for (size_t j = render[i].used; j < render[i].instances.size(); ++j)
+            HideObject(render[i].instances[j]);
+}
+} // namespace PWGrassMix
