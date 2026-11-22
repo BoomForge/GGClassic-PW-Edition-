@@ -27,6 +27,12 @@ inline int Count() {
     return count;
 }
 inline bool Active() { return Count() >= 2; }
+// Selecting multiple styles only CONFIGURES a mix. The experimental
+// standalone-mesh renderer must be explicitly enabled to avoid blank maps.
+bool PreviewEnabled();
+bool RenderEnabled();
+void SetPreviewEnabled(bool enabled);
+std::string Diagnostics();
 inline int Pick(float unit) {
     float total = 0.f;
     for (int i = 0; i < MaxStyles; ++i)
