@@ -7,6 +7,7 @@
 #include "gameguru.h"
 #include "PW-ImportPaths.h" // PW Edition: safe Blender/Mixamo texture path handling
 #include "PW-AssetManifest.h" // Shared Model Importer 2 / Character Creator 2 preflight
+#include "PW-MaterialRelink.h" // Model Importer 2 M2: validated slot selection and texture relinking
 #include "PW-SkeletalAudit.h" // Non-destructive GameGuru skeleton/clip inspection
 #include "PW-SkeletalIntegrity.h" // Native skin weight/bind-pose/keyframe consistency verification
 
@@ -2263,6 +2264,65 @@ void imgui_importer_loop(void)
 			}
 			break;
 		}
+        case 5: // Model Importer 2 M2: safe texture replacement for a chosen legacy material slot
+        {
+            iDelayedExecute = 0;
+            const int slot = iDelayedExecuteSelection;
+            if (!PWMaterialRelink::ValidSlot(slot, t.tcounttextures, IMPORTERTEXTURESMAX))
+            {
+                popup_text("Select a valid material slot before replacing its texture.");
+                break;
+            }
+            // Use the existing GameGuru file picker. Unlike the original
+            // replace operation, stage a new image without deleting the old
+            // image or changing the material until the load succeeds.
+            #ifdef _WIN64
+            t.tFileName_s = openFileBox("All Files\0*.*\0DDS\0*.dds\0PNG\0*.png\0JPEG\0*.jpg\0TGA\0*.tga\0BMP\0*.bmp\0", "", "Replace Material Texture", "*.*", IMPORTEROPENFILE);
+            #else
+            t.tFileName_s = openFileBox("All Files|*.*|DDS|*.dds|PNG|*.png|JPEG|*.jpg|TGA|*.tga|BMP|*.bmp|", "", "Replace Material Texture", ".dds", IMPORTEROPENFILE);
+            #endif
+            if (t.tFileName_s == "Error") break;
+            const std::string chosen = t.tFileName_s.Get();
+            if (!PWMaterialRelink::SupportedTexture(chosen) || FileExist(t.tFileName_s.Get()) != 1)
+            {
+                popup_text("Choose an existing DDS, PNG, JPG, TGA or BMP texture.");
+                break;
+            }
+            int stagedImage = g.importermenuimageoffset + 15;
+            int attempts = 0;
+            while (attempts < 50000 && ImageExist(stagedImage) == 1)
+            {
+                ++stagedImage;
+                ++attempts;
+            }
+            if (attempts == 50000)
+            {
+                popup_text("No free image ID for replacement texture.");
+                break;
+            }
+            LoadImage(t.tFileName_s.Get(), stagedImage);
+            if (ImageExist(stagedImage) != 1)
+            {
+                popup_text("Texture could not be loaded; original material retained.");
+                break;
+            }
+            const int originalImage = t.importerTextures[slot].imageID;
+            t.importerTextures[slot].fileName = t.tFileName_s;
+            t.importerTextures[slot].imageID = stagedImage;
+            int populatedSlots = 0;
+            for (int i = 1; i < IMPORTERTEXTURESMAX; ++i)
+                if (strlen(t.importerTextures[i].fileName.Get()) > 0) ++populatedSlots;
+            if (populatedSlots == 1)
+                t.importer.objectFPE.textured = t.tFileName_s;
+            // Keep iOptionalStage / iAssociatedBaseImage and source skeleton
+            // untouched. The existing importer owns preview/DBO/FPE output.
+            importer_applyimagelisttextures(false, slot, false);
+            importer_recreate_texturesprites();
+            if (originalImage > 0 && originalImage != stagedImage && ImageExist(originalImage) == 1)
+                DeleteImage(originalImage);
+            iImporterGenerateThumb = 0;
+            break;
+        }
 		case 3: //Save entity
 		{
 			iDelayedExecute = 0;
@@ -2511,6 +2571,58 @@ void imgui_importer_loop(void)
             }
             else
                 ImGui::TextDisabled("Click Inspect loaded model to collect a snapshot.");
+        }
+
+        // Model Importer 2 M2: expose Classic's real texture slot assignments
+        // and allow a safely staged replacement. This is a manual opt-in path;
+        // it does not rewrite the underlying mesh/skeleton or source FBX.
+        if (ImGui::CollapsingHeader("Model Importer 2 - Materials & Relinking"))
+        {
+            static int pwSelectedMaterialSlot = 1;
+            const int maxSlot = t.tcounttextures < (IMPORTERTEXTURESMAX - 1)
+                ? t.tcounttextures : (IMPORTERTEXTURESMAX - 1);
+            if (maxSlot < 1)
+            {
+                ImGui::TextDisabled("No importer texture slots available for this model.");
+            }
+            else
+            {
+                if (pwSelectedMaterialSlot < 1 || pwSelectedMaterialSlot > maxSlot)
+                    pwSelectedMaterialSlot = 1;
+                ImGui::SliderInt("Texture slot##PWImporter2", &pwSelectedMaterialSlot, 1, maxSlot);
+                const char* stored = t.importerTextures[pwSelectedMaterialSlot].fileName.Get();
+                const std::string reference = stored ? stored : "";
+                ImGui::TextWrapped("Slot %d / %d | native texture stage %d",
+                    pwSelectedMaterialSlot, maxSlot,
+                    t.importerTextures[pwSelectedMaterialSlot].iOptionalStage);
+                ImGui::TextWrapped("Assigned file: %s", reference.empty() ? "(none)" : reference.c_str());
+                const bool exists = !reference.empty() && FileExist((LPSTR)reference.c_str()) == 1;
+                ImGui::TextUnformatted(exists ? "Texture file found." : "Texture file missing or unassigned.");
+                const char* modelName = t.importer.objectFileOriginalPath.Get();
+                const std::string modelPath = modelName ? modelName : "";
+                const auto fileExists = [](const std::string& filename) -> bool {
+                    const DWORD attr = GetFileAttributesA(filename.c_str());
+                    return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) == 0;
+                };
+                const std::string suggestion = PWMaterialRelink::Suggest(
+                    reference, modelPath,
+                    std::string(g.rootdir_s.Get()) + "importer\\temp\\", fileExists);
+                if (!suggestion.empty())
+                {
+                    ImGui::TextWrapped("Existing candidate: %s", suggestion.c_str());
+                    if (ImGui::Button("Copy candidate path##PWImporter2"))
+                        ImGui::SetClipboardText(suggestion.c_str());
+                }
+                if (PWMaterialRelink::ValidSlot(
+                        pwSelectedMaterialSlot, t.tcounttextures, IMPORTERTEXTURESMAX)
+                    && ImGui::Button("Browse and replace selected slot##PWImporter2"))
+                {
+                    iDelayedExecuteSelection = pwSelectedMaterialSlot;
+                    iDelayedExecute = 5; // deferred: avoid file dialogs during an ImGui draw
+                }
+                ImGui::TextWrapped("Replacement preserves the original material if loading fails. The existing Classic importer still applies preview and export textures.");
+                ImGui::TextDisabled("Stage-level editing, UV inspection and material reassignment remain under development.");
+            }
         }
 
         // PW Edition: inspect native skeletons without overwriting bone names,
