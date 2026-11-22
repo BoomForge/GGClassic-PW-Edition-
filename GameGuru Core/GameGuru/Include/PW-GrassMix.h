@@ -45,6 +45,9 @@ inline int Pick(float unit) {
 inline void Dirty() { ++revision; }
 void ResetInstances();
 bool Ready();
+// True only when at least one real mixed instance was populated near the view.
+// Merely loading style resources must NEVER hide Classic's visible grass grid.
+bool OwnsGrid();
 // Match Classic's temporary shadow-pass hide/restore without showing stale instances.
 void SetInstancesVisible(bool visible);
 void InvalidateMask();
