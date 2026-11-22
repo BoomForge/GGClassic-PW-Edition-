@@ -931,7 +931,7 @@ void mapeditorexecutable_init ( void )
 	grass_loop();
 	t.terrain.grassupdateafterterrain = 0;
     // Startup must not re-enable Classic's one-style vegetation over PW mix.
-    if (PWGrassMix::Active() && PWGrassMix::Ready())
+    if (PWGrassMix::OwnsGrid())
         HideVegetationGrid();
     else
         ShowVegetationGrid();
