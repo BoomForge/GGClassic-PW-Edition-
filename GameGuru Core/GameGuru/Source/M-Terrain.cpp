@@ -1184,7 +1184,7 @@ void imgui_terrain_loop(void)
                 if (ImGui::Button("Import Grass Style..."))
                     delay_terrain_execute = 3;
                 if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Choose veg.DBO or veg.X from a Classic vegetation folder containing grass.dds.");
+                    ImGui::SetTooltip("Choose veg.DBO or veg.X from a Classic vegetation folder containing grass.dds or grass.png.");
                 ImGui::TextDisabled("Installs to vegbank and refreshes available grasses.");
 
 				ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX(), ImGui::GetCursorPosY() + 3));
