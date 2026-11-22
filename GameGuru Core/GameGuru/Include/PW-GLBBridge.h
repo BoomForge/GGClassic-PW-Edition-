@@ -96,6 +96,16 @@ inline std::wstring Quote(const std::wstring& value) {
     out += L'"';
     return out;
 }
+inline std::wstring Absolute(const std::wstring& path) {
+    if (path.empty()) return std::wstring();
+    const DWORD n = GetFullPathNameW(path.c_str(), 0, nullptr, nullptr);
+    if (!n || n >= 32768) return std::wstring();
+    std::wstring full(n, L'\0');
+    const DWORD copied = GetFullPathNameW(path.c_str(), n, &full[0], nullptr);
+    if (!copied || copied >= n) return std::wstring();
+    full.resize(copied);
+    return full;
+}
 inline std::wstring Blender() {
     wchar_t env[32768] = {};
     const DWORD n = GetEnvironmentVariableW(L"PW_GLB_BLENDER_EXE", env, 32768);
@@ -130,8 +140,11 @@ inline bool Convert(const std::string& source, const std::string& gameFilesDirec
         problem = "Blender is required for GLB import. Install Blender or set PW_GLB_BLENDER_EXE.";
         return false;
     }
-    std::wstring root = Wide(gameFilesDirectory);
-    if (root.empty()) { problem = "GameGuru Files directory is not valid."; return false; }
+    std::wstring root = Absolute(Wide(gameFilesDirectory));
+    const std::wstring input = Absolute(Wide(source));
+    if (root.empty() || input.empty()) {
+        problem = "GameGuru Files directory or source GLB path is invalid."; return false;
+    }
     if (root.back() != L'\\' && root.back() != L'/') root += L'\\';
     const std::wstring script = root + L"PWTools\\pw_glb_to_fbx.py";
     if (!Exists(script)) {
@@ -154,7 +167,7 @@ inline bool Convert(const std::string& source, const std::string& gameFilesDirec
     const std::wstring output = working + L"model.fbx";
     const std::wstring logfile = working + L"conversion.log";
     std::wstring command = Quote(blender) + L" --background --factory-startup"
-        + L" --python " + Quote(script) + L" -- " + Quote(Wide(source))
+        + L" --python " + Quote(script) + L" -- " + Quote(input)
         + L" " + Quote(output) + L" " + Quote(logfile);
     std::vector<wchar_t> mutableCommand(command.begin(), command.end());
     mutableCommand.push_back(0);
