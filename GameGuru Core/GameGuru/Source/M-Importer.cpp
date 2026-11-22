@@ -107,6 +107,11 @@ extern preferences pref; //cyb
 // Prototypes
 void LoadFBX ( LPSTR pFilename, int iObjectNumber );
 
+// The GLB converter emits images into a unique folder under importer/temp.
+// Keep that folder for texture relinking; searching only importer/temp misses
+// its subfolders and silently leaves stale embedded texture names behind.
+static std::string pwGLBTextureDirectory;
+
 // Convert GLB using an installed Blender, then load its real FBX geometry,
 // materials and armature through the legacy GameGuru importer. Conversion is
 // isolated under Files\importer\temp and never overwrites the source GLB.
@@ -122,6 +127,7 @@ static bool PW_LoadGLBIntoImporter(const char* input, int objectNumber)
         popup_text((LPSTR)problem.c_str());
         return false;
     }
+    pwGLBTextureDirectory = PWImport::DirectoryOf(converted);
     // LoadFBX takes a mutable legacy LPSTR; do not cast away const from
     // the std::string's internal storage.
     std::vector<char> path(converted.begin(), converted.end());
@@ -132,6 +138,7 @@ static bool PW_LoadGLBIntoImporter(const char* input, int objectNumber)
     g_bOverrideXCacheWhenUsingImporter = false;
     if (ObjectExist(objectNumber) != 1)
     {
+        pwGLBTextureDirectory.clear();
         popup_text("Converted GLB could not be loaded by GameGuru's FBX importer.");
         return false;
     }
@@ -1444,7 +1451,17 @@ void importer_applyimagelisttextures ( bool bCubeMapOnly, int iOptionalOnlyUpdat
 						if ( t.importerTextures[iImageListIndex].imageID > 0 )
 						{
 							// diffuse/albedo
-							TextureLimbStage ( t.importer.objectnumber, tLimbIndex, iColorStage, t.importerTextures[iImageListIndex].imageID );
+                            // TextureLimbStage alone changes the runtime image but
+                            // leaves the original FBX (often .dds) stage name in
+                            // the DBO. TextureLimbStageEx also records the real
+                            // PNG/DDS filename, as verified by the Serine case.
+                            if (strlen(pLimbTextureName.Get()) < MAX_STRING)
+                                TextureLimbStageEx(t.importer.objectnumber, tLimbIndex,
+                                    iColorStage, t.importerTextures[iImageListIndex].imageID,
+                                    pLimbTextureName.Get());
+                            else
+                                TextureLimbStage(t.importer.objectnumber, tLimbIndex,
+                                    iColorStage, t.importerTextures[iImageListIndex].imageID);
 
 							// find and load any associated PBR textures for this color texture choice
 							if ( bExpandOutPBRTextureSet == true )
@@ -1737,6 +1754,7 @@ void importer_loadmodel ( void )
 
 	//  load model specified by timporterfile$
 	g_bLoadedFBXModel = false;
+    pwGLBTextureDirectory.clear();
 	t.importer.objectnumber=g.importermenuobjectoffset+1;
 
 	t.importer.objectnumberpreeffectcopy=g.importermenuobjectoffset+3;
@@ -1792,7 +1810,10 @@ void importer_loadmodel ( void )
             }
 			else if ( PWImport::EndsWithI(t.strwork.Get(), ".fbx") )
 			{
+                extern bool g_bOverrideXCacheWhenUsingImporter;
+                g_bOverrideXCacheWhenUsingImporter = true;
 				LoadFBX ( t.strwork.Get(), t.importer.objectnumber );
+                g_bOverrideXCacheWhenUsingImporter = false;
 				//SetObjectRenderMatrixMode ( t.importer.objectnumber, 1 );
 				g_bLoadedFBXModel = ObjectExist(t.importer.objectnumber) == 1;
 			}
@@ -1804,9 +1825,10 @@ void importer_loadmodel ( void )
 		}
 		else
 		{
-            if (PWGLB::IsGLB(t.importer.objectFilename.Get()))
+            if (PWGLB::IsGLB(t.importer.objectFilename.Get()) ||
+                PWImport::EndsWithI(t.importer.objectFilename.Get(), ".fbx"))
             {
-                popup_text("GLB source file is missing; no model was imported.");
+                popup_text("FBX/GLB source file is missing; no model was imported.");
                 importer_free();
                 t.importer.importerActive = 0;
                 #if defined(ENABLEIMGUI) && !defined(USEOLDIDE)
@@ -2047,7 +2069,6 @@ void importer_loadmodel ( void )
 		// absolute texture paths. DDS and PNG remain supported side-by-side.
 		cstr sOldDir = GetDir();
 		SetDir(cstr(g.rootdir_s+"importer\\temp").Get());
-		bool bUseTexturesFromConversion = false;
 		sObject* pObject = GetObjectData ( t.importer.objectnumber );
 		if ( pObject && pObject->ppMeshList )
 		{
@@ -2067,16 +2088,22 @@ void importer_loadmodel ( void )
 					int iSlotUsed = 0;
 					const char* referencedName = pMesh->pTextures[iTextureStage].pName;
 					const std::string reference = referencedName ? referencedName : "";
-					std::string found = PWImport::FindTexture(
-						std::string(g.rootdir_s.Get()) + "importer\\temp\\", reference, fileExists);
-					if (found.empty())
-						found = PWImport::FindTexture(t.importer.objectFileOriginalPath.Get(), reference, fileExists);
+                    // GLB conversion uses importer/temp/pw_glb_<pid>_<tick>/,
+                    // not importer/temp directly. Search it first; then the
+                    // original FBX/GLB folder; finally Classic's temp folder.
+                    std::string found;
+                    if (!pwGLBTextureDirectory.empty())
+                        found = PWImport::FindTexture(pwGLBTextureDirectory, reference, fileExists);
+                    if (found.empty())
+                        found = PWImport::FindTexture(t.importer.objectFileOriginalPath.Get(), reference, fileExists);
+                    if (found.empty())
+                        found = PWImport::FindTexture(
+                            std::string(g.rootdir_s.Get()) + "importer\\temp\\", reference, fileExists);
 					if (!found.empty())
 					{
 						cstr resolvedTexture;
 						resolvedTexture = found.c_str();
 						iSlotUsed = importer_addtexturefiletolist(resolvedTexture, resolvedTexture, &tCount);
-						bUseTexturesFromConversion = true;
 					}
 					else if (!reference.empty())
 					{
@@ -2112,16 +2139,12 @@ void importer_loadmodel ( void )
 		}
 		// Always restore the working folder, including when the model is invalid.
 		SetDir(sOldDir.Get());
-		if ( bUseTexturesFromConversion == true )
-		{
-			// if model did not have its own textures, texture with external ones next to FBX model
-			importer_load_textures_finish ( tCount, true ); // add cube mapping texture stage only
-		}
-		else
-		{
-			// if model did not have its own textures, texture with external ones next to FBX model
-			importer_load_textures_finish ( tCount, false ); // texture object from import image texture list
-		}
+        // Relink and APPLY the resolved albedo/normal textures. The old
+        // cube-map-only path did not replace the stale base texture stage
+        // (SerineAlbidoIdle.dds) even when SerineAlbidoIdle.png existed.
+        // This also updates native stage names via TextureLimbStageEx above,
+        // so saved DBO references match the files copied beside the FPE.
+        importer_load_textures_finish(tCount, false);
 	}
 	else
 	{

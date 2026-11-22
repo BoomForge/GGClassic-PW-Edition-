@@ -137,3 +137,12 @@ GameGuru's existing sBone/sFrame/sAnimationSet data is now inspected without mod
 
 **Next acceptance:** In an installed PW Edition rebuild, inspect `Files/entitybank/user/charactercreator/SerineTest.fpe` with its referenced `.dbo` and `.bmp` plus the source FBX. Verify that the generated DBO has real meshes/vertices and positive bounds; that the saved FPE `model=` points to the correct DBO; that the thumbnail shows the character instead of a green image; that click and drag/drop both place a visible model; and that save/reopen preserves the asset. Do not delete user assets or claim local repairs were performed by a GitHub-only source commit.
 
+
+
+## 22 November M2.1 importer correction — FBX material application and GLB conversion folder
+
+The FBX/GLB loading path now explicitly reapplies successfully resolved base textures rather than taking the cube-map-only branch. The legacy branch preserved stale stage-zero names even when the imported texture list found a real PNG. The model's native stage-zero filename is now updated via `TextureLimbStageEx` (with a bounded basename) as well as the displayed image ID; this is necessary for `SaveObject` to preserve the working PNG rather than embed a missing DDS in the exported DBO. The previous normal/AO stages and native mesh/skeleton data are not rewritten by this change.
+
+GLB import continues to convert through an installed Blender (`PW_GLB_BLENDER_EXE` or detected Blender), producing an FBX and PNGs in a unique `Files/importer/temp/pw_glb_*` directory. The FBX material resolver now searches that *specific* conversion folder before the original input folder and legacy conversion directory. Both original FBX loading paths use the importer X-cache override and missing source FBX/GLB no longer falls through to a manufactured cube.
+
+Added a Windows GLB header/path regression executable and converter-script self-check to the importer CI workflow. These are **not** Blender integration tests or proof that real arbitrary GLB rigs, PBR maps or animations export correctly. A real Windows engine build and two clean imports (Serine FBX and a textured GLB with Blender installed) must still verify thumbnails, placed entity visibility, exported DBO/FPE material names, saved-level reload and skeletal playback before user acceptance. Do not claim a test installer exists until published.

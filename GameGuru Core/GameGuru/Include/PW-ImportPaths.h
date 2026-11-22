@@ -29,6 +29,12 @@ namespace PWImport
         return slash == std::string::npos ? path : path.substr(slash + 1);
     }
 
+    inline std::string DirectoryOf(const std::string& path)
+    {
+        const size_t slash = path.find_last_of("\\/");
+        return slash == std::string::npos ? std::string() : path.substr(0, slash + 1);
+    }
+
     inline std::string Folder(std::string path)
     {
         if (!path.empty() && path.back() != '\\' && path.back() != '/')
