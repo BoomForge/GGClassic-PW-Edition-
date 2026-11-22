@@ -51,7 +51,9 @@ existing mesh and texture atlas. With zero or one active style, the native
 single-style vegetation grid remains in use. The bounded multi-style path
 uses up to 320 camera-near instances as an initial performance safeguard.
 The weights and choices are saved in optional `pw_grassmix.cfg` inside the
-FPM. Older maps continue to use Classic single-style grass.
+FPM. The standalone asset collection now includes each enabled mixed grass
+style folder, not just the one currently selected; real packaged-game playback
+remains to be tested. Older maps continue to use Classic single-style grass.
 
 This is distribution control, **not** a user-side mesh import or shader-only
 colour blend.
