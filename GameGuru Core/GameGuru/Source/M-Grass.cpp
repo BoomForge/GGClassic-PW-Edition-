@@ -3,6 +3,7 @@
 //----------------------------------------------------
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-EnvironmentStyleSettings.h"
 
 
 // Global
@@ -68,7 +69,16 @@ void grass_init ( void )
 	cstr pFileToLoad = cstr(cstr("vegbank\\")+g.vegstyle_s+"\\veg.DBO");
 	if ( FileExist ( pFileToLoad.Get() ) == 0 ) pFileToLoad = cstr(cstr("vegbank\\")+g.vegstyle_s+"\\veg.X");
 	LoadObject ( pFileToLoad.Get(),t.tGrassObj );
-	ScaleObject ( t.tGrassObj,200,200,200 );
+    if (ObjectExist(t.tGrassObj) == 1)
+    {
+        // Custom mesh import saves size/orientation in its style folder.
+        // The legacy default is precisely 200% with no extra yaw.
+        const std::string style = std::string("vegbank\\") + g.vegstyle_s.Get();
+        const PWEnvironmentStyle::Settings pwSettings = PWEnvironmentStyle::Read(style);
+        const float scale = 200.f * pwSettings.percent / 100.f;
+        ScaleObject(t.tGrassObj, scale, scale, scale);
+        if (pwSettings.yaw != 0.f) YRotateObject(t.tGrassObj, pwSettings.yaw);
+    }
 	MakeMeshFromObject ( t.tGrassObj,t.tGrassObj );
 
 
