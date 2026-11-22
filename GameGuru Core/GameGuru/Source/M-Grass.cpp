@@ -919,7 +919,6 @@ static bool Prepare() {
             lastIssue = "could not load grass atlas for " + slots[i].style;
             return false;
         }
-        TextureObject(rs.source, rs.image);
         // Native vegetation calls UpdateGrassShader() for its own generated
         // grids. These are independent regular 3D objects, and without a
         // conventional object effect they can be marked visible but render
@@ -932,6 +931,9 @@ static bool Prepare() {
             return false;
         }
         SetObjectEffect(rs.source, rs.effect);
+        // The importer has to restore base textures after SetObjectEffect:
+        // attaching a shader can clear the earlier mesh texture stages.
+        TextureObject(rs.source, rs.image);
         const PWEnvironmentStyle::Settings opt = PWEnvironmentStyle::Read(dir);
         rs.scale = 200.f * opt.percent / 100.f;
         rs.yaw = opt.yaw;
