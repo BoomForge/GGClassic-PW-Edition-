@@ -484,7 +484,8 @@ extern int iLastUpdateVeg;
 bool TutorialNextAction(void);
 bool CheckTutorialPlaceit(void);
 bool CheckTutorialAction(const char * action, float x_adder = 0.0f );
-void RenderToPreview(int displayobj);
+void RenderToPreview(int displayobj, int previewImageId = 0, float yaw = 0.0f, float pitch = 0.0f, float zoom = 1.0f);
+namespace PWAssetInspector { void RenderPending(); }
 void CheckTooltipObjectDelete(void);
 void get_tutorials(void);
 void SmallTutorialVideo(char *tutorial,char* combo_items[] = NULL, int combo_entries = 0,int iVideoSection = 0);
@@ -1151,6 +1152,19 @@ void mapeditorexecutable_loop(void)
 			iLaunchAfterSync = 0;
 			break;
 		}
+        case 32: // Asset Inspector 3D preview: reuse the native offscreen renderer.
+        {
+            g_bNoSwapchainPresent = true;
+            PWAssetInspector::RenderPending();
+            iLaunchAfterSync = 33;
+            break;
+        }
+        case 33:
+        {
+            g_bNoSwapchainPresent = false;
+            iLaunchAfterSync = 0;
+            break;
+        }
 
 		case 21: //Social VR.
 		{
@@ -21249,10 +21263,16 @@ float ApplyPivot(sObject* pObject, int iMode, GGVECTOR3 vecValue, float fValue)
 }
 
 
-void RenderToPreview(int displayobj)
+void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch, float zoom)
 {
 	float oldx_f, oldy_f, oldz_f, oldangx_f, oldangy_f;
 	int entid = displayobj - g.entitybankoffset;
+    const bool inspectorRender = previewImageId > 0;
+    if (!ObjectExist(displayobj)) return;
+    const float restoreAngleX = ObjectAngleX(displayobj);
+    const float restoreAngleY = ObjectAngleY(displayobj);
+    const float restoreAngleZ = ObjectAngleZ(displayobj);
+    if (inspectorRender) RotateObject(displayobj, pitch, yaw, 0.0f);
 
 	// prepare for thumb , set camera.
 	oldx_f = t.editorfreeflight.c.x_f;
@@ -21270,7 +21290,7 @@ void RenderToPreview(int displayobj)
 	float terrain_height = BT_GetGroundHeight(t.terrain.TerrainID, GGORIGIN_X, GGORIGIN_Z, 1);
 
 	sObject* pObject = g_ObjectList[displayobj];
-	if (pObject && t.entityprofile[entid].ischaracter != 1) {
+	if (pObject && (inspectorRender || (entid > 0 && entid <= g.entidmaster && t.entityprofile[entid].ischaracter != 1))) {
 		float fAdjustScaleX = 1.0, fAdjustScaleZ = 1.0;
 		if (pObject->pInstanceOfObject)
 		{
@@ -21298,12 +21318,12 @@ void RenderToPreview(int displayobj)
 	if (fLargest >= 1500) fLargest = 1500;
 	if (fLargestY >= 1500) fLargestY = 1500;
 
-	t.editorfreeflight.c.x_f = 25650 + (fLargest*2.4);
+	t.editorfreeflight.c.x_f = 25650 + (fLargest*2.4*(inspectorRender ? zoom : 1.0f));
 	if(fLargestY < 10.0f)
 		t.editorfreeflight.c.y_f = terrain_height + 80 + (fLargestY*1.85);
 	else
 		t.editorfreeflight.c.y_f = terrain_height + 50 + (fLargestY*1.85);
-	t.editorfreeflight.c.z_f = 25550 - (fLargest*2.4);
+	t.editorfreeflight.c.z_f = 25550 - (fLargest*2.4*(inspectorRender ? zoom : 1.0f));
 	t.editorfreeflight.c.angx_f = 13;
 	t.editorfreeflight.c.angy_f = -180;
 	t.editorfreeflight.s = t.editorfreeflight.c;
@@ -21369,7 +21389,7 @@ void RenderToPreview(int displayobj)
 
 	HideObject(t.terrain.objectstartindex + 2); //hide water
 
-	if (t.entityprofile[entid].ismarker != 0 || t.entityprofile[entid].zdepth == 0)
+	if (inspectorRender || t.entityprofile[entid].ismarker != 0 || t.entityprofile[entid].zdepth == 0)
 	{
 		SetObjectMask(displayobj, 1);
 	}
@@ -21414,12 +21434,13 @@ void RenderToPreview(int displayobj)
 
 
 	PositionObject(displayobj, fOldObjPosX, fOldObjPosY, fOldObjPosZ);
+    if (inspectorRender) RotateObject(displayobj, restoreAngleX, restoreAngleY, restoreAngleZ);
 	
 	// delete previous thumbnail
-	if (GetImageExistEx(g.importermenuimageoffset + 50))
+	if (GetImageExistEx((inspectorRender ? previewImageId : g.importermenuimageoffset + 50)))
 	{
 		image_setlegacyimageloading(true);
-		DeleteImage(g.importermenuimageoffset + 50);
+		DeleteImage((inspectorRender ? previewImageId : g.importermenuimageoffset + 50));
 		image_setlegacyimageloading(false);
 	}
 
@@ -21436,7 +21457,7 @@ void RenderToPreview(int displayobj)
 
 		ImVec2 grab = ImVec2((m_mycam->viewPort3D.Width*0.5) - (thumbnail_dimension*0.5) , (m_mycam->viewPort3D.Height*0.5) - (thumbnail_dimension*0.5) );
 
-		GrabImage(g.importermenuimageoffset + 50, grab.x, grab.y, grab.x+thumbnail_dimension, grab.y + thumbnail_dimension, 0);
+		GrabImage((inspectorRender ? previewImageId : g.importermenuimageoffset + 50), grab.x, grab.y, grab.x+thumbnail_dimension, grab.y + thumbnail_dimension, 0);
 		g_pGlob->pCurrentBitmapSurface = pTmpSurface;
 	}
 
