@@ -94,6 +94,26 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn("ShowObject(t.importer.objectnumber);", capture)
         self.assertNotIn("GetChildWindowWidth(-1)", capture)
 
+    def test_environment_imports_and_multi_grass_have_real_paths(self):
+        terrain = (ROOT / "GameGuru Core/GameGuru/Source/M-Terrain.cpp").read_text(encoding="utf-8")
+        veg = (ROOT / "GameGuru Core/GameGuru/Source/M-Grass.cpp").read_text(encoding="utf-8")
+        maps = (ROOT / "GameGuru Core/GameGuru/Source/M-MapFile.cpp").read_text(encoding="utf-8")
+        env = (ROOT / "GameGuru Core/GameGuru/Include/PW-TerrainStyleUI.h").read_text(encoding="utf-8")
+        save = (ROOT / "GameGuru Core/GameGuru/Include/PW-EnvironmentImport.h").read_text(encoding="utf-8")
+        self.assertIn('Mix Multiple Grass Types', terrain)
+        self.assertIn('Spread weight (%)', terrain)
+        self.assertIn('PWGrassMix::Refresh(', veg)
+        self.assertIn('InstanceObject(id, rs.source);', veg)
+        self.assertIn('ReadMemblockByte(memblockId, offset)', veg)
+        self.assertIn('PWGrassMix::Save(', maps)
+        self.assertIn('PWGrassMix::Load(', maps)
+        self.assertIn('AddFileToBlock(1, "pw_grassmix.cfg")', maps)
+        self.assertIn('importer_loadmodel(); // The existing textured 3D model preview', env)
+        self.assertIn('SaveObject(mutableMesh.data(), modelObject)', save)
+        self.assertIn('GLB importing is temporarily disabled', IMPORTER)
+        self.assertNotIn('GLB\\0*.glb', GRID)
+        self.assertNotIn('bPermittedFormat = true;\n                            if (stricmp(pExtension, ".glb")', GRID)
+
     def test_shutdown_trace_records_cleanup_milestones(self):
         self.assertIn('PWShutdownTrace("file-exit accepted")', GRID)
         self.assertIn('PWShutdownTrace("finish entered; before common_justbeforeend")', GRID)
