@@ -6,7 +6,7 @@
 
 static void PWImportTerrainStyle(bool skyStyle)
 {
-    const cstr oldDir = GetDir();
+    cstr oldDir = GetDir();
     cstr selected = "";
 #ifdef _WIN64
     if (skyStyle)
