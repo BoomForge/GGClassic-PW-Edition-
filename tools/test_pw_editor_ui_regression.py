@@ -132,11 +132,24 @@ class PWEditorUiRegressions(unittest.TestCase):
 
         # Three independent Classic restoration sites exist: editor rebuild,
         # painted vegetation refresh, and the post-shadow render pass.
-        self.assertGreaterEqual(
-            terrain.count("if (PWGrassMix::Active() && PWGrassMix::Ready())"), 3
-        )
-        self.assertIn("SetVegetationGridVisible(!PWGrassMix::Active());", grass)
-        self.assertIn("if (PWGrassMix::Active() && PWGrassMix::Ready())", GRID)
+        # Never hide Classic grass just because styles loaded successfully.
+        # A mixed renderer owns the region only AFTER some real blades exist.
+        self.assertGreaterEqual(terrain.count("PWGrassMix::OwnsGrid()"), 3)
+        self.assertIn("SetVegetationGridVisible(true);", grass)
+        self.assertIn("if (PWGrassMix::OwnsGrid())", GRID)
+        self.assertIn("bool OwnsGrid();", mix)
+        self.assertIn("bool OwnsGrid() {", grass)
+        self.assertIn("if (render[i].used > 0) return true;", grass)
+        self.assertIn("if (PWGrassMix::OwnsGrid())", grass)
+        self.assertNotIn("PWGrassMix::Active() && PWGrassMix::Ready()", terrain)
+        self.assertNotIn("SetVegetationGridVisible(!PWGrassMix::Active())", grass)
+
+        # Camera cropping previously sampled only 500 units around the
+        # editor camera and a single mask pixel every two painted pixels.
+        self.assertIn("for (int ring = 0; ring <= 48", grass)
+        self.assertIn("const int nextX = offset + 4;", grass)
+        self.assertIn("const int nextZ = offset + MAXTEXTURESIZE * 4;", grass)
+        self.assertIn("ReadMemblockByte(memblockId, nextZ + 4)", grass)
 
         # Classic hides its vegetation during the shadow pass. Mixed objects
         # must be hidden too, then restored only while the mixed renderer owns
