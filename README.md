@@ -130,7 +130,8 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 
 - [x] Safe local build-and-stage script for owned GameGuru Classic Steam files: [tools/pw-local-test.ps1](tools/pw-local-test.ps1). Compiles x64 in VS2022, stages into a separate `PW-TestInstall` folder, and does **not** overwrite Steam or publish proprietary EXEs.
 - [x] CI now restores the pinned official Microsoft D3DX import libraries (`d3dx11.lib`, `d3dx9.lib`) locally and builds vendored DirectXTex/Effects11 dependencies before full engine linking. [Build instructions](docs/PW_LOCAL_WINDOWS_TEST_BUILD.md).
-- [ ] Confirm full x64 CI engine + launcher build success and verify gameplay in a local Windows test install.
+- [x] Confirm full x64 CI engine compile success (GitHub Actions, 22 Nov 2026). The original Win32 Steam launcher remains separately owned; the compiled x64 editor is not automatically distributed with the updater artifact.
+- [ ] Verify editor, importer and gameplay in a local Windows test installation.
 
 ### Requested engine-wide quality-of-life improvements (22 November 2026)
 
@@ -141,6 +142,12 @@ These are **new cross-genre user requests**, not completed features. See the [de
 - [ ] **P1 — Customisable controls:** Introduce configurable action bindings and a Controls menu with save/reset/conflict handling. Provide Lua action queries and a compatibility plan for stock/community scripts using hard-coded key codes. This is **gameplay input binding**, separate from weapon model attachment/socket binding.
 
 - [ ] **P1 — Basic display options:** Player-selectable windowed/fullscreen and resolution in a simple in-game options menu **or** startup configuration window. Remember the selection, list compatible modes, safely revert unusable settings, and verify in standalone games. Requested 22 Nov; not implemented. See [display options requirements](docs/PIXELWOLF_CLASSIC_ROADMAP.md#p1--basic-game-display-options-windowedfullscreen-and-resolution).
+
+### Requested editor usability improvement — user asset deletion (22 November 2026)
+
+- [ ] **Delete custom assets from inside the Asset Browser.** Provide a right-click **Delete imported asset…** action (or equivalent), with clear identification of the selected asset and explicit confirmation. Restrict to user-owned content in `Files/entitybank/user/` and its subfolders, never stock GameGuru/Steam/DLC assets or arbitrary filesystem paths.
+- [ ] **Protect existing maps and shared resources.** Refuse deletion of assets currently placed in the active level or referenced by loaded scenes; ideally inspect dependencies/references before deleting. Use Windows Recycle Bin (or an undoable quarantine area) rather than immediate permanent deletion; do not blindly remove shared texture files. Invalidate thumbnail/entity caches and refresh the docked browser.
+- [ ] **Handle failed FBX/GLB imports.** If an import fails, avoid publishing a ghost entry or requiring the user to manually delete leftovers. Surface a useful diagnostic and provide a safe removal path for pre-existing invalid custom assets. Validate user/charactercreator assets such as the reported `SerineTest`.
 
 ### To do — future upgrades
 
@@ -157,5 +164,5 @@ These are **new cross-genre user requests**, not completed features. See the [de
 - [ ] Investigate **waypoint-editing stability** for later NPC work. [Upstream #6444](https://github.com/Dark-Basic-Software-Limited/GameGuruRepo/issues/6444).
 - [ ] Confirm reliable Windows builds and regression checks before merging experimental engine changes to `master`.
 
-**No Windows binary or performance improvement has been verified yet.** The first priority is maintaining a pleasant, fast world-building workflow—not building the entire RPG feature set now.
+**The full Release x64 solution now compiles in GitHub Actions, but a complete locally installed game/editor runtime, end-to-end FBX import and gameplay performance improvement have not yet been verified.** The first priority is maintaining a pleasant, fast world-building workflow—not building the entire RPG feature set now.
 
