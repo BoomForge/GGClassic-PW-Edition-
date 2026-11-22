@@ -795,7 +795,7 @@ void Load(const std::string& levelFolder) {
             ::sscanf_s(line.substr(a + 1, b - a - 1).c_str(), "%f", &weight) != 1)
             continue;
         slots[i].enabled = line[0] == '1';
-        slots[i].weight = std::max(0.f, std::min(100.f, weight));
+        slots[i].weight = (std::max)(0.f, (std::min)(100.f, weight));
         slots[i].style = style;
     }
     ++revision;
@@ -869,7 +869,7 @@ void Refresh(float cameraX, float cameraZ, int terrainId, bool superflat,
     // 21x21 cells around the player, capped at 320 live instances. No
     // level-wide per-grass object explosion or per-frame rebuild.
     unsigned count = 0;
-    const float chanceScale = std::max(0.15f, std::min(1.f, quantity / 20.f));
+    const float chanceScale = (std::max)(0.15f, (std::min)(1.f, quantity / 20.f));
     for (int dz = -10; dz <= 10 && count < 320; ++dz)
     for (int dx = -10; dx <= 10 && count < 320; ++dx) {
         const int cellX = centerX + dx, cellZ = centerZ + dz;
