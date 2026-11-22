@@ -58,6 +58,25 @@ remains to be tested. Older maps continue to use Classic single-style grass.
 This is distribution control, **not** a user-side mesh import or shader-only
 colour blend.
 
+## 22 November 2026 editor regression — mixed grass shows one style / flickers
+
+**Owner report (runtime observation):** The UI allows several grass choices, but the editor appears to display only the current/custom grass texture across the area, and custom/mixed grass flickers.
+
+**Source inspection confirmed an overlapping-renderer defect:** Classic's original **single-style** `ShowVegetationGrid()` was invoked after building and refreshing the PW multi-style instances and again when restoring the scene after cascade-shadow passes. Both systems could paint the same areas, making the current native style dominate and producing z-fighting/flicker.
+
+**Fix committed to the active development branch:**
+- `M-Grass.cpp`: keep the native vegetation grid hidden when a mix is active, restore Classic only if a required mixed asset is unavailable, respect no-grass mode, and provide per-instance hide/show that mirrors the shadow rendering pass.
+- `M-Terrain.cpp`: guard editor vegetation rebuild/refresh and post-shadow native grid restoration; temporarily hide and restore **mixed grass objects** around shadow passes; reset mixed objects when the editor's Display Vegetation toggle is disabled.
+- `M-GridEdit.cpp`: prevent startup from re-showing the native grid over the mix.
+- `PW-GrassMix.h`: declare the visibility handler. `tools/test_pw_editor_ui_regression.py` and CI now guard these ownership paths.
+- The actual mixed renderer already loads **distinct mesh and atlas image IDs per selected style** and uses the deterministic weighted distribution. The fix is to draw only the appropriate renderer, not to reuse one texture on all options.
+
+**Verification status:** Source fixes committed; Windows x64 compilation and actual visual acceptance remain separate gates. This is **not yet confirmed** to eliminate flickering on the owner's machine.
+
+**If a single custom style still flickers with the mix entirely disabled:** test its selected image's transparency/alpha and whether it matches the native grass template's atlas UV layout. An opaque seamless ground texture is not automatically an alpha-cutout grass-blade atlas, and this would require a separate import/texture compatibility fix rather than treating it as the mixed-grid overlap.
+
+**Local acceptance via the already-integrated in-editor updater (not manual ZIP):** After successful CI, use PW Edition's existing updater, then inspect: native single style with mix off; two distinct grass types at 50/50, then 25/75; a new custom style alongside stock grass; an existing painted area while moving the camera; toggle Display Vegetation; test level, return to editor, save/reopen. Confirm distinct meshes and textures without z-fighting. Record the commit reported by the updater if it fails.
+
 ## Required acceptance before an install is called ready
 
 1. Compile full Windows x64 editor at the latest branch head.
