@@ -24,7 +24,7 @@ This is Classic style-folder import, **not** arbitrary HDRI or six-image cubemap
 
 ## Import custom grass style
 
-Open **Terrain Tools → Customize Vegetation → Import Grass Style...**, then choose **`veg.DBO`** or **`veg.X`** in a compatible vegetation style folder with **`grass.dds`**. The editor copies supported files to `Files/vegbank/<style>`, refreshes the bank, selects the style and reloads the existing vegetation mesh and texture.
+Open **Terrain Tools → Customize Vegetation → Import Grass Style...**, then choose **`veg.DBO`** or **`veg.X`** in a compatible vegetation style folder with **`grass.dds` or `grass.png`**. The editor copies supported files to `Files/vegbank/<style>`, refreshes the bank, selects the style and reloads the existing vegetation mesh and texture.
 
 A single standalone PNG grass image is not yet converted into a Classic-style grass package. Users can author the standard folder in a 3D editor or supply an existing Classic-compatible style folder.
 
