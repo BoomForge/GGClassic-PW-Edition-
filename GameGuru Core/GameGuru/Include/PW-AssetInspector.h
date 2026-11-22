@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstring>
+#include <cstdint>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -162,7 +163,14 @@ inline void Select(const std::string& file) {
     s.modelId=FreeObjectId();
     if (!s.modelId) { s.status="No free temporary preview object ID."; return; }
     if (Ends(s.modelSource,".fbx")) {
+        // Match the working native FBX importer conversion path; restore the
+        // global cache preference immediately so preview does not affect
+        // ordinary editor model imports.
+        extern bool g_bOverrideXCacheWhenUsingImporter;
+        const bool oldCache = g_bOverrideXCacheWhenUsingImporter;
+        g_bOverrideXCacheWhenUsingImporter = true;
         LoadFBX((LPSTR)s.modelSource.c_str(),s.modelId);
+        g_bOverrideXCacheWhenUsingImporter = oldCache;
     } else {
         LoadObject((LPSTR)s.modelSource.c_str(),s.modelId);
     }
