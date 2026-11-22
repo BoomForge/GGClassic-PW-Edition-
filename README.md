@@ -133,6 +133,13 @@ Statuses below distinguish **committed source changes** from **tested runtime be
 - [x] Confirm full x64 CI engine compile success (GitHub Actions, 22 Nov 2026). The original Win32 Steam launcher remains separately owned; the compiled x64 editor is not automatically distributed with the updater artifact.
 - [ ] Verify editor, importer and gameplay in a local Windows test installation.
 
+### Skybox and grass import — owner-corrected texture-only design (22 November 2026)
+
+- [x] **Source change:** Terrain Tools sky/grass import now asks for **one image only**, then safely clones the currently active native skybox or grass template, including its existing mesh/UV and compatible configuration. It creates a new name and switches to the created style. **No FBX/DBO/X model picker, no user-supplied mesh, no scale/yaw controls.** PNG/DDS/JPG/JPEG/BMP/TGA image formats are accepted.
+- [x] Native sky renderer can use the clone's selected image; native and mixed-grass renderers can load the clone's grass atlas. The four-style weighted spread sliders are unchanged.
+- [x] Added isolated Windows source tests for cloning, name collisions and safe file handling.
+- [ ] **Not yet accepted:** Windows full-engine compile of latest revision, actual editor visuals, sky textures on cloned geometry, grass atlas alignment/UV, FPM save/reopen, packaging, performance and standalone exports. See [texture-only sky/grass import specification](docs/PW_WORKSPACE_SKY_GRASS_IMPORT.md).
+
 ### Requested engine-wide quality-of-life improvements (22 November 2026)
 
 These are **new cross-genre user requests**, not completed features. See the [detailed requirements and acceptance tests](docs/PIXELWOLF_CLASSIC_ROADMAP.md#general-purpose-game-system-requests--22-november-2026).
