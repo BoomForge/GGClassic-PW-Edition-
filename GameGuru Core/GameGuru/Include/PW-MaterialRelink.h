@@ -21,22 +21,20 @@ inline bool SupportedTexture(const std::string& name) {
         || PWImport::EndsWithI(name.c_str(), ".bmp");
 }
 
-inline std::string SourceFolder(const std::string& modelPath) {
-    const std::string::size_type pos = modelPath.find_last_of("/\\");
-    return pos == std::string::npos ? std::string() : modelPath.substr(0, pos + 1);
-}
-
+// GameGuru's importer stores objectFileOriginalPath as a DIRECTORY and keeps
+// objectFilename separately. Do not strip the last path segment as if the
+// directory were a model filename (that can search in its parent instead).
 template <class Exists>
 inline std::string Suggest(const std::string& reference,
-                           const std::string& modelPath,
-                           const std::string& converterFolder,
+                           const std::string& originalDirectory,
+                           const std::string& converterDirectory,
                            Exists exists) {
     if (reference.empty()) return std::string();
     // Prefer an existing source file or same-folder DDS-first companion;
     // the original importer's converter folder is only a fallback.
-    const std::string source = PWImport::FindTexture(SourceFolder(modelPath), reference, exists);
+    const std::string source = PWImport::FindTexture(originalDirectory, reference, exists);
     if (!source.empty()) return source;
-    return PWImport::FindTexture(converterFolder, reference, exists);
+    return PWImport::FindTexture(converterDirectory, reference, exists);
 }
 
 } // namespace PWMaterialRelink
