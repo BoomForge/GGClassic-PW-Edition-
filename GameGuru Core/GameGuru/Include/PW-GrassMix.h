@@ -33,7 +33,7 @@ inline int Pick(float unit) {
         if (slots[i].enabled && !slots[i].style.empty() && slots[i].weight > 0.f)
             total += slots[i].weight;
     if (total <= 0.f) return -1;
-    const float selected = std::max(0.f, std::min(0.999999f, unit)) * total;
+    const float selected = (std::max)(0.f, (std::min)(0.999999f, unit)) * total;
     float at = 0.f;
     for (int i = 0; i < MaxStyles; ++i) {
         if (!slots[i].enabled || slots[i].style.empty() || slots[i].weight <= 0.f) continue;
