@@ -166,6 +166,12 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn("LoadImage((LPSTR)atlas.c_str(), rs.image);", grass)
         self.assertIn("TextureObject(rs.source, rs.image);", grass)
         self.assertIn("InstanceObject(id, rs.source);", grass)
+        # Classic grass templates are 200% scaled. InstanceObject creates
+        # independent transforms; the scale/yaw must reach each visible instance.
+        self.assertIn("rs.scale = 200.f * opt.percent / 100.f;", grass)
+        self.assertIn("rs.yaw = opt.yaw;", grass)
+        self.assertIn("ScaleObject(id, rs.scale, rs.scale, rs.scale);", grass)
+        self.assertIn("YRotateObject(inst, rs.yaw +", grass)
 
         # Hiding vegetation in the editor also releases PW-created instances.
         self.assertIn("PWGrassMix::ResetInstances();", terrain)
