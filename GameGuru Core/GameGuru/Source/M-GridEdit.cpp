@@ -84,6 +84,7 @@ extern bool g_occluderf9Mode;
 //Skip terrain rendering when going into importer mode
 extern bool g_bSkipTerrainRender;
 extern bool g_bOverrideXCacheWhenUsingImporter; // Native FBX loader global.
+void LoadFBX(LPSTR pFilename, int iObjectNumber);
 // extern to global that toggles when load map removed from entities
 extern bool g_bBlackListRemovedSomeEntities;
 extern bool gbWelcomeSystemActive;
