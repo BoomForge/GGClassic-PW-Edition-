@@ -747,6 +747,7 @@ static unsigned builtRevision = 0;
 static int lastCameraCellX = -999999, lastCameraCellZ = -999999;
 static bool ready = false;
 static bool previewEnabled = false; // SAFETY: off by default until verified on the owner's GPU.
+static std::string lastIssue;
 static int allocatedBase = 0;
 static int FindFreeId() {
     if (!allocatedBase)
@@ -790,6 +791,7 @@ void ResetInstances() {
 void SetPreviewEnabled(bool enabled) {
     if (previewEnabled == enabled) return;
     previewEnabled = enabled;
+    lastIssue.clear();
     // Clear stale objects whenever preview changes. The next grass_loop()
     // rebuilds them only if the owner has explicitly opted in.
     ResetInstances();
@@ -809,6 +811,8 @@ std::string Diagnostics() {
     std::ostringstream out;
     out << "Models: " << sources << " | objects: " << allocated
         << " | placed: " << placed << " | visible flags: " << markedVisible;
+    if (!lastIssue.empty()) out << " | issue: " << lastIssue;
+    else if (ready && placed == 0) out << " | issue: no painted samples populated";
     return out.str();
 }
 void SetInstancesVisible(bool visible) {
@@ -846,6 +850,7 @@ void Load(const std::string& levelFolder) {
     // rendering just because its project contains a grass-mix configuration.
     previewEnabled = false;
     ResetInstances();
+    lastIssue.clear();
     for (int i = 0; i < MaxStyles; ++i) slots[i] = Slot();
     std::ifstream in(ConfigPath(levelFolder), std::ios::binary);
     std::string line;
@@ -868,28 +873,44 @@ void Load(const std::string& levelFolder) {
 }
 static bool Prepare() {
     ResetInstances();
+    lastIssue.clear();
     for (int i = 0; i < MaxStyles; ++i) {
         if (!slots[i].enabled || slots[i].weight <= 0.f || slots[i].style.empty())
             continue;
         const std::string dir = std::string("vegbank\\") + slots[i].style;
         std::string model = dir + "\\veg.DBO";
         if (FileExist((LPSTR)model.c_str()) == 0) model = dir + "\\veg.X";
-        if (FileExist((LPSTR)model.c_str()) == 0) return false;
+        if (FileExist((LPSTR)model.c_str()) == 0) {
+            lastIssue = "missing veg.DBO/veg.X for " + slots[i].style;
+            return false;
+        }
         std::string atlas = dir + "\\grass.dds";
         if (FileExist((LPSTR)atlas.c_str()) == 0) atlas = dir + "\\grass.png";
         if (FileExist((LPSTR)atlas.c_str()) == 0) atlas = dir + "\\grass.jpg";
         if (FileExist((LPSTR)atlas.c_str()) == 0) atlas = dir + "\\grass.jpeg";
         if (FileExist((LPSTR)atlas.c_str()) == 0) atlas = dir + "\\grass.bmp";
         if (FileExist((LPSTR)atlas.c_str()) == 0) atlas = dir + "\\grass.tga";
-        if (FileExist((LPSTR)atlas.c_str()) == 0) return false;
+        if (FileExist((LPSTR)atlas.c_str()) == 0) {
+            lastIssue = "missing grass atlas for " + slots[i].style;
+            return false;
+        }
         RenderStyle& rs = render[i];
         rs.source = FindFreeId();
         rs.image = FindFreeImageId();
-        if (!rs.source || !rs.image) return false;
+        if (!rs.source || !rs.image) {
+            lastIssue = "no free grass model/texture resource ID";
+            return false;
+        }
         LoadObject((LPSTR)model.c_str(), rs.source);
-        if (!ObjectExist(rs.source)) return false;
+        if (!ObjectExist(rs.source)) {
+            lastIssue = "could not load model for " + slots[i].style;
+            return false;
+        }
         LoadImage((LPSTR)atlas.c_str(), rs.image);
-        if (!ImageExist(rs.image)) return false;
+        if (!ImageExist(rs.image)) {
+            lastIssue = "could not load grass atlas for " + slots[i].style;
+            return false;
+        }
         TextureObject(rs.source, rs.image);
         const PWEnvironmentStyle::Settings opt = PWEnvironmentStyle::Read(dir);
         rs.scale = 200.f * opt.percent / 100.f;
@@ -923,7 +944,11 @@ static bool EnsureInstance(RenderStyle& rs, size_t index) {
 }
 void Refresh(float cameraX, float cameraZ, int terrainId, bool superflat,
              float flatHeight, int memblockId, float quantity) {
-    if (!RenderEnabled() || !MemblockExist(memblockId)) return;
+    if (!RenderEnabled()) return;
+    if (!MemblockExist(memblockId)) {
+        lastIssue = "painted grass mask is not loaded";
+        return;
+    }
     if (!ready || builtRevision != revision) {
         if (!Prepare()) {
             ResetInstances();
