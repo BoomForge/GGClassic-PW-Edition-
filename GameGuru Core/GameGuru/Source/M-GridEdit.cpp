@@ -91,6 +91,7 @@ extern int g_trialStampDaysLeft;
 int g_tstoreprojectmodifiedstatic = 0;
 
 #ifdef ENABLEIMGUI
+#include "PW-AssetInspector.h"
 void process_entity_library(void);
 void process_entity_library_v2(void);
 // can prevent app from quitting out while in test game
@@ -23532,6 +23533,10 @@ void process_entity_library(void)
 		bool bIsWeDocked = ImGui::IsWindowDocked();
 		static int current_tab = -1;
 
+        if (ImGui::Button("Asset Inspector...##PWOpenAssetInspector"))
+            PWAssetInspector::Open();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Browse folders and inspect images or 3D assets. Insert models in front of the editor camera.");
 
 		CheckTutorialAction("TABMARKERS", 54.0f); //Tutorial: check if we are waiting for this action
 		if (current_tab == 1 && bTutorialCheckAction)
@@ -24647,6 +24652,9 @@ void process_entity_library(void)
 		ImGui::End();
 
 	}
+    // A separate user-requested popup; never docks, replaces, or tears off
+    // the permanent bottom Asset Browser.
+    PWAssetInspector::Draw();
 
 }
 
