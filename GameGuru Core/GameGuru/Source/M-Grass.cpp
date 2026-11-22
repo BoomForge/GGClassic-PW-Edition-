@@ -737,6 +737,8 @@ unsigned revision = 1;
 struct RenderStyle {
     int source = 0;
     int image = 0;
+    float scale = 200.f;
+    float yaw = 0.f;
     std::vector<int> instances;
     size_t used = 0;
 };
@@ -860,9 +862,12 @@ static bool Prepare() {
         if (!ImageExist(rs.image)) return false;
         TextureObject(rs.source, rs.image);
         const PWEnvironmentStyle::Settings opt = PWEnvironmentStyle::Read(dir);
-        const float scale = 200.f * opt.percent / 100.f;
-        ScaleObject(rs.source, scale, scale, scale);
-        if (opt.yaw != 0.f) YRotateObject(rs.source, opt.yaw);
+        rs.scale = 200.f * opt.percent / 100.f;
+        rs.yaw = opt.yaw;
+        // Source geometry is kept hidden; instance transforms are independent.
+        // Save native style size/yaw for each visible instance below.
+        ScaleObject(rs.source, rs.scale, rs.scale, rs.scale);
+        if (rs.yaw != 0.f) YRotateObject(rs.source, rs.yaw);
         SetObjectTransparency(rs.source, 6);
         SetObjectMask(rs.source, 1);
         HideObject(rs.source);
@@ -877,6 +882,9 @@ static bool EnsureInstance(RenderStyle& rs, size_t index) {
         if (!id) return false;
         InstanceObject(id, rs.source);
         if (!ObjectExist(id)) return false;
+        // InstanceObject creates an independent transform and does NOT copy
+        // the source object's 200% native grass scaling.
+        ScaleObject(id, rs.scale, rs.scale, rs.scale);
         SetObjectTransparency(id, 6);
         SetObjectMask(id, 1);
         rs.instances.push_back(id);
@@ -939,7 +947,8 @@ void Refresh(float cameraX, float cameraZ, int terrainId, bool superflat,
             (Unit(Hash(unsigned(cellX), unsigned(cellZ), 0xdde091u)) - 0.5f) * 36.f;
         const float y = superflat ? flatHeight : BT_GetGroundHeight(terrainId, x, z);
         PositionObject(inst, x, y, z);
-        YRotateObject(inst, Unit(Hash(unsigned(cellX), unsigned(cellZ), 0xd123a0u)) * 360.f);
+        YRotateObject(inst, rs.yaw +
+            Unit(Hash(unsigned(cellX), unsigned(cellZ), 0xd123a0u)) * 360.f);
         ShowObject(inst);
         ++count;
     }
