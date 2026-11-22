@@ -5,6 +5,13 @@ on:
     paths:
       - "GameGuru Core/GameGuru/Include/PW-ImportPaths.h"
       - "GameGuru Core/GameGuru/Include/PW-GLBBridge.h"
+      - "GameGuru Core/GameGuru/Include/PW-ThumbnailCheck.h"
+      - "GameGuru Core/GameGuru/Include/PW-StyleImport.h"
+      - "GameGuru Core/GameGuru/Include/PW-TerrainStyleUI.h"
+      - "GameGuru Core/GameGuru/Source/M-Terrain.cpp"
+      - "GameGuru Core/GameGuru/Source/M-GridEdit.cpp"
+      - "tools/test_pw_style_import_win.cpp"
+      - "tools/test_pw_thumbnail_check.cpp"
       - "GameGuru Core/GameGuru/Shaders and Scripts/PWTools/pw_glb_to_fbx.py"
       - "tools/test_pw_glb_bridge_win.cpp"
       - "GameGuru Core/GameGuru/Source/M-Importer.cpp"
@@ -38,6 +45,10 @@ jobs:
           if errorlevel 1 exit /b 1
           cl.exe /nologo /std:c++14 /EHsc /W4 /WX /I "GameGuru Core\GameGuru\Include" "tools\test_pw_glb_bridge_win.cpp" /Fe:pw-glb-bridge-test.exe
           if errorlevel 1 exit /b 1
+          cl.exe /nologo /std:c++14 /EHsc /W4 /WX /I "GameGuru Core\GameGuru\Include" "tools\test_pw_style_import_win.cpp" /Fe:pw-style-import-test.exe
+          if errorlevel 1 exit /b 1
+          cl.exe /nologo /std:c++14 /EHsc /W4 /WX /I "GameGuru Core\GameGuru\Include" "tools\test_pw_thumbnail_check.cpp" /Fe:pw-thumbnail-test.exe
+          if errorlevel 1 exit /b 1
           cl.exe /nologo /std:c++14 /EHsc /W3 /I "GameGuru Core\Dark Basic Public Shared\Include" "tools\test_pw_occluder_thread_win.cpp" "GameGuru Core\Dark Basic Public Shared\Dark Basic Pro SDK\DarkSDKMore\CPU3D\cThread.cpp" /Fe:pw-occluder-test.exe
           if errorlevel 1 exit /b 1
       - name: Run importer path and repeated thread cleanup
@@ -47,6 +58,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'FBX texture path tests failed' }
           ./pw-glb-bridge-test.exe
           if ($LASTEXITCODE -ne 0) { throw 'GLB bridge path/header tests failed' }
+          ./pw-style-import-test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Sky/grass style installer tests failed' }
+          ./pw-thumbnail-test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Thumbnail BMP content checks failed' }
           python "GameGuru Core/GameGuru/Shaders and Scripts/PWTools/pw_glb_to_fbx.py" --self-test
           if ($LASTEXITCODE -ne 0) { throw 'Blender bridge script self-check failed' }
           ./pw-occluder-test.exe
