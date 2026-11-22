@@ -45,6 +45,8 @@ inline int Pick(float unit) {
 inline void Dirty() { ++revision; }
 void ResetInstances();
 bool Ready();
+// Match Classic's temporary shadow-pass hide/restore without showing stale instances.
+void SetInstancesVisible(bool visible);
 void InvalidateMask();
 void Refresh(float cameraX, float cameraZ, int terrainId, bool superflat, float flatHeight,
              int memblockId, float quantity);
