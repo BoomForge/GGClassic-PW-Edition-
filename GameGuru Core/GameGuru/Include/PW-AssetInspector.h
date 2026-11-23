@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <fstream>
 #include <string>
+#include <utility>
 #include <vector>
 #include <windows.h>
 
@@ -75,7 +76,8 @@ inline bool ViewableFile(const std::string& path) {
 inline bool AssetDirectory(const std::string& name) {
     const std::string n=Lower(name);
     return n!="thumb" && n!="thumbs" && n!="thumbnail" &&
-           n!="thumbnails" && n!="preview" && n!="previews" &&
+           n!="thumbnails" && n!="thumbbank" && n!="thumbnailbank" &&
+           n!="preview" && n!="previews" && n!="previewbank" &&
            n!="__pycache__";
 }
 inline std::string FolderOf(const std::string& file) {
@@ -126,6 +128,30 @@ inline std::string ResolveProfileAsset(const std::string& fpe, const std::string
     const std::string bank = Current().root + "\\entitybank\\" + asset;
     if (IsFile(bank)) return bank;
     return "";
+}
+// The left tree deliberately hides FPE setup files, but native GameGuru
+// entity models often rely on those sidecars to specify their real texture.
+// Use the sidecar internally so directly browsing a DBO/X still previews it
+// textured, without putting setup files back in the tree.
+inline std::string TextureForModel(const std::string& model) {
+    const std::string folder=FolderOf(model);
+    WIN32_FIND_DATAA data={};
+    HANDLE find=FindFirstFileA((folder+"\\*.fpe").c_str(),&data);
+    if (find==INVALID_HANDLE_VALUE) return "";
+    std::string result;
+    int remaining=512;
+    do {
+        if (--remaining<0) break;
+        if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        const std::string profile=folder+"\\"+data.cFileName;
+        const std::string pointed=ProfileField(profile,"model");
+        if (pointed.empty() || Lower(NameOf(pointed))!=Lower(NameOf(model)))
+            continue;
+        result=ResolveProfileAsset(profile,ProfileField(profile,"textured"));
+        if (!result.empty()) break;
+    } while(FindNextFileA(find,&data));
+    FindClose(find);
+    return result;
 }
 inline int FreeObjectId() {
     // 26400 was INSIDE g.gamerealtimeobjoffset..max, so runtime entities
@@ -178,6 +204,8 @@ inline void Select(const std::string& file) {
         return;
     }
     s.modelSource=file;
+    if (!Ends(file,".fpe"))
+        s.albedoSource=TextureForModel(file);
     if (Ends(file,".fpe")) {
         s.modelSource=ResolveProfileAsset(file,ProfileField(file,"model"));
         s.albedoSource=ResolveProfileAsset(file,ProfileField(file,"textured"));
