@@ -14,6 +14,18 @@ User request: Add a **separate popup** with the on-disk GameGuru `Files` directo
 - Selecting native DBO/X or FBX automatically creates an ordinary editable FPE/DBO copy under `Files/entitybank/user/PWInspector` before creating the scene entity; the original selected asset is not overwritten. Browsable FPE entries are retired: an inserted browsed raw model becomes a native editable FPE/DBO-backed entity.
 - Preview resources are deleted when selecting a different file or closing the window.
 
+## 23 November 2026 — partial live preview confirmed; rotation / centring / DBO regressions
+
+**Owner's new real-editor observation:** Some DBO models now appear, confirming *partial* 3D preview rendering. However, dragging over the model moves the **entire Asset Inspector window** rather than rotating the model; some DBO files still do not display; visible models appear off-centre. This supersedes the earlier statement that *all* preview models are blank. **Do not mark 3D preview accepted** until mouse orbit, centring and several representative model files are tested.
+
+**Source repair in active branch:**
+- [`39afb780`](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/39afb780f6fbfea49a207e6a4edcbca852e2d82c) wraps the model preview in an ImGui **InvisibleButton** and uses the mouse capture state `IsItemActive()` to apply drag rotation, rendering the actual preview image into that same widget rectangle. This should stop ImGui treating a model drag as a window drag, while keeping title-bar movement available.
+- [`757bcbf7`](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/757bcbf7b7c3c847c1d44aea7fa900fe2145a7bc) updates `RenderToPreview` to aim at the **rotated, scaled collision-bounds midpoint** instead of a fixed unrotated offset; calculates camera distance from the **full 3D size diagonal** and guards invalid bounds. Preserve stock tooltip camera path.
+- [`0742de6a`](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/0742de6a098d0e9596384c1181c1ac8c7f1aed7a) centres the preview square within the right-hand pane without changing the docked Asset Browser.
+- [`4480c218`](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/4480c21834300da0d9a6407d4b4b0c172ea0862a) updates static UI tests to guard drag-capture semantics and the geometry-centred camera path. Targeted UI regression run [#45166595627](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45166595627) **passed** on this code. The latest full x64 compile [#45166606100](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45166606100) was **queued** at the time this entry was written; check newer HEAD CI before using the integrated updater.
+
+**Open acceptance questions:** Not all DBOs preview; still need names/paths of a failing model and a working model, actual screen capture, importer/model validity, shader and material behaviour, camera focus and drag-to-orbit/scroll-to-zoom verification. Successful compilation and static tests are not visual acceptance. Do not suggest downloading a ZIP/manual installation; use the **already integrated PW Editor updater** only after CI passes. Multi-grass remains a separate unfinished feature.
+
 ## 23 November 2026 — updated editor appears unchanged (owner report)
 
 The owner reports **"I updated but nothing changed"** after the compiler-error repair. This does **not** count as accepted visual behaviour. The [full Windows x64 build for `0a6fd773`](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45162913299) passed, but the installed executable path, `pw-installed-commit.txt`, whether installation confirmation was accepted, and actual Asset Inspector window behaviour are not independently confirmed.
