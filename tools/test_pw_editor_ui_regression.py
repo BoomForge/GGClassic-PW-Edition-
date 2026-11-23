@@ -259,7 +259,18 @@ class PWEditorUiRegressions(unittest.TestCase):
         # occlude a raw model or leave the capture looking at empty land.
         self.assertIn("float terrain_height = inspectorRender ? 20000.0f", GRID)
         self.assertIn("if (inspectorRender) {", GRID)
-        self.assertIn("const float radius=(std::max)(6.0f", GRID)
+        self.assertIn("const float radius=(std::max)(35.0f", GRID)
+        self.assertIn("const float safeExtent=std::isfinite(extent)", GRID)
+        self.assertIn("const float pitchedY = cy * std::cos(p)", GRID)
+        self.assertIn("fOffsetX = cx * std::cos(y) + pitchedZ * std::sin(y);", GRID)
+        self.assertIn("fOffsetZ = pitchedZ * std::cos(y) - cx * std::sin(y);", GRID)
+        self.assertIn("const float extent=std::sqrt(fLargestX*fLargestX", GRID)
+        self.assertIn('ImGui::InvisibleButton("##PWAssetModelOrbit"', inspector)
+        self.assertIn("const bool previewActive=ImGui::IsItemActive();", inspector)
+        self.assertIn("if (previewActive && ImGui::IsMouseDragging(0))", inspector)
+        self.assertIn("ImGui::GetWindowDrawList()->AddImage((ImTextureID)view", inspector)
+        self.assertIn("ImGui::SetCursorPosX(ImGui::GetCursorPosX()+leftPadding);", inspector)
+        self.assertNotIn("if (ImGui::IsMouseDragging(0)) {", inspector)
         # Catch accidental extra parentheses in the raw-model camera radius:
         # the previous mistake passed textual guards but broke MSVC C2059.
         radius_start = GRID.index("const float radius=(std::max)")
