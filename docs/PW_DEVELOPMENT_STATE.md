@@ -11,6 +11,16 @@
 
 > **OWNER-CORRECTED DELIVERY FACT (22 Nov 2026): The current installed PW Edition ALREADY INCLUDES AN IN-ENGINE UPDATER.** Never describe this updater as a future feature, or default to downloading source ZIPs and running `START_PW_TEST_BUILD.cmd` every update. The editor's update command launches the installed `Pixelwolf-GGC-Updater.exe` source-building helper. Distinguish this **existing, owner-confirmed capability** from whether the **latest revision** has passed actual installation and gameplay acceptance; CI compilation is not a local runtime test.
 
+## 23 November 2026 — OWNER UPDATER COMPILE FAILURE AND CORRECTION
+
+**Latest corrective action (supersedes older in-progress build snapshots below):** The owner ran the **already-integrated in-editor updater** and received a pre-install MSBuild failure. No files were installed. The updater displayed C2059 syntax errors against DarkEXE.vcxproj but lacked the original compiler source location. Independently fetched GitHub full x64 job logs for runs [#45158348201](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45158348201), [#45158211244](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45158211244) and [#45158073815](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45158073815): **all FAILED** with the identical first source error at `GameGuru Core/GameGuru/Source/M-GridEdit.cpp(21342,76): error C2059: syntax error: ')'`. It affected Map Editor and Lightmapper compilation, and is an upstream source defect, **not evidence of a broken Windows setup**.
+
+- **Code correction committed as [`ade4a423`](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/ade4a423a67a401f37ed87b1ce0c6fdcbcd41e79)**: removed one extraneous `) ` from the new Asset Inspector preview camera-radius calculation. The source was read back and the balanced expression verified.
+- **Regression guard committed as [`a6ae4579`](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/a6ae4579a0662917359e2aeb5ecfd9a538b0b7b1)**: the editor UI regression test checks parentheses balance in this expression to catch the same typo before release.
+- **Full x64 CI validation at corrective source + guard:** [#45162762476](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45162762476) was **in progress** at this documentation update. The code-only correction had editor UI regression success [#45162574521](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45162574521); the guard-inclusive revision needs its own latest checks. Verify fresh Actions before installing.
+- **Next gate:** Wait for a complete successful full Windows x64 build, then use **the existing PW Edition integrated updater** again (do not require a manual ZIP). Verify installed commit, then real model appearance/rotation/zoom and file filtering. A passing compile is not a visual fix or local installation acceptance.
+- **Separate grass status:** simultaneous multi-grass remains visually unverified and is not solved by this Asset Inspector syntax fix.
+
 ## Product intent and hard requirements
 
 - Creator-friendly, fast, familiar GameGuru Classic world-building workflow, with early-2000s game-making simplicity, retaining the Classic visual style and icons rather than replacing it wholesale.
@@ -35,7 +45,7 @@
 - Keep drag rotation, mouse wheel zoom, Reset View and Insert into Scene; add **Refresh 3D Preview** and a capture-error message if the capture image is missing.
 - `tools/test_pw_editor_ui_regression.py`: static regression checks for viewable file filter, thumbnail exclusion, internal sidecar matching, model effect, safe IDs, isolated framing, preview retry and original entity insertion.
 
-**Checks:** UI regression suite [#45158073857](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45158073857) **passed** at source `73eee8d2`; import/cleanup suite [#45158073936](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45158073936) **passed**. Full x64 compile [#45158073815](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45158073815) **in progress** at last check. **NO actual local 3D picture has been verified.** The source code is a repair attempt, not visual acceptance.
+**Checks:** UI regression suite [#45158073857](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45158073857) **passed** at source `73eee8d2`; import/cleanup suite [#45158073936](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45158073936) **passed**. Full x64 compile [#45158073815](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45158073815) **failed** with C2059 in M-GridEdit.cpp; corrected at `ade4a423` and guarded at `a6ae4579`; new x64 run [#45162762476](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45162762476) requires completion. **NO actual local 3D picture has been verified.** The source code is a repair attempt, not visual acceptance.
 
 **Next owner acceptance:** After full Windows CI success, use the **existing built-in PW Edition updater**, check installed commit and open Asset Inspector. Select a stock DBO/X model and an FBX; verify model (not just background) appears, rotates, zooms and textures display. Ensure FPE/setup files, previews/thumbnails and empty folders do not appear, and original bottom docked browser is unchanged. Use Insert into Scene and Undo and save/reopen. If still blank, capture screenshot and any preview error; do not report fixed solely because CI compiled.
 ## Current highest-priority task — actually render 2+ grass types (22 November 2026)
@@ -91,7 +101,7 @@ Owner request:
 | --- | --- |
 | Code committed on active branch | Mixed-grass shader overlay through `a8b68916` (visual unverified); Asset Inspector render/file-browser source through `73eee8d2`, docs through `930691cf` before this handoff update |
 | Targeted source and UI checks | Passed for the Asset Inspector revision |
-| Entire GameGuru Core Release x64 CI compile | Previous revision passed but failed grass visual check; latest Inspector source #45158073815 **in progress** at last check; independently check HEAD build |
+| Entire GameGuru Core Release x64 CI compile | Asset Inspector source at `73eee8d2`, `930691cf`, `ac6da5b2` FAILED with C2059. Syntax fixed at `ade4a423`, guarded at `a6ae4579`; latest corrective full build #45162762476 **awaiting final result** at this checkpoint |
 | Compiled editor included as downloadable artifact in that CI run | **No** — artifact list empty |
 | Local Windows editor test / original Steam overlay | **Not verified** for this revision |
 | In-engine updater included in owner's current build | **Yes — owner-confirmed**; integrated source-building updater is already present |
@@ -118,6 +128,7 @@ Use `START_PW_TEST_BUILD.cmd` and the separate `PW-TestInstall\\Guru-MapEditor.e
 ### P0 — Verify Asset Inspector rendering; separately finish multi-grass
 
 - [x] Commit Asset Inspector source repair: only viewable models/textures in tree; no setup files or thumbnails; independent preview shader, resource IDs, model framing, texture sidecars and retry.
+- [x] Diagnose owner's integrated updater C2059 failure in GitHub full x64 job log; fix extra parenthesis in M-GridEdit.cpp (`ade4a423`) and add balancing regression guard (`a6ae4579`).
 - [ ] Confirm newest full Windows x64 build for Inspector corrections, then **visually test an actual model** in the local editor (not just static tests). Use the already-integrated updater.
 - [x] **Record third grass failure:** earlier overlap/instance/mask fixes compiled but did **not** fix the actual all-grass-disappears bug.
 - [x] Add a **safe default**: selecting multiple grass types no longer automatically hides Classic; experimental PW rendering requires explicit preview opt-in. Add diagnostic resource/instance/visible-flag information in the editor.
