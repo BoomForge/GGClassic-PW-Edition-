@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstring>
 #include <cstdint>
+#include <deque>
 #include <fstream>
 #include <string>
 #include <utility>
@@ -20,6 +21,8 @@ struct State {
     std::string selected;
     std::string root;
     std::string status;
+    char searchQuery[128] = {};
+    unsigned long loadMilliseconds = 0;
     std::string modelSource;
     std::string albedoSource;
     int imageId = 0;
@@ -59,7 +62,7 @@ inline bool ImageFile(const std::string& p) {
 inline bool ModelFile(const std::string& p) {
     // FPE is metadata for placement, not a viewable 3D model file.
     // GLB/OBJ are not in the supported GameGuru preview-import path.
-    return Ends(p, ".dbo") || Ends(p, ".x") || Ends(p, ".fbx");
+    return Ends(p, ".dbo") || Ends(p, ".x");
 }
 inline bool ThumbnailName(const std::string& filename) {
     const std::string n=Lower(filename);
@@ -71,7 +74,7 @@ inline bool ThumbnailName(const std::string& filename) {
            n.find("-preview")!=std::string::npos;
 }
 inline bool ViewableFile(const std::string& path) {
-    return ModelFile(path) || (ImageFile(path) && !ThumbnailName(path));
+    return ModelFile(path) && !ThumbnailName(path);
 }
 inline bool AssetDirectory(const std::string& name) {
     const std::string n=Lower(name);
@@ -173,20 +176,23 @@ inline int FreeImageId() {
     }
     return 0;
 }
-inline void Release() {
+inline void Release(bool keepShader=false) {
     State& s=Current();
     if (s.modelId && ObjectExist(s.modelId)) DeleteObject(s.modelId);
     if (s.imageId && ImageExist(s.imageId)) DeleteImage(s.imageId);
     if (s.modelTextureId && ImageExist(s.modelTextureId)) DeleteImage(s.modelTextureId);
     if (s.previewId && ImageExist(s.previewId)) DeleteImage(s.previewId);
-    if (s.modelEffectId>0) deleteinternaleffect(s.modelEffectId);
-    s.modelId=s.imageId=s.modelTextureId=s.previewId=s.modelEffectId=0;
+    if (!keepShader && s.modelEffectId>0) deleteinternaleffect(s.modelEffectId);
+    s.modelId=s.imageId=s.modelTextureId=s.previewId=0;
+    if (!keepShader) s.modelEffectId=0;
     s.isModel=s.isImage=s.renderRequested=false;
 }
 inline void Select(const std::string& file) {
     State& s=Current();
     if (file==s.selected) return;
-    Release();
+    Release(true); // Keep the compiled preview shader between model selections.
+    const DWORD loadStarted=GetTickCount();
+    s.loadMilliseconds=0;
     s.selected=file; s.status.clear(); s.modelSource.clear(); s.albedoSource.clear();
     s.yaw=s.pitch=0.f; s.zoom=1.f;
     if (!IsFile(file)) { s.status="File is unavailable."; return; }
@@ -246,7 +252,8 @@ inline void Select(const std::string& file) {
     // has no GameGuru object effect. Assign an inspector-owned shader just as
     // the native model importer does: without this it may render no pixels.
     char basicShader[]="effectbank\\reloaded\\entity_basic.fx";
-    s.modelEffectId=loadinternaleffectunique(basicShader,1);
+    if (s.modelEffectId<=0)
+        s.modelEffectId=loadinternaleffectunique(basicShader,1);
     if (s.modelEffectId>0) {
         SetObjectEffect(s.modelId,s.modelEffectId);
         MakeVector4(g.characterkitvector);
@@ -268,6 +275,7 @@ inline void Select(const std::string& file) {
     HideObject(s.modelId);
     s.isModel=true;
     s.renderRequested=true;
+    s.loadMilliseconds=GetTickCount()-loadStarted;
 }
 inline void InvalidateBrowser();
 inline void Open() {
@@ -428,65 +436,202 @@ inline bool InsertIntoScene() {
     s.status="Inserted into the scene in front of the camera.";
     return true;
 }
-// Build the browser once per open/refresh instead of enumerating thousands of
-// unrelated files (scripts, setup metadata, baked thumbnails) every frame.
+// Index only model filenames. Large Steam Files folders are scanned in short
+// batches on editor frames; never traverse the full directory tree in one UI
+// call or load any 3D geometry until the user selects a model.
 struct Entry {
-    std::string name;
+    std::string name; // original filename for load; label is Stem(name)
     bool folder=false;
     std::vector<Entry> children;
+};
+struct FolderScan {
+    std::string path;
+    std::vector<size_t> indices; // stable until final sort, no raw vector pointers
+    int depth=0;
+};
+struct SearchEntry {
+    std::string path;
+    std::string label;
+    std::string lowerLabel;
 };
 struct BrowseIndex {
     std::string root;
     std::vector<Entry> entries;
+    std::deque<FolderScan> pending;
+    std::vector<SearchEntry> searchable;
+    HANDLE find=INVALID_HANDLE_VALUE;
+    WIN32_FIND_DATAA found={};
     bool valid=false;
+    bool scanning=false;
     bool limited=false;
+    int remaining=100000;
     size_t fileCount=0;
+    size_t visited=0;
 };
 inline BrowseIndex& Index() { static BrowseIndex b; return b; }
-inline void InvalidateBrowser() { Index().valid=false; Index().entries.clear(); }
-inline void ScanAssets(const std::string& path, int depth, int& budget,
-                       std::vector<Entry>& result, BrowseIndex& b) {
-    if (depth>15 || !IsFolder(path)) return;
-    WIN32_FIND_DATAA data={};
-    HANDLE find=FindFirstFileA((path+"\\*").c_str(),&data);
-    if (find==INVALID_HANDLE_VALUE) return;
-    do {
-        if (!strcmp(data.cFileName,".") || !strcmp(data.cFileName,"..") ||
-            (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) continue;
-        if (--budget<0) { b.limited=true; break; }
-        const std::string name=data.cFileName;
-        const std::string full=path+"\\"+name;
-        Entry e;
-        e.name=name;
-        e.folder=(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)!=0;
-        if (e.folder) {
-            if (AssetDirectory(name) && depth<15)
-                ScanAssets(full,depth+1,budget,e.children,b);
-            // Hide empty directories and directories containing only metadata.
-            if (!e.children.empty()) result.push_back(std::move(e));
-        } else if (ViewableFile(name)) {
-            result.push_back(std::move(e));
-            ++b.fileCount;
+inline void InvalidateBrowser() {
+    BrowseIndex& b=Index();
+    if (b.find!=INVALID_HANDLE_VALUE) {
+        FindClose(b.find);
+        b.find=INVALID_HANDLE_VALUE;
+    }
+    b.pending.clear();
+    b.entries.clear();
+    b.searchable.clear();
+    b.valid=false;
+    b.scanning=false;
+    b.limited=false;
+    b.fileCount=b.visited=0;
+}
+inline void BeginBrowserScan(const std::string& root) {
+    InvalidateBrowser();
+    BrowseIndex& b=Index();
+    b.root=root;
+    b.valid=true;
+    b.scanning=true;
+    b.remaining=100000;
+    FolderScan first;
+    first.path=root;
+    b.pending.push_back(std::move(first));
+}
+inline std::vector<Entry>* EntriesFor(BrowseIndex& b,
+                                      const std::vector<size_t>& indices) {
+    std::vector<Entry>* entries=&b.entries;
+    for (size_t index: indices) {
+        if (index>=entries->size()) return nullptr;
+        entries=&(*entries)[index].children;
+    }
+    return entries;
+}
+inline void SortPruneUnique(std::vector<Entry>& entries) {
+    for (Entry& e: entries)
+        if (e.folder) SortPruneUnique(e.children);
+    entries.erase(std::remove_if(entries.begin(),entries.end(),
+        [](const Entry& e){ return e.folder && e.children.empty(); }),
+        entries.end());
+    // Prefer .dbo to .x when both formats exist for the same model in
+    // the same directory. Do not deduplicate distinct folders.
+    std::sort(entries.begin(),entries.end(),
+        [](const Entry& a,const Entry& b){
+            if (a.folder!=b.folder) return a.folder>b.folder;
+            const std::string al=Lower(a.folder?a.name:Stem(a.name));
+            const std::string bl=Lower(b.folder?b.name:Stem(b.name));
+            if (al!=bl) return al<bl;
+            if (!a.folder && !b.folder && Ends(a.name,".dbo")!=Ends(b.name,".dbo"))
+                return Ends(a.name,".dbo");
+            return Lower(a.name)<Lower(b.name);
+        });
+    for (size_t i=1;i<entries.size();) {
+        if (!entries[i].folder && !entries[i-1].folder &&
+            Lower(Stem(entries[i].name))==Lower(Stem(entries[i-1].name)))
+            entries.erase(entries.begin()+i);
+        else ++i;
+    }
+}
+inline void IndexSearch(BrowseIndex& b,const std::string& folder,
+                        const std::vector<Entry>& entries) {
+    for (const Entry& e: entries) {
+        const std::string path=folder+"\\"+e.name;
+        if (e.folder) IndexSearch(b,path,e.children);
+        else {
+            SearchEntry found;
+            found.path=path;
+            found.label=Stem(e.name);
+            found.lowerLabel=Lower(found.label);
+            b.searchable.push_back(std::move(found));
         }
-    } while(FindNextFileA(find,&data));
-    FindClose(find);
-    std::sort(result.begin(),result.end(),[](const Entry& a,const Entry& b){
-        if (a.folder!=b.folder) return a.folder>b.folder;
-        return Lower(a.name)<Lower(b.name);
-    });
+    }
+}
+inline void FinaliseBrowserScan(BrowseIndex& b) {
+    if (b.find!=INVALID_HANDLE_VALUE) {
+        FindClose(b.find);
+        b.find=INVALID_HANDLE_VALUE;
+    }
+    b.pending.clear();
+    SortPruneUnique(b.entries);
+    b.searchable.clear();
+    IndexSearch(b,b.root,b.entries);
+    b.fileCount=b.searchable.size();
+    b.scanning=false;
+}
+inline void TickBrowserScan() {
+    BrowseIndex& b=Index();
+    if (!b.valid || !b.scanning) return;
+    const DWORD frameStarted=GetTickCount();
+    // Bound each editor frame by both directory entries and milliseconds.
+    // Searches work once the index is complete, rather than repeatedly
+    // traversing the filesystem on every typed character.
+    for (int processed=0;processed<192 && GetTickCount()-frameStarted<6;) {
+        if (b.pending.empty() || b.remaining<=0) {
+            if (b.remaining<=0) b.limited=true;
+            FinaliseBrowserScan(b);
+            break;
+        }
+        FolderScan& task=b.pending.front();
+        if (b.find==INVALID_HANDLE_VALUE) {
+            b.find=FindFirstFileA((task.path+"\\*").c_str(),&b.found);
+            if (b.find==INVALID_HANDLE_VALUE) {
+                b.pending.pop_front();
+                continue;
+            }
+        }
+        const WIN32_FIND_DATAA info=b.found;
+        const std::string dir=task.path;
+        const int depth=task.depth;
+        const std::vector<size_t> indices=task.indices;
+        const bool hasNext=FindNextFileA(b.find,&b.found)!=0;
+        ++processed;
+        ++b.visited;
+        --b.remaining;
+        if (strcmp(info.cFileName,".") && strcmp(info.cFileName,"..") &&
+            !(info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+            const std::string name=info.cFileName;
+            std::vector<Entry>* children=EntriesFor(b,indices);
+            if (children) {
+                if (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                    if (depth<15 && AssetDirectory(name)) {
+                        Entry item;
+                        item.name=name;
+                        item.folder=true;
+                        children->push_back(std::move(item));
+                        FolderScan child;
+                        child.path=dir+"\\"+name;
+                        child.indices=indices;
+                        child.indices.push_back(children->size()-1);
+                        child.depth=depth+1;
+                        b.pending.push_back(std::move(child));
+                    }
+                } else if (ViewableFile(name)) {
+                    Entry item;
+                    item.name=name;
+                    children->push_back(std::move(item));
+                }
+            }
+        }
+        if (!hasNext) {
+            FindClose(b.find);
+            b.find=INVALID_HANDLE_VALUE;
+            b.pending.pop_front();
+        }
+    }
+    if (b.scanning && b.pending.empty()) FinaliseBrowserScan(b);
 }
 inline void DrawIndexedTree(const std::string& path,const std::string& name,
                             const std::vector<Entry>& entries,int depth) {
-    if(depth>15) return;
+    if (depth>15) return;
     ImGui::PushID(path.c_str());
     const bool expanded=ImGui::TreeNodeEx("##dir",ImGuiTreeNodeFlags_OpenOnArrow,
                                          "%s",name.c_str());
     if (expanded) {
-        for (const Entry& e : entries) {
+        for (const Entry& e: entries) {
             const std::string full=path+"\\"+e.name;
             if (e.folder) DrawIndexedTree(full,e.name,e.children,depth+1);
-            else if (ImGui::Selectable(e.name.c_str(),Current().selected==full))
-                Select(full);
+            else {
+                ImGui::PushID(full.c_str());
+                if (ImGui::Selectable(Stem(e.name).c_str(),Current().selected==full))
+                    Select(full);
+                ImGui::PopID();
+            }
         }
         ImGui::TreePop();
     }
@@ -494,16 +639,37 @@ inline void DrawIndexedTree(const std::string& path,const std::string& name,
 }
 inline void DrawTree(const std::string& path,const std::string& name,int depth) {
     BrowseIndex& b=Index();
-    if (!b.valid || b.root!=path) {
-        b.root=path;
-        b.entries.clear();
-        b.fileCount=0;
-        b.limited=false;
-        int budget=100000; // global scan cap keeps malformed/huge installs bounded
-        ScanAssets(path,0,budget,b.entries,b);
-        b.valid=true;
+    if (!b.valid || b.root!=path) BeginBrowserScan(path);
+    TickBrowserScan();
+    if (b.scanning)
+        ImGui::TextDisabled("Indexing models... %u files checked",
+                            (unsigned)b.visited);
+    else
+        DrawIndexedTree(path,name,b.entries,depth);
+}
+inline void DrawSearchResults(const std::string& query) {
+    BrowseIndex& b=Index();
+    if (!b.valid) return;
+    if (b.scanning) {
+        ImGui::TextDisabled("Searching after model index completes...");
+        return;
     }
-    DrawIndexedTree(path,name,b.entries,depth);
+    const std::string needle=Lower(query);
+    size_t matches=0;
+    for (const SearchEntry& e: b.searchable) {
+        if (e.lowerLabel.find(needle)==std::string::npos) continue;
+        ++matches;
+        if (matches>200) continue; // Keep very broad search responsive.
+        ImGui::PushID(e.path.c_str());
+        if (ImGui::Selectable(e.label.c_str(),Current().selected==e.path))
+            Select(e.path);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s",e.path.c_str());
+        ImGui::PopID();
+    }
+    if (matches==0) ImGui::TextDisabled("No matching models.");
+    if (matches>200)
+        ImGui::TextDisabled("Showing first 200 of %u matches. Refine search.",
+                            (unsigned)matches);
 }
 inline void Draw() {
     State& s=Current();
@@ -515,17 +681,33 @@ inline void Draw() {
     if (visible) {
         const float left=(std::min)(300.f,ImGui::GetContentRegionAvail().x*0.35f);
         ImGui::BeginChild("##PWAssetDirectoryTree",ImVec2(left,0),true);
-        ImGui::TextUnformatted("Models and texture images");
-        if (ImGui::Button("Refresh Files##PWAssetRefresh"))
+        ImGui::TextUnformatted("3D Models");
+        if (ImGui::Button("Refresh Models##PWAssetRefresh"))
             InvalidateBrowser();
+        ImGui::InputText("Search models##PWAssetSearch",s.searchQuery,
+                         sizeof(s.searchQuery));
         ImGui::Separator();
-        DrawTree(s.root,"Files",0);
+        // The scan runs in small main-thread slices: no heavy blocking
+        // recursive walk when the Inspector first opens.
+        if (!Index().valid || Index().root!=s.root)
+            BeginBrowserScan(s.root);
+        TickBrowserScan();
+        if (Index().scanning)
+            ImGui::TextDisabled("Indexing models... %u entries checked",
+                                (unsigned)Index().visited);
+        else {
+            ImGui::TextDisabled("%u models", (unsigned)Index().fileCount);
+            if (s.searchQuery[0])
+                DrawSearchResults(s.searchQuery);
+            else
+                DrawIndexedTree(s.root,"Files",Index().entries,0);
+        }
         if (Index().limited)
-            ImGui::TextDisabled("Asset scan limit reached; some folders may be omitted.");
+            ImGui::TextDisabled("Scan limit reached; some folders may be omitted.");
         ImGui::EndChild();
         ImGui::SameLine();
         ImGui::BeginChild("##PWAssetPreview",ImVec2(0,0),true);
-        ImGui::TextWrapped("%s",s.selected.empty()?"Select a file on the left":NameOf(s.selected).c_str());
+        ImGui::TextWrapped("%s",s.selected.empty()?"Select a model on the left":Stem(s.selected).c_str());
         ImGui::Separator();
         if (s.isImage && s.imageId && ImageExist(s.imageId)) {
             const float w=(std::max)(1.f,(float)ImageWidth(s.imageId));
@@ -575,7 +757,8 @@ inline void Draw() {
                 }
                 if (changed) s.renderRequested=true;
             }
-            ImGui::TextDisabled("Drag to rotate. Scroll to zoom.");
+            ImGui::TextDisabled("Drag to rotate. Scroll to zoom. Load: %lu ms",
+                                s.loadMilliseconds);
             if (ImGui::Button("Reset View")) {
                 s.yaw=s.pitch=0.f;s.zoom=1.f;s.renderRequested=true;
             }
@@ -591,7 +774,7 @@ inline void Draw() {
         } else if (!s.status.empty()) {
             ImGui::TextWrapped("%s",s.status.c_str());
         } else {
-            ImGui::TextDisabled("Select a DBO, X, FBX model or PNG, DDS, JPG, BMP, TGA image.");
+            ImGui::TextDisabled("Select a DBO or X model to preview.");
         }
         if (!s.status.empty() && s.isModel) {
             ImGui::Separator();
@@ -600,7 +783,7 @@ inline void Draw() {
         ImGui::EndChild();
     }
     ImGui::End();
-    if (!s.open) { Release(); s.selected.clear(); }
+    if (!s.open) { Release(); InvalidateBrowser(); s.selected.clear(); }
 }
 inline void RenderPending() {
     State& s=Current();
