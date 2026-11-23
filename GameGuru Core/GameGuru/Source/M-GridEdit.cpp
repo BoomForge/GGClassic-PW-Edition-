@@ -41,6 +41,7 @@
 #endif
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <time.h>
 
@@ -21301,10 +21302,11 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
 
 	sObject* pObject = g_ObjectList[displayobj];
 	if (pObject && (inspectorRender || (entid > 0 && entid <= g.entidmaster && t.entityprofile[entid].ischaracter != 1))) {
-		float fAdjustScaleX = 1.0, fAdjustScaleZ = 1.0;
+		float fAdjustScaleX = 1.0, fAdjustScaleY = 1.0, fAdjustScaleZ = 1.0;
 		if (pObject->pInstanceOfObject)
 		{
 			fAdjustScaleX = pObject->position.vecScale[0];
+            fAdjustScaleY = pObject->position.vecScale[1];
 			fAdjustScaleZ = pObject->position.vecScale[2];
 			pObject = pObject->pInstanceOfObject;
 		}
@@ -21318,9 +21320,31 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
 		fValue = fValue * pObject->position.vecScale[2] * fAdjustScaleZ;
 		fOffsetZ = fValue * 0.5f;
         if (inspectorRender) {
-            const float centerY = (pObject->collision.vecMax[1] +
-                                   pObject->collision.vecMin[1]) * 0.5f;
-            fOffsetY = centerY * pObject->position.vecScale[1];
+            // Unlike a native thumbnail, a raw DBO/FBX may have an origin far
+            // away from its actual mesh. Aim at the scaled bounding-box centre.
+            // Rotate the centre with the model so drag-orbit stays centred even
+            // when the model pivot is offset from the geometry.
+            const float cx = (pObject->collision.vecMax[0] +
+                              pObject->collision.vecMin[0]) * 0.5f *
+                              pObject->position.vecScale[0] * fAdjustScaleX;
+            const float cy = (pObject->collision.vecMax[1] +
+                              pObject->collision.vecMin[1]) * 0.5f *
+                              pObject->position.vecScale[1] * fAdjustScaleY;
+            const float cz = (pObject->collision.vecMax[2] +
+                              pObject->collision.vecMin[2]) * 0.5f *
+                              pObject->position.vecScale[2] * fAdjustScaleZ;
+            const float radians = 0.01745329251994329577f;
+            const float p = pitch * radians, y = yaw * radians;
+            const float pitchedY = cy * std::cos(p) - cz * std::sin(p);
+            const float pitchedZ = cy * std::sin(p) + cz * std::cos(p);
+            fOffsetX = cx * std::cos(y) + pitchedZ * std::sin(y);
+            fOffsetY = pitchedY;
+            fOffsetZ = pitchedZ * std::cos(y) - cx * std::sin(y);
+            if (!std::isfinite(fOffsetX) || !std::isfinite(fOffsetY) ||
+                !std::isfinite(fOffsetZ)) {
+                // Malformed bounds must not send the preview camera to NaN.
+                fOffsetX = fOffsetY = fOffsetZ = 0.0f;
+            }
         }
 	}
 	float fLargest = fLargestX;
@@ -21337,9 +21361,13 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
         // The native tooltip uses a hard-coded world camera and terrain
         // height. It can capture a blank landscape when previewing an
         // independent raw model. Frame the actual loaded bounding box.
-        const float extent=(std::max)(fLargestY,
-             (std::max)(fLargestX,fLargestZ));
-        const float radius=(std::max)(6.0f,(std::min)(1500.0f,extent)*2.0f)
+        // Use the complete 3D diagonal so long, flat or tall meshes fit in
+        // the square capture instead of disappearing beyond its edges.
+        const float extent=std::sqrt(fLargestX*fLargestX +
+                                     fLargestY*fLargestY +
+                                     fLargestZ*fLargestZ);
+        const float safeExtent=std::isfinite(extent) ? extent : 100.0f;
+        const float radius=(std::max)(35.0f,(std::min)(8000.0f,safeExtent)*1.6f)
                               * (std::max)(0.35f,(std::min)(4.0f,zoom));
         t.editorfreeflight.c.x_f=GGORIGIN_X + fOffsetX + radius;
         t.editorfreeflight.c.y_f=terrain_height + fOffsetY + radius*0.48f;
