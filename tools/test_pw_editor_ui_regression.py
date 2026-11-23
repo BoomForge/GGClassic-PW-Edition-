@@ -260,6 +260,19 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn("float terrain_height = inspectorRender ? 20000.0f", GRID)
         self.assertIn("if (inspectorRender) {", GRID)
         self.assertIn("const float radius=(std::max)(6.0f", GRID)
+        # Catch accidental extra parentheses in the raw-model camera radius:
+        # the previous mistake passed textual guards but broke MSVC C2059.
+        radius_start = GRID.index("const float radius=(std::max)")
+        radius_end = GRID.index(";", radius_start)
+        radius_expr = GRID[radius_start:radius_end]
+        balance = 0
+        for char in radius_expr:
+            if char == "(":
+                balance += 1
+            elif char == ")":
+                balance -= 1
+                self.assertGreaterEqual(balance, 0, "Inspector camera radius closes too many parentheses")
+        self.assertEqual(balance, 0, "Inspector camera radius has unclosed parentheses")
         self.assertIn("terrain_height + (inspectorRender ? fOffsetY : 0.0f)", GRID)
         self.assertIn("if (!inspectorRender && t.terrain.TerrainID > 0)", GRID)
         self.assertIn("if (!inspectorRender) {", GRID)
