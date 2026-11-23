@@ -11,6 +11,21 @@
 
 > **OWNER-CORRECTED DELIVERY FACT (22 Nov 2026): The current installed PW Edition ALREADY INCLUDES AN IN-ENGINE UPDATER.** Never describe this updater as a future feature, or default to downloading source ZIPs and running `START_PW_TEST_BUILD.cmd` every update. The editor's update command launches the installed `Pixelwolf-GGC-Updater.exe` source-building helper. Distinguish this **existing, owner-confirmed capability** from whether the **latest revision** has passed actual installation and gameplay acceptance; CI compilation is not a local runtime test.
 
+## 23 November 2026 — owner accepted preview repairs; performance and search are now P0
+
+**Owner live acceptance:** The latest Asset Inspector rotation and centring update **"worked really well"**. Preserve drag capture, camera framing, native GameGuru toolbar and permanently docked bottom browser. Owner identified **severe lag while the Inspector was loading** and requested a more focused browser: **only DBO and X models**, **one entry per same-name DBO/X pair** (DBO preferred), **names without file extensions**, plus **a search field in the viewer**. This updates the previous broader popup-listing requirement. Keep internal texture lookup and FBX support in the *separate importer*; they need not appear as selectable assets in this model Inspector.
+
+**Code changes on the same active development branch:**
+- [a9d3055e](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/a9d3055e59626a96e419431157329eb980f65725): bounded incremental filesystem scan rather than a synchronous recursive walk of up to 100,000 items; indexing progress without freezing the editor; index only model filenames, with no preloading of models. Case-insensitive global model search limited to showing first 200 hits; extensionless names and same-directory DBO-over-X deduplication. Measures each selected model's loading time.
+- [b60601ad](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/b60601ad5d805e67e1aedaf335e00f5d6594de06): reuse a completed model index after closing and reopening the popup, and release interrupted scan handles. **Refresh Models** re-indexes as needed.
+- [a1f30b9c](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/a1f30b9ce2ecb95a132d747b006c202bd9aa3976): linear duplicate elimination instead of repeated vector erases.
+- [1a8e3963](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/1a8e3963efa1fb898c40dd3e60da9ed8741cb2dc): updated static UI guards. The Inspector also reuses a compiled preview shader between model selections, releasing it when the popup closes.
+- Detailed acceptance and superseded scope are in [PW_ASSET_INSPECTOR.md](PW_ASSET_INSPECTOR.md). This section supersedes older popup docs that listed selectable FBX and texture images.
+
+**Verification gate:** Source checks do not establish a measured performance improvement on the owner's PC. Latest revision must pass a **full Windows x64 compile** before using the **existing built-in PW Edition updater**; then owner should verify no initial freeze, searchable unique DBO/X model names, quick repeated open, correct model preview/rotation/zoom/insertion, and per-model load timing. Do not claim performance solved until runtime verification.
+
+**Next three actions:** (1) check HEAD CI and repair any build/test failure; (2) install via the *existing in-editor updater* once CI is green and run acceptance; (3) investigate any remaining slow individual model using the new load-ms readout and actual filename/path. Mixed-grass remains a separate unfinished feature.
+
 ## 23 November 2026 — newest LIVE Asset Inspector regression feedback and source changes
 
 **User tested the updated editor** and now confirms **some DBOs do show** in the Asset Inspector. This supersedes the earlier non-specific "nothing changed" report: real model rendering is partially present. Three new issues remain: (1) mouse-dragging the 3D preview **moves the window instead of rotating the model**; (2) model/preview framing is not centred; (3) other DBOs still fail to render. These are unfinished acceptance failures; do not describe the Inspector as visually verified or production-ready.
