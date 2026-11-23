@@ -539,15 +539,23 @@ inline void Draw() {
         } else if (s.isModel && s.modelId && ObjectExist(s.modelId)) {
             ID3D11ShaderResourceView* view=s.previewId?GetImagePointerView(s.previewId):NULL;
             const float size=(std::max)(120.f,(std::min)(500.f,ImGui::GetContentRegionAvail().x-5.f));
-            if (view) ImGui::Image((ImTextureID)view,ImVec2(size,size));
-            else {
-                ImGui::Dummy(ImVec2(size,size));
+            // An Image is only drawn; it does not claim the mouse as an
+            // active UI control. Without a capturing item, dragging the
+            // preview can move the entire inspector window instead of the model.
+            const ImVec2 previewCorner=ImGui::GetCursorScreenPos();
+            ImGui::InvisibleButton("##PWAssetModelOrbit",ImVec2(size,size));
+            const bool previewHovered=ImGui::IsItemHovered();
+            const bool previewActive=ImGui::IsItemActive();
+            if (view) {
+                ImGui::GetWindowDrawList()->AddImage((ImTextureID)view,
+                    previewCorner,ImVec2(previewCorner.x+size,previewCorner.y+size));
+            } else {
                 ImGui::TextDisabled("Preparing 3D preview...");
             }
-            if (ImGui::IsItemHovered()) {
+            if (previewHovered || previewActive) {
                 ImGuiIO& io=ImGui::GetIO();
                 bool changed=false;
-                if (ImGui::IsMouseDragging(0)) {
+                if (previewActive && ImGui::IsMouseDragging(0)) {
                     s.yaw+=io.MouseDelta.x*0.7f;
                     s.pitch+=io.MouseDelta.y*0.7f;
                     if (s.pitch>80.f) s.pitch=80.f;
