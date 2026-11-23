@@ -14,6 +14,12 @@ User request: Add a **separate popup** with the on-disk GameGuru `Files` directo
 - Selecting native DBO/X or FBX automatically creates an ordinary editable FPE/DBO copy under `Files/entitybank/user/PWInspector` before creating the scene entity; the original selected asset is not overwritten. Browsable FPE entries are retired: an inserted browsed raw model becomes a native editable FPE/DBO-backed entity.
 - Preview resources are deleted when selecting a different file or closing the window.
 
+## 23 November 2026 — updated editor appears unchanged (owner report)
+
+The owner reports **"I updated but nothing changed"** after the compiler-error repair. This does **not** count as accepted visual behaviour. The [full Windows x64 build for `0a6fd773`](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45162913299) passed, but the installed executable path, `pw-installed-commit.txt`, whether installation confirmation was accepted, and actual Asset Inspector window behaviour are not independently confirmed.
+
+**First diagnostic:** The updater installs `Guru-MapEditor.exe` but deliberately does not overwrite Steam's original `GameGuru.exe`. Launch `Launch-PW-Edition.cmd` in the selected Steam GameGuru folder, inspect `pw-installed-commit.txt` and confirm the separate **Asset Inspector...** popup from the still-docked Asset Browser is being tested. A normal bottom browser that looks unchanged is expected. The popup should contain **Refresh Files** and **Refresh 3D Preview** and should filter unsupported formats. If the current SHA is installed and the popup's model still appears blank, treat this as a genuine remaining runtime renderer defect; do not claim the asset preview was repaired.
+
 ## 23 November 2026 — updater build failure diagnosed and corrected
 
 The owner ran the **existing in-editor PW Edition updater**, which stopped **before installing** because of MSBuild C2059 (syntax error `')'`). The matching full Windows x64 GitHub CI logs for [#45158348201](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45158348201) and earlier attempts reveal the original location: `M-GridEdit.cpp(21342,76)`, in the new preview camera-radius expression. Both Map Editor and Lightmapper failed at this line.
