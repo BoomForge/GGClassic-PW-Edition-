@@ -280,8 +280,11 @@ inline void Select(const std::string& file) {
 inline void InvalidateBrowser();
 inline void Open() {
     State& s=Current();
-    s.root=std::string(g.fpscrootdir_s.Get())+"\\Files";
-    InvalidateBrowser();
+    const std::string root=std::string(g.fpscrootdir_s.Get())+"\\Files";
+    // Preserve the completed lightweight filename index across popup opens.
+    // Refresh Models is the explicit way to discover newly installed assets.
+    if (s.root!=root) InvalidateBrowser();
+    s.root=root;
     s.open=true;
 }
 inline bool ValidProfilePath(const std::string& full, std::string& relative) {
@@ -783,7 +786,13 @@ inline void Draw() {
         ImGui::EndChild();
     }
     ImGui::End();
-    if (!s.open) { Release(); InvalidateBrowser(); s.selected.clear(); }
+    if (!s.open) {
+        Release();
+        // Do not keep a Windows directory enumeration handle open after
+        // closing midway through indexing; completed indexes stay cached.
+        if (Index().scanning) InvalidateBrowser();
+        s.selected.clear();
+    }
 }
 inline void RenderPending() {
     State& s=Current();
