@@ -21339,7 +21339,7 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
         // independent raw model. Frame the actual loaded bounding box.
         const float extent=(std::max)(fLargestY,
              (std::max)(fLargestX,fLargestZ));
-        const float radius=(std::max)(6.0f,(std::min)(1500.0f,extent)*2.0f))
+        const float radius=(std::max)(6.0f,(std::min)(1500.0f,extent)*2.0f)
                               * (std::max)(0.35f,(std::min)(4.0f,zoom));
         t.editorfreeflight.c.x_f=GGORIGIN_X + fOffsetX + radius;
         t.editorfreeflight.c.y_f=terrain_height + fOffsetY + radius*0.48f;
