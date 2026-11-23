@@ -21291,8 +21291,13 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
 	float fLargestZ = ObjectSizeZ(displayobj,1);
 
 	float fOffsetX = 0.0f,fOffsetZ = 0.0f;
+    float fOffsetY = 0.0f;
 
-	float terrain_height = BT_GetGroundHeight(t.terrain.TerrainID, GGORIGIN_X, GGORIGIN_Z, 1);
+    // Inspector previews must never depend on the live map height or on
+    // terrain/collision at the native thumbnail staging coordinates.
+    // Put the model high in a clean, isolated scene instead.
+    float terrain_height = inspectorRender ? 20000.0f :
+        BT_GetGroundHeight(t.terrain.TerrainID, GGORIGIN_X, GGORIGIN_Z, 1);
 
 	sObject* pObject = g_ObjectList[displayobj];
 	if (pObject && (inspectorRender || (entid > 0 && entid <= g.entidmaster && t.entityprofile[entid].ischaracter != 1))) {
@@ -21312,6 +21317,11 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
 		fValue = ApplyPivot(pObject, 2, GGVECTOR3(pObject->collision.vecMax - pObject->collision.vecMin), fValue);
 		fValue = fValue * pObject->position.vecScale[2] * fAdjustScaleZ;
 		fOffsetZ = fValue * 0.5f;
+        if (inspectorRender) {
+            const float centerY = (pObject->collision.vecMax[1] +
+                                   pObject->collision.vecMin[1]) * 0.5f;
+            fOffsetY = centerY * pObject->position.vecScale[1];
+        }
 	}
 	float fLargest = fLargestX;
 
@@ -21323,15 +21333,31 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
 	if (fLargest >= 1500) fLargest = 1500;
 	if (fLargestY >= 1500) fLargestY = 1500;
 
-	t.editorfreeflight.c.x_f = 25650 + (fLargest*2.4*(inspectorRender ? zoom : 1.0f));
-	if(fLargestY < 10.0f)
-		t.editorfreeflight.c.y_f = terrain_height + 80 + (fLargestY*1.85);
-	else
-		t.editorfreeflight.c.y_f = terrain_height + 50 + (fLargestY*1.85);
-	t.editorfreeflight.c.z_f = 25550 - (fLargest*2.4*(inspectorRender ? zoom : 1.0f));
-	t.editorfreeflight.c.angx_f = 13;
-	t.editorfreeflight.c.angy_f = -180;
-	t.editorfreeflight.s = t.editorfreeflight.c;
+    if (inspectorRender) {
+        // The native tooltip uses a hard-coded world camera and terrain
+        // height. It can capture a blank landscape when previewing an
+        // independent raw model. Frame the actual loaded bounding box.
+        const float extent=(std::max)(fLargestY,
+             (std::max)(fLargestX,fLargestZ));
+        const float radius=(std::max)(6.0f,(std::min)(1500.0f,extent)*2.0f))
+                              * (std::max)(0.35f,(std::min)(4.0f,zoom));
+        t.editorfreeflight.c.x_f=GGORIGIN_X + fOffsetX + radius;
+        t.editorfreeflight.c.y_f=terrain_height + fOffsetY + radius*0.48f;
+        t.editorfreeflight.c.z_f=GGORIGIN_Z + fOffsetZ + radius;
+        t.editorfreeflight.c.angx_f=0.0f;
+        t.editorfreeflight.c.angy_f=0.0f;
+    } else {
+        // Do not change the existing, working native thumbnail framing.
+        t.editorfreeflight.c.x_f=25650 + (fLargest*2.4);
+        if (fLargestY < 10.0f)
+            t.editorfreeflight.c.y_f=terrain_height + 80 + (fLargestY*1.85);
+        else
+            t.editorfreeflight.c.y_f=terrain_height + 50 + (fLargestY*1.85);
+        t.editorfreeflight.c.z_f=25550 - (fLargest*2.4);
+        t.editorfreeflight.c.angx_f=13;
+        t.editorfreeflight.c.angy_f=-180;
+    }
+    t.editorfreeflight.s=t.editorfreeflight.c;
 
 	//Preview object could be reused so store old pos.
 	float fOldObjPosX = ObjectPositionX(displayobj), fOldObjPosY = ObjectPositionY(displayobj), fOldObjPosZ = ObjectPositionZ(displayobj);
@@ -21373,8 +21399,13 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
 
 	PositionCamera(t.editorfreeflight.c.x_f, t.editorfreeflight.c.y_f, t.editorfreeflight.c.z_f);
 	RotateCamera(t.editorfreeflight.c.angx_f, t.editorfreeflight.c.angy_f, 0);
-	PointCamera(GGORIGIN_X + fOffsetX, terrain_height, GGORIGIN_Z + fOffsetZ);
-	
+    PointCamera(GGORIGIN_X + fOffsetX,
+                terrain_height + (inspectorRender ? fOffsetY : 0.0f),
+                GGORIGIN_Z + fOffsetZ);
+    if (inspectorRender) {
+        t.editorfreeflight.c.angx_f=CameraAngleX();
+        t.editorfreeflight.c.angy_f=CameraAngleY();
+    } else {
 	if(fLargestY > 1000.0f)
 		t.editorfreeflight.c.angx_f = CameraAngleX() - 9.0f; //6.0
 	else if (fLargestY > 500.0f)
@@ -21389,6 +21420,7 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
 		t.editorfreeflight.c.angx_f = CameraAngleX() - 4.0f; //6.0
 	t.editorfreeflight.c.angy_f = CameraAngleY();
 	RotateCamera(t.editorfreeflight.c.angx_f, t.editorfreeflight.c.angy_f, 0);
+    }
 
 	PositionObject(displayobj, GGORIGIN_X, terrain_height, GGORIGIN_Z);
 
@@ -21407,12 +21439,14 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
 	
 	visuals_justshaderupdate();
 
-	int iOldSpeedshadows = g.globals.speedshadows;
-	g.globals.speedshadows = 0; //We need all cascades.
-	terrain_shadowupdate();
-	g.globals.speedshadows = iOldSpeedshadows;
+    int iOldSpeedshadows=g.globals.speedshadows;
+    if (!inspectorRender) {
+        g.globals.speedshadows=0; // Native thumbnail needs all cascades.
+        terrain_shadowupdate();
+        g.globals.speedshadows=iOldSpeedshadows;
+    }
 
-	if (t.terrain.TerrainID > 0)
+	if (!inspectorRender && t.terrain.TerrainID > 0)
 	{
 		BT_SetCurrentCamera(t.terrain.gameplaycamera);
 		BT_UpdateTerrainCull(t.terrain.TerrainID);
@@ -21501,9 +21535,11 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
 	}
 
 
-	g.globals.speedshadows = 0; //We need all cascades.
-	terrain_shadowupdate(); //Remove preview objects shadow from cascades.
-	g.globals.speedshadows = iOldSpeedshadows;
+    if (!inspectorRender) {
+        g.globals.speedshadows=0;
+        terrain_shadowupdate(); // Remove native thumbnail shadows.
+        g.globals.speedshadows=iOldSpeedshadows;
+    }
 
 	//Turn off custom clear color.
 	custom_back_color[0] = 0.0f; custom_back_color[1] = 0.0f; custom_back_color[2] = 0.0f; custom_back_color[3] = 0.0f;
