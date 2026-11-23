@@ -14,6 +14,15 @@ User request: Add a **separate popup** with the on-disk GameGuru `Files` directo
 - Selecting native DBO/X or FBX automatically creates an ordinary editable FPE/DBO copy under `Files/entitybank/user/PWInspector` before creating the scene entity; the original selected asset is not overwritten. Browsable FPE entries are retired: an inserted browsed raw model becomes a native editable FPE/DBO-backed entity.
 - Preview resources are deleted when selecting a different file or closing the window.
 
+## 23 November 2026 — updater build failure diagnosed and corrected
+
+The owner ran the **existing in-editor PW Edition updater**, which stopped **before installing** because of MSBuild C2059 (syntax error `')'`). The matching full Windows x64 GitHub CI logs for [#45158348201](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45158348201) and earlier attempts reveal the original location: `M-GridEdit.cpp(21342,76)`, in the new preview camera-radius expression. Both Map Editor and Lightmapper failed at this line.
+
+- **Fix:** Removed the extra closing `) ` in `M-GridEdit.cpp`; committed as [`ade4a423`](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/ade4a423a67a401f37ed87b1ce0c6fdcbcd41e79) and read the corrected source back.
+- **Regression prevention:** [`a6ae4579`](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/a6ae4579a0662917359e2aeb5ecfd9a538b0b7b1) adds explicit parenthesis-balance checking for the preview camera-radius expression.
+- **Build gate:** Source at and before `ac6da5b2` failed full x64 CI despite green static UI tests. The new corrective full Windows run [#45162762476](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45162762476) was still running when recorded; check its live result before the next updater attempt.
+- **Runtime gate:** A successful compile does not establish that a real DBO/FBX model appears. After green CI, update through the **already-installed in-engine updater**, then verify model visibility, rotation, zoom, images, filtered file listing and Insert into Scene. Do not use ZIP/manual-build steps by default.
+
 ## 23 November 2026 — blank preview and noisy file tree
 
 **Owner observation:** The popup opens, but 3D previews show an empty scene rather than the model. The file tree also includes thumbnails and setup files that should not be browsed.
