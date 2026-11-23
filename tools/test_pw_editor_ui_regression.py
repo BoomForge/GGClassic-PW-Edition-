@@ -261,7 +261,9 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('if (matches>200)', inspector)
         self.assertIn('Release(true); // Keep the compiled preview shader', inspector)
         self.assertIn('s.loadMilliseconds=GetTickCount()-loadStarted;', inspector)
-        self.assertIn('if (!s.open) { Release(); InvalidateBrowser();', inspector)
+        self.assertIn('if (s.root!=root) InvalidateBrowser();', inspector)
+        self.assertIn('if (Index().scanning) InvalidateBrowser();', inspector)
+        self.assertIn('if (!s.open) {', inspector)
 
     def test_inspector_frames_raw_3d_in_isolated_preview_with_shader(self):
         inspector = (ROOT / "GameGuru Core/GameGuru/Include/PW-AssetInspector.h").read_text(encoding="utf-8")
