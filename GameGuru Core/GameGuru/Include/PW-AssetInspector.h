@@ -567,6 +567,10 @@ inline void Draw() {
                 s.yaw=s.pitch=0.f;s.zoom=1.f;s.renderRequested=true;
             }
             ImGui::SameLine();
+            if (ImGui::Button("Refresh 3D Preview")) {
+                s.renderRequested=true;
+                s.status.clear();
+            }
             if (ImGui::Button("Insert into Scene"))
                 InsertIntoScene();
             if (s.renderRequested && iLaunchAfterSync==0)
@@ -592,7 +596,9 @@ inline void RenderPending() {
         RenderToPreview(s.modelId,s.previewId,s.yaw,s.pitch,s.zoom);
         s.renderRequested=false;
         if (!ImageExist(s.previewId) || !GetImagePointerView(s.previewId))
-            s.status="3D preview capture failed. Select another model, then retry.";
+            s.status="3D preview capture failed. Use Refresh 3D Preview to retry.";
+        else if (s.status.find("3D preview capture failed")==0)
+            s.status.clear();
     }
 }
 } // namespace PWAssetInspector
