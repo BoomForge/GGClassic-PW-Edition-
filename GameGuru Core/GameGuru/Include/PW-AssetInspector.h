@@ -538,7 +538,12 @@ inline void Draw() {
             ImGui::Text("%d x %d pixels",ImageWidth(s.imageId),ImageHeight(s.imageId));
         } else if (s.isModel && s.modelId && ObjectExist(s.modelId)) {
             ID3D11ShaderResourceView* view=s.previewId?GetImagePointerView(s.previewId):NULL;
-            const float size=(std::max)(120.f,(std::min)(500.f,ImGui::GetContentRegionAvail().x-5.f));
+            const float availableWidth=ImGui::GetContentRegionAvail().x;
+            const float size=(std::max)(120.f,(std::min)(500.f,availableWidth-5.f));
+            // Keep the square 3D viewport centred within the right pane,
+            // independently of the model-space camera centring below.
+            const float leftPadding=(std::max)(0.f,(availableWidth-size)*0.5f);
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX()+leftPadding);
             // An Image is only drawn; it does not claim the mouse as an
             // active UI control. Without a capturing item, dragging the
             // preview can move the entire inspector window instead of the model.
