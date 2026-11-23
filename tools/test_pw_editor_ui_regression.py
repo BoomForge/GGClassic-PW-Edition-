@@ -225,6 +225,44 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('entity_adduniqueentity(false);', inspector)
         self.assertNotIn('DockBuilderDockWindow("Asset Inspector', GRID)
 
+    def test_asset_inspector_filters_setup_files_and_generated_thumbnails(self):
+        inspector = (ROOT / "GameGuru Core/GameGuru/Include/PW-AssetInspector.h").read_text(encoding="utf-8")
+        self.assertIn('return Ends(p, ".dbo") || Ends(p, ".x") || Ends(p, ".fbx");', inspector)
+        self.assertIn("inline bool ViewableFile(const std::string& path)", inspector)
+        self.assertIn("return ModelFile(path) || (ImageFile(path) && !ThumbnailName(path));", inspector)
+        self.assertIn('n.find("thumbnail")', inspector)
+        self.assertIn('n.find("_thumb")', inspector)
+        self.assertIn('n!="thumbnails"', inspector)
+        self.assertIn("if (!e.children.empty()) result.push_back(std::move(e));", inspector)
+        self.assertIn("else if (ViewableFile(name))", inspector)
+        self.assertIn('ImGui::Button("Refresh Files##PWAssetRefresh")', inspector)
+        self.assertIn("InvalidateBrowser();", inspector)
+        self.assertIn("DrawIndexedTree(path,name,b.entries,depth);", inspector)
+        self.assertNotIn('return Ends(p, ".fpe") ||', inspector)
+        self.assertNotIn("if (e.folder) DrawTree(full,e.name,depth+1);", inspector)
+
+    def test_inspector_frames_raw_3d_in_isolated_preview_with_shader(self):
+        inspector = (ROOT / "GameGuru Core/GameGuru/Include/PW-AssetInspector.h").read_text(encoding="utf-8")
+        # Preview temporary IDs must not collide with live GameGuru entity
+        # or image allocations (old 26400 and 71750 were allocated banks).
+        self.assertIn("const int base = 220000;", inspector)
+        self.assertIn("const int base=120500;", inspector)
+        self.assertIn("loadinternaleffectunique(basicShader,1)", inspector)
+        self.assertIn("SetObjectEffect(s.modelId,s.modelEffectId)", inspector)
+        self.assertIn("TextureObject(s.modelId,s.modelTextureId)", inspector)
+        self.assertIn("deleteinternaleffect(s.modelEffectId)", inspector)
+        self.assertIn("if (!ImageExist(s.previewId) || !GetImagePointerView(s.previewId))", inspector)
+        # Old thumbnail renderer uses live terrain elevation, which can
+        # occlude a raw model or leave the capture looking at empty land.
+        self.assertIn("float terrain_height = inspectorRender ? 20000.0f", GRID)
+        self.assertIn("if (inspectorRender) {", GRID)
+        self.assertIn("const float radius=(std::max)(6.0f", GRID)
+        self.assertIn("terrain_height + (inspectorRender ? fOffsetY : 0.0f)", GRID)
+        self.assertIn("if (!inspectorRender && t.terrain.TerrainID > 0)", GRID)
+        self.assertIn("if (!inspectorRender) {", GRID)
+        self.assertIn("GrabImage((inspectorRender ? previewImageId", GRID)
+        self.assertIn("PWAssetInspector::RenderPending();", GRID)
+
     def test_shutdown_trace_records_cleanup_milestones(self):
         self.assertIn('PWShutdownTrace("file-exit accepted")', GRID)
         self.assertIn('PWShutdownTrace("finish entered; before common_justbeforeend")', GRID)
