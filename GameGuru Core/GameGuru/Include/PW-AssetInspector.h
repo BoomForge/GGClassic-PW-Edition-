@@ -24,6 +24,7 @@ struct State {
     int imageId = 0;
     int modelId = 0;
     int modelTextureId = 0;
+    int modelEffectId = 0;
     int previewId = 0;
     float yaw = 0.f;
     float pitch = 0.f;
@@ -127,7 +128,9 @@ inline std::string ResolveProfileAsset(const std::string& fpe, const std::string
     return "";
 }
 inline int FreeObjectId() {
-    const int base = g.importermenuobjectoffset + 8500;
+    // 26400 was INSIDE g.gamerealtimeobjoffset..max, so runtime entities
+    // could claim the preview model ID and leave an empty/broken preview.
+    const int base = 220000;
     for (int i=0;i<900;++i) {
         const int id=base+i;
         if (id>0 && !ObjectExist(id)) return id;
@@ -135,7 +138,9 @@ inline int FreeObjectId() {
     return 0;
 }
 inline int FreeImageId() {
-    const int base=g.importermenuimageoffset+8500;
+    // 71750 falls inside the editor's live thumbnail/image allocation bank.
+    // Reserve IDs beyond established image ranges instead.
+    const int base=120500;
     for (int i=0;i<900;++i) {
         const int id=base+i;
         if (id>0 && !ImageExist(id)) return id;
@@ -148,7 +153,8 @@ inline void Release() {
     if (s.imageId && ImageExist(s.imageId)) DeleteImage(s.imageId);
     if (s.modelTextureId && ImageExist(s.modelTextureId)) DeleteImage(s.modelTextureId);
     if (s.previewId && ImageExist(s.previewId)) DeleteImage(s.previewId);
-    s.modelId=s.imageId=s.modelTextureId=s.previewId=0;
+    if (s.modelEffectId>0) deleteinternaleffect(s.modelEffectId);
+    s.modelId=s.imageId=s.modelTextureId=s.previewId=s.modelEffectId=0;
     s.isModel=s.isImage=s.renderRequested=false;
 }
 inline void Select(const std::string& file) {
@@ -208,10 +214,24 @@ inline void Select(const std::string& file) {
         s.modelId=0;
         return;
     }
+    // A standalone raw DBO/X/FBX isn't registered as an entity and normally
+    // has no GameGuru object effect. Assign an inspector-owned shader just as
+    // the native model importer does: without this it may render no pixels.
+    char basicShader[]="effectbank\\reloaded\\entity_basic.fx";
+    s.modelEffectId=loadinternaleffectunique(basicShader,1);
+    if (s.modelEffectId>0) {
+        SetObjectEffect(s.modelId,s.modelEffectId);
+        MakeVector4(g.characterkitvector);
+        SetVector4(g.characterkitvector,500000,1,0,0);
+        SetEffectConstantV(s.modelEffectId,"EntityEffectControl",g.characterkitvector);
+        DeleteVector4(g.characterkitvector);
+    }
     if (!s.albedoSource.empty()) {
         s.modelTextureId=FreeImageId();
         if (s.modelTextureId) {
             LoadImage((LPSTR)s.albedoSource.c_str(),s.modelTextureId);
+            // Bind AFTER the effect: the native importer does the same
+            // because a new effect can discard old texture stages.
             if (ImageExist(s.modelTextureId)) TextureObject(s.modelId,s.modelTextureId);
         }
     }
@@ -492,7 +512,10 @@ inline void Draw() {
             ID3D11ShaderResourceView* view=s.previewId?GetImagePointerView(s.previewId):NULL;
             const float size=(std::max)(120.f,(std::min)(500.f,ImGui::GetContentRegionAvail().x-5.f));
             if (view) ImGui::Image((ImTextureID)view,ImVec2(size,size));
-            else ImGui::Dummy(ImVec2(size,size));
+            else {
+                ImGui::Dummy(ImVec2(size,size));
+                ImGui::TextDisabled("Preparing 3D preview...");
+            }
             if (ImGui::IsItemHovered()) {
                 ImGuiIO& io=ImGui::GetIO();
                 bool changed=false;
@@ -540,6 +563,8 @@ inline void RenderPending() {
         s.modelId>0 && ObjectExist(s.modelId) && s.previewId>0) {
         RenderToPreview(s.modelId,s.previewId,s.yaw,s.pitch,s.zoom);
         s.renderRequested=false;
+        if (!ImageExist(s.previewId) || !GetImagePointerView(s.previewId))
+            s.status="3D preview capture failed. Select another model, then retry.";
     }
 }
 } // namespace PWAssetInspector
