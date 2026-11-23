@@ -11,6 +11,19 @@
 
 > **OWNER-CORRECTED DELIVERY FACT (22 Nov 2026): The current installed PW Edition ALREADY INCLUDES AN IN-ENGINE UPDATER.** Never describe this updater as a future feature, or default to downloading source ZIPs and running `START_PW_TEST_BUILD.cmd` every update. The editor's update command launches the installed `Pixelwolf-GGC-Updater.exe` source-building helper. Distinguish this **existing, owner-confirmed capability** from whether the **latest revision** has passed actual installation and gameplay acceptance; CI compilation is not a local runtime test.
 
+## 23 November 2026 — newest LIVE Asset Inspector regression feedback and source changes
+
+**User tested the updated editor** and now confirms **some DBOs do show** in the Asset Inspector. This supersedes the earlier non-specific "nothing changed" report: real model rendering is partially present. Three new issues remain: (1) mouse-dragging the 3D preview **moves the window instead of rotating the model**; (2) model/preview framing is not centred; (3) other DBOs still fail to render. These are unfinished acceptance failures; do not describe the Inspector as visually verified or production-ready.
+
+**Committed source-level fixes:** [`39afb780`](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/39afb780f6fbfea49a207e6a4edcbca852e2d82c) uses ImGui InvisibleButton mouse capture around the actual preview so left drag acts on the model, not the popup; [`757bcbf7`](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/757bcbf7b7c3c847c1d44aea7fa900fe2145a7bc) frames raw models around their rotated scaled bounds and uses the spatial diagonal for safe fit; [`0742de6a`](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/0742de6a098d0e9596384c1181c1ac8c7f1aed7a) centres the preview square in the right pane. [`4480c218`](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/4480c21834300da0d9a6407d4b4b0c172ea0862a) adds static regression checks of those paths. The prior UI regression run for this code [#45166595627](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45166595627) **PASSED**. Full Windows x64 run [#45166606100](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45166606100) **queued** when checked; recheck latest CI at HEAD before installing. These are **unverified runtime attempts**, not an accepted fix.
+
+**Immediate next three actions:**
+1. Verify completed full x64 build result for latest revision, fix compiler regressions if any, retain the draft development PR.
+2. Through **owner's already-integrated PW Edition updater**, install after green CI, then test on a known-good DBO: the image must remain fixed as mouse dragging spins the model, mouse wheel zooms, and camera keeps geometry centred on reset/rotation.
+3. Investigate specific DBO preview failures using two file names/paths (one failing, one working) and the preview status/screenshot. Inspect material/shader, mesh validity and preview capture path; do not infer all models work from successful compilation. Other grass-mix work remains outstanding.
+
+See [PW_ASSET_INSPECTOR.md](PW_ASSET_INSPECTOR.md) for implementation details.
+
 ## 23 November 2026 — latest owner report: updater ran, editor appears unchanged
 
 **Owner report (not independently verified):** After retrying the built-in updater following the Asset Inspector C2059 fix, the owner reports **"I updated but nothing changed"**. Treat this as an unresolved **runtime/installation acceptance failure**, not proof that the Asset Inspector visuals are fixed, and not proof the updater failed. The specific unchanged behaviour and installed source commit were not supplied.
