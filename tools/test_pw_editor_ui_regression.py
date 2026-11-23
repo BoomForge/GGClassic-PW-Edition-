@@ -238,6 +238,9 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('ImGui::Button("Refresh Files##PWAssetRefresh")', inspector)
         self.assertIn("InvalidateBrowser();", inspector)
         self.assertIn("DrawIndexedTree(path,name,b.entries,depth);", inspector)
+        self.assertIn('TextureForModel(const std::string& model)', inspector)
+        self.assertIn('FindFirstFileA((folder+"\\\\*.fpe").c_str(),&data)', inspector)
+        self.assertIn('s.albedoSource=TextureForModel(file);', inspector)
         self.assertNotIn('return Ends(p, ".fpe") ||', inspector)
         self.assertNotIn("if (e.folder) DrawTree(full,e.name,depth+1);", inspector)
 
@@ -262,6 +265,8 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn("if (!inspectorRender) {", GRID)
         self.assertIn("GrabImage((inspectorRender ? previewImageId", GRID)
         self.assertIn("PWAssetInspector::RenderPending();", GRID)
+        self.assertIn('ImGui::Button("Refresh 3D Preview")', inspector)
+        self.assertIn("s.renderRequested=true;", inspector)
 
     def test_shutdown_trace_records_cleanup_milestones(self):
         self.assertIn('PWShutdownTrace("file-exit accepted")', GRID)
