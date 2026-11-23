@@ -524,12 +524,13 @@ inline void SortPruneUnique(std::vector<Entry>& entries) {
                 return Ends(a.name,".dbo");
             return Lower(a.name)<Lower(b.name);
         });
-    for (size_t i=1;i<entries.size();) {
-        if (!entries[i].folder && !entries[i-1].folder &&
-            Lower(Stem(entries[i].name))==Lower(Stem(entries[i-1].name)))
-            entries.erase(entries.begin()+i);
-        else ++i;
-    }
+    // Collapse adjacent .dbo/.x aliases in one linear pass instead of
+    // repeatedly erasing from a vector (quadratic on large asset folders).
+    entries.erase(std::unique(entries.begin(),entries.end(),
+        [](const Entry& a,const Entry& b){
+            return !a.folder && !b.folder &&
+                   Lower(Stem(a.name))==Lower(Stem(b.name));
+        }),entries.end());
 }
 inline void IndexSearch(BrowseIndex& b,const std::string& folder,
                         const std::vector<Entry>& entries) {
