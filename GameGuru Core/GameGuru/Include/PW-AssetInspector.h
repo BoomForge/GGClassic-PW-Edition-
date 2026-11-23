@@ -55,7 +55,27 @@ inline bool ImageFile(const std::string& p) {
            Ends(p, ".jpeg") || Ends(p, ".bmp") || Ends(p, ".tga");
 }
 inline bool ModelFile(const std::string& p) {
-    return Ends(p, ".fpe") || Ends(p, ".dbo") || Ends(p, ".x") || Ends(p, ".fbx");
+    // FPE is metadata for placement, not a viewable 3D model file.
+    // GLB/OBJ are not in the supported GameGuru preview-import path.
+    return Ends(p, ".dbo") || Ends(p, ".x") || Ends(p, ".fbx");
+}
+inline bool ThumbnailName(const std::string& filename) {
+    const std::string n=Lower(filename);
+    return n.find("thumbnail")!=std::string::npos ||
+           n.find("_thumb")!=std::string::npos ||
+           n.find("-thumb")!=std::string::npos ||
+           n.find("thumb_")==0 || n.find("thumb-")==0 ||
+           n.find("_preview")!=std::string::npos ||
+           n.find("-preview")!=std::string::npos;
+}
+inline bool ViewableFile(const std::string& path) {
+    return ModelFile(path) || (ImageFile(path) && !ThumbnailName(path));
+}
+inline bool AssetDirectory(const std::string& name) {
+    const std::string n=Lower(name);
+    return n!="thumb" && n!="thumbs" && n!="thumbnail" &&
+           n!="thumbnails" && n!="preview" && n!="previews" &&
+           n!="__pycache__";
 }
 inline std::string FolderOf(const std::string& file) {
     const size_t p = file.find_last_of("\\/");
@@ -201,9 +221,11 @@ inline void Select(const std::string& file) {
     s.isModel=true;
     s.renderRequested=true;
 }
+inline void InvalidateBrowser();
 inline void Open() {
     State& s=Current();
     s.root=std::string(g.fpscrootdir_s.Get())+"\\Files";
+    InvalidateBrowser();
     s.open=true;
 }
 inline bool ValidProfilePath(const std::string& full, std::string& relative) {
@@ -358,41 +380,82 @@ inline bool InsertIntoScene() {
     s.status="Inserted into the scene in front of the camera.";
     return true;
 }
-struct Entry { std::string name; bool folder=false; };
-inline void DrawTree(const std::string& path, const std::string& name, int depth) {
+// Build the browser once per open/refresh instead of enumerating thousands of
+// unrelated files (scripts, setup metadata, baked thumbnails) every frame.
+struct Entry {
+    std::string name;
+    bool folder=false;
+    std::vector<Entry> children;
+};
+struct BrowseIndex {
+    std::string root;
+    std::vector<Entry> entries;
+    bool valid=false;
+    bool limited=false;
+    size_t fileCount=0;
+};
+inline BrowseIndex& Index() { static BrowseIndex b; return b; }
+inline void InvalidateBrowser() { Index().valid=false; Index().entries.clear(); }
+inline void ScanAssets(const std::string& path, int depth, int& budget,
+                       std::vector<Entry>& result, BrowseIndex& b) {
     if (depth>15 || !IsFolder(path)) return;
+    WIN32_FIND_DATAA data={};
+    HANDLE find=FindFirstFileA((path+"\\*").c_str(),&data);
+    if (find==INVALID_HANDLE_VALUE) return;
+    do {
+        if (!strcmp(data.cFileName,".") || !strcmp(data.cFileName,"..") ||
+            (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) continue;
+        if (--budget<0) { b.limited=true; break; }
+        const std::string name=data.cFileName;
+        const std::string full=path+"\\"+name;
+        Entry e;
+        e.name=name;
+        e.folder=(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)!=0;
+        if (e.folder) {
+            if (AssetDirectory(name) && depth<15)
+                ScanAssets(full,depth+1,budget,e.children,b);
+            // Hide empty directories and directories containing only metadata.
+            if (!e.children.empty()) result.push_back(std::move(e));
+        } else if (ViewableFile(name)) {
+            result.push_back(std::move(e));
+            ++b.fileCount;
+        }
+    } while(FindNextFileA(find,&data));
+    FindClose(find);
+    std::sort(result.begin(),result.end(),[](const Entry& a,const Entry& b){
+        if (a.folder!=b.folder) return a.folder>b.folder;
+        return Lower(a.name)<Lower(b.name);
+    });
+}
+inline void DrawIndexedTree(const std::string& path,const std::string& name,
+                            const std::vector<Entry>& entries,int depth) {
+    if(depth>15) return;
     ImGui::PushID(path.c_str());
     const bool expanded=ImGui::TreeNodeEx("##dir",ImGuiTreeNodeFlags_OpenOnArrow,
-                                           "%s",name.c_str());
+                                         "%s",name.c_str());
     if (expanded) {
-        std::vector<Entry> entries;
-        WIN32_FIND_DATAA data={};
-        HANDLE find=FindFirstFileA((path+"\\*").c_str(),&data);
-        if (find!=INVALID_HANDLE_VALUE) {
-            do {
-                if (entries.size()>=2048) break; // protect editor responsiveness
-                if (!strcmp(data.cFileName,".") || !strcmp(data.cFileName,"..") ||
-                    (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) continue;
-                Entry e;
-                e.name=data.cFileName;
-                e.folder=(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)!=0;
-                entries.push_back(e);
-            } while(FindNextFileA(find,&data));
-            FindClose(find);
-        }
-        std::sort(entries.begin(),entries.end(),[](const Entry& a,const Entry& b){
-            if (a.folder!=b.folder) return a.folder>b.folder;
-            return Lower(a.name)<Lower(b.name);
-        });
         for (const Entry& e : entries) {
             const std::string full=path+"\\"+e.name;
-            if (e.folder) DrawTree(full,e.name,depth+1);
+            if (e.folder) DrawIndexedTree(full,e.name,e.children,depth+1);
             else if (ImGui::Selectable(e.name.c_str(),Current().selected==full))
                 Select(full);
         }
         ImGui::TreePop();
     }
     ImGui::PopID();
+}
+inline void DrawTree(const std::string& path,const std::string& name,int depth) {
+    BrowseIndex& b=Index();
+    if (!b.valid || b.root!=path) {
+        b.root=path;
+        b.entries.clear();
+        b.fileCount=0;
+        b.limited=false;
+        int budget=100000; // global scan cap keeps malformed/huge installs bounded
+        ScanAssets(path,0,budget,b.entries,b);
+        b.valid=true;
+    }
+    DrawIndexedTree(path,name,b.entries,depth);
 }
 inline void Draw() {
     State& s=Current();
@@ -404,9 +467,13 @@ inline void Draw() {
     if (visible) {
         const float left=(std::min)(300.f,ImGui::GetContentRegionAvail().x*0.35f);
         ImGui::BeginChild("##PWAssetDirectoryTree",ImVec2(left,0),true);
-        ImGui::TextUnformatted("GameGuru Files");
+        ImGui::TextUnformatted("Models and texture images");
+        if (ImGui::Button("Refresh Files##PWAssetRefresh"))
+            InvalidateBrowser();
         ImGui::Separator();
         DrawTree(s.root,"Files",0);
+        if (Index().limited)
+            ImGui::TextDisabled("Asset scan limit reached; some folders may be omitted.");
         ImGui::EndChild();
         ImGui::SameLine();
         ImGui::BeginChild("##PWAssetPreview",ImVec2(0,0),true);
@@ -456,7 +523,7 @@ inline void Draw() {
         } else if (!s.status.empty()) {
             ImGui::TextWrapped("%s",s.status.c_str());
         } else {
-            ImGui::TextDisabled("Images and FPE, DBO, X or FBX models are previewable.");
+            ImGui::TextDisabled("Select a DBO, X, FBX model or PNG, DDS, JPG, BMP, TGA image.");
         }
         if (!s.status.empty() && s.isModel) {
             ImGui::Separator();
