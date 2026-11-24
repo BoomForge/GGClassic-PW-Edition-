@@ -33,6 +33,28 @@ extern bool bUpdateVeg;
 void grass_init ( void )
 {
     PWGrassMix::ResetInstances(); // release previous map's owned instances
+    // A saved mixed-grass map must retain its actual first selected species
+    // as the native Classic base even after the level header restores the
+    // previously selected single-style vegbank setting.
+    if (PWGrassMix::RenderEnabled())
+    {
+        for (int slotIndex=0; slotIndex<PWGrassMix::MaxStyles; ++slotIndex)
+        {
+            const PWGrassMix::Slot& slot=PWGrassMix::slots[slotIndex];
+            if (!slot.enabled || slot.weight<=0.f || slot.style.empty()) continue;
+            for (int bank=1; bank<=g.vegstylemax; ++bank)
+            {
+                if (!PWStyleImport::Same(slot.style,t.vegstylebank_s[bank].Get()))
+                    continue;
+                g.vegstyleindex=bank;
+                g.vegstyle_s=t.vegstylebank_s[bank];
+                t.visuals.vegetationindex=bank;
+                t.visuals.vegetation_s=t.vegstylebank_s[bank];
+                break;
+            }
+            break;
+        }
+    }
 	//  init our resource values
 	t.tGrassObj=t.terrain.objectstartindex+6;
 	t.tGrassImg=t.terrain.imagestartindex+8;
