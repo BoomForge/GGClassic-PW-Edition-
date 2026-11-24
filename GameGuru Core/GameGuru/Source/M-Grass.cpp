@@ -8,6 +8,7 @@
 #include "PW-StyleImport.h"
 #include <array>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -737,7 +738,9 @@ struct RenderStyle {
     int source = 0;
     int image = 0;
     int effect = 0; // Own standard entity shader; raw vegetation DBO has none.
-    float scale = 200.f;
+    float scaleXZ = 200.f;
+    float scaleY = 200.f;
+    float rawWidth = 0.f, rawHeight = 0.f;
     float yaw = 0.f;
     std::vector<int> instances;
     size_t used = 0;
@@ -751,7 +754,9 @@ static std::string lastIssue;
 static int allocatedBase = 0;
 static int FindFreeId() {
     if (!allocatedBase)
-        allocatedBase = g.importermenuobjectoffset + 4000;
+        // Dedicated object bank: do not compete with editor importer/realtime
+        // entities. The Asset Inspector uses 220000..220899 separately.
+        allocatedBase = 230000;
     for (int attempt = 0; attempt < 16000; ++attempt) {
         const int id = allocatedBase++;
         if (id > 0 && !ObjectExist(id)) return id;
@@ -759,7 +764,8 @@ static int FindFreeId() {
     return 0;
 }
 static int FindFreeImageId() {
-    int id = g.importermenuimageoffset + 4000;
+    // Avoid the thumbnail/asset-ID banks and the Asset Inspector images.
+    int id = 125000;
     for (int n = 0; n < 16000; ++n, ++id)
         if (!ImageExist(id)) return id;
     return 0;
@@ -813,8 +819,13 @@ std::string Diagnostics() {
     out << "Overlay models: " << sources << " | objects: " << allocated
         << " | placed: " << placed << " | visible flags: " << markedVisible;
     for (int i = 0; i < MaxStyles; ++i)
-        if (slots[i].enabled && slots[i].weight > 0.f && !slots[i].style.empty())
+        if (slots[i].enabled && slots[i].weight > 0.f && !slots[i].style.empty()) {
             out << " | " << slots[i].style << ": " << render[i].used;
+            if (render[i].source && ObjectExist(render[i].source))
+                out << " (mesh " << render[i].rawWidth << "x"
+                    << render[i].rawHeight << ", scaled "
+                    << render[i].scaleXZ << "%/" << render[i].scaleY << "%)";
+        }
     if (!lastIssue.empty()) out << " | issue: " << lastIssue;
     else if (ready && placed == 0) out << " | issue: no painted samples populated";
     return out.str();
@@ -935,13 +946,45 @@ static bool Prepare() {
         // attaching a shader can clear the earlier mesh texture stages.
         TextureObject(rs.source, rs.image);
         const PWEnvironmentStyle::Settings opt = PWEnvironmentStyle::Read(dir);
-        rs.scale = 200.f * opt.percent / 100.f;
         rs.yaw = opt.yaw;
-        // Source geometry is kept hidden; instance transforms are independent.
-        // Save native style size/yaw for each visible instance below.
-        ScaleObject(rs.source, rs.scale, rs.scale, rs.scale);
+        // The stock vegetation builder scales its imported base mesh AND
+        // applies the VegWidth/VegHeight sliders when it creates the grid.
+        // Our independent 3D instances previously applied only 200% and could
+        // become tiny specks next to the full-size native grass. Normalise
+        // each native style's genuine mesh bounds to the same world units as
+        // the sliders, preserving the optional cloned-style size factor.
+        const float bx = ObjectSizeX(rs.source, 0);
+        const float by = ObjectSizeY(rs.source, 0);
+        const float bz = ObjectSizeZ(rs.source, 0);
+        rs.rawWidth = (std::max)(std::fabs(bx), std::fabs(bz));
+        rs.rawHeight = std::fabs(by);
+        if (!std::isfinite(rs.rawWidth) || !std::isfinite(rs.rawHeight) ||
+            rs.rawWidth < 0.01f || rs.rawHeight < 0.01f) {
+            lastIssue = "model has empty/invalid grass geometry: " + slots[i].style;
+            return false;
+        }
+        const float styleRatio=(std::max)(0.05f,(std::min)(10.f,opt.percent/100.f));
+        const float targetWidth = t.visuals.VegWidth_f * styleRatio;
+        const float targetHeight = t.visuals.VegHeight_f * styleRatio;
+        if (targetWidth <= 0.f || targetHeight <= 0.f) {
+            lastIssue = "vegetation width/height is zero";
+            return false;
+        }
+        rs.scaleXZ = 100.f * targetWidth / rs.rawWidth;
+        rs.scaleY = 100.f * targetHeight / rs.rawHeight;
+        if (!std::isfinite(rs.scaleXZ) || !std::isfinite(rs.scaleY) ||
+            rs.scaleXZ <= 0.f || rs.scaleY <= 0.f ||
+            rs.scaleXZ > 100000.f || rs.scaleY > 100000.f) {
+            lastIssue = "grass model scale is invalid for " + slots[i].style;
+            return false;
+        }
+        // Keep source geometry hidden but fully prepared; instances borrow
+        // the source mesh/shader/atlas and carry their own transforms.
+        ScaleObject(rs.source, rs.scaleXZ, rs.scaleY, rs.scaleXZ);
         if (rs.yaw != 0.f) YRotateObject(rs.source, rs.yaw);
-        SetObjectTransparency(rs.source, 6);
+        // Mode 6 had a hard 0xCF alpha-test threshold (see CObjectsC.cpp),
+        // discarding much of soft-edged grass. Use alpha blending instead.
+        SetObjectTransparency(rs.source, 2);
         SetObjectMask(rs.source, 1);
         // Entity basic effect clips badly without its standard importer
         // control value. Own the effect so this cannot alter other entities.
@@ -963,8 +1006,8 @@ static bool EnsureInstance(RenderStyle& rs, size_t index) {
         if (!ObjectExist(id)) return false;
         // InstanceObject creates an independent transform and does NOT copy
         // the source object's 200% native grass scaling.
-        ScaleObject(id, rs.scale, rs.scale, rs.scale);
-        SetObjectTransparency(id, 6);
+        ScaleObject(id, rs.scaleXZ, rs.scaleY, rs.scaleXZ);
+        SetObjectTransparency(id, 2);
         SetObjectMask(id, 1);
         rs.instances.push_back(id);
     }
