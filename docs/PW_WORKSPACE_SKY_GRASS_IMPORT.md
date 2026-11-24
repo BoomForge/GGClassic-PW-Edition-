@@ -114,6 +114,39 @@ colour blend.
 - The preview toggle remains **OFF by default**, safe for the owner's existing project. Opting in enables experimental secondary-style overlay on a disposable map. The 320-object budget and original native density mean the 50/50 or 25/75 values are **not yet visually guaranteed** as true final mixed proportions; do not claim weighted mixing is accepted.
 - Full Windows x64 CI and static regression checks must pass; then user uses the **existing built-in updater**, enables *Preview experimental multi-grass*, chooses two very visually different styles, and inspects both viewport and per-style diagnostics. If count for second style is nonzero but it remains invisible, investigate shader/vertex layout/effect constants/camera and texture atlas. Do not label the feature complete until real visual proof.
 
+## 24 November 2026 — deep grass-renderer investigation and corrective build
+
+**Owner request:** Multi-grass **still does not work visually**. Do not repeat the claim that selecting two styles produces visible mixed grass merely because CI passed. Diagnose the full path rather than only changing style weights.
+
+**Primary-source findings (actual GameGuru code, not speculation):**
+
+1. **Saved selections were not drawn.** `PWGrassMix::Load` had deliberately forced `previewEnabled = false` for every map, meaning a correctly saved two-style configuration reliably reloaded as *one native type*. The checkbox was also off when a new mix was configured. The corrected path restores the additive renderer for a valid saved mix, and enables it when a second style is first selected. The owner can still disable the extra styles using **Show additional grass types**, with unchanged Classic grass as fallback.
+2. **Wrong base species.** The terrain editor only synchronised Classic's active style when **exactly one** mix slot was selected. With two or more, an unrelated previously selected native grass could dominate the screen. The base is now the **first enabled mix species** in the editor and again during grass initialization of a saved map.
+3. **Incorrect world dimensions.** Classic creates its grid using the `VegWidth_f` and `VegHeight_f` sliders; the experimental standalone instances ignored those parameters and only used a fixed 200% style scale. The custom path now measures each real loaded DBO/X mesh and normalises instance dimensions against those same vegetation settings. It reports raw mesh width/height and applied scales in diagnostics, rejecting invalid/NaN geometry.
+4. **Scale applied twice.** Inspected Dark Basic's `CObjectsC.cpp` implementation: instances multiply the original source object's scale by their own scale. The experimental code scaled the source and each instance, magnifying/altering the actual sizes twice. The source is now held at native **100%** and only the visible instances receive the calculated size/yaw.
+5. **Alpha was cut too aggressively.** `SetObjectTransparency(...,6)` uses alpha blending **plus a fixed 0xCF (207/255) alpha cutoff** in `CObjectsC.cpp`. That can discard large portions of soft-edged grass textures. Both source and instances now use blended mode **2** without that severe hard alpha threshold; visual alpha appearance must still be tested.
+6. **Temporary ID collision risk.** Previous secondary models/images allocated from importer offsets plus 4000, not guaranteed isolated from editor objects and previews. Grass now uses separate free-ID search ranges starting at **230000 for objects** and **125000 for images** (the Asset Inspector probes a different range).
+7. **Stale painted-mask ordering.** `grass_loop()` previously refreshed the secondary objects **before** rebuilding/refreshing Classic terrain vegetation and bitmap data. The PW refresh now runs **after** the native update, using the latest mask and invalidation state.
+
+**Implementation source and regression commits:**
+- [c6899f89](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/c6899f89e0c4b6a8c3f320d77ed3947960177238) — style dimensions, alpha mode, diagnostic fields, isolated IDs
+- [8f4b0878](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/8f4b08786bfe29965a2d8098f000d34afd5c3f94) — eliminate compounded source/instance scaling
+- [02ff1bb1](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/02ff1bb17d4b7289a0d65177a45d85d3d2015419) — reorder native and PW mask updates
+- [fb7b41e2](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/fb7b41e26f1b0759b0e540fc0c2ffef94080542c) and [8b8696cb](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/8b8696cbd421812792b7918770ffae5dd1b61e4c) — pure tested mesh-size calculation and adoption
+- [5e7d1356](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/5e7d135671b861713009c5f50364d88a9aadeae1) — Windows unit tests for valid/invalid mesh sizes
+- [d497ff08](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/d497ff08187027275d2ded20fdd5903f666134b4) and [31c4d9bd](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/31c4d9bd42aed20e8c3e62206f81cfb6f4c54290) — chosen native base in editor and on saved-map initialization
+- [ebda3896](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/ebda389661ad11f2fa3e998668ad0f4d20c3eb5e) and [b583a026](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/b583a0262f38e4fb41a6b53855306057ee6a04d0) — saved/new mix activation with explicit fallback
+- [41a6134e](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/41a6134e3400166b5b7badc643ea02c57b2bd468) — final targeted UI guards
+
+**Important known design limitation:** Classic's native vegetation grid remains full-density for the chosen primary style. The extra species are separate ordinary objects with a **320-instance budget**. Consequently, even if they appear, **50/50 and 25/75 spread weights are not yet visually proven to represent the requested proportions**, and this additive implementation is *not* a genuine multiple native vegetation grid. Shader, transparency, fog, wind and performance need real in-editor verification before changing the architecture further. Do not mark the feature resolved or public-ready on source inspection alone.
+
+**Test and evidence gate:** Latest full Windows x64 compilation plus both UI and isolated C++ grass-sizing tests must pass for this revision. Then use the **existing in-editor PW Edition updater** on a disposable map (not a manual ZIP):
+1. Paint a substantial grass area with two visually contrasting built-in styles selected at 50/50. Confirm **Show additional grass types** is checked (it should switch on automatically for a new mix). The native first style must remain visible and the second must be visually identifiable.
+2. Capture UI diagnostics (`Overlay models`, `placed`, per-style instance counts, raw mesh size and percentage scales). Compare with the real image rather than treating visible flags as drawn pixels.
+3. Move the camera and paint/erase vegetation; try 25/75, new/custom texture style, F9/test game and save/reload; the overlay must update without stale patches or vanishing grass.
+4. Toggle **Show additional grass types** OFF to verify Classic still renders immediately. Measure FPS and pauses on the owner's GTX 1660 before increasing the instance cap.
+5. If per-style placed counts are nonzero but the secondary isn't visible, inspect the screenshot and shader/texture mesh path next. If counts are zero, inspect missing assets, painted mask and scale diagnostics. Never declare visual success without direct owner confirmation.
+
 ## Required acceptance before an install is called ready
 
 1. Compile full Windows x64 editor at the latest branch head.
