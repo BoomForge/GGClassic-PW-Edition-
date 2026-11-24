@@ -1293,8 +1293,13 @@ void imgui_terrain_loop(void)
                         bUpdateVeg = true;
                         iLastUpdateVeg = 0;
                         g.projectmodified = 1;
-                        // With one type, restore Classic's fast vegetation grid.
-                        if (PWGrassMix::Count() == 1)
+                        // The native Classic renderer is the first enabled
+                        // mix species at full density; other selected species
+                        // are supplementary objects. Previously the native
+                        // base was only updated when Count()==1, leaving an
+                        // unrelated old grass style dominating any multi-mix.
+                        // Keep a valid native species even with two+ slots.
+                        if (PWGrassMix::Count() >= 1)
                         {
                             for (int n = 0; n < PWGrassMix::MaxStyles; ++n)
                             {
