@@ -978,10 +978,12 @@ static bool Prepare() {
             lastIssue = "grass model scale is invalid for " + slots[i].style;
             return false;
         }
-        // Keep source geometry hidden but fully prepared; instances borrow
-        // the source mesh/shader/atlas and carry their own transforms.
-        ScaleObject(rs.source, rs.scaleXZ, rs.scaleY, rs.scaleXZ);
-        if (rs.yaw != 0.f) YRotateObject(rs.source, rs.yaw);
+        // The ObjectSize and draw paths multiply BOTH the source model
+        // scale and the independent instance scale (see CObjectsC.cpp).
+        // Previously scaling both made instance sizes wrong. The source is
+        // hidden and must remain at its native 100% transform; each instance
+        // receives the actual world-size scale and per-style yaw once.
+        ScaleObject(rs.source, 100.f, 100.f, 100.f);
         // Mode 6 had a hard 0xCF alpha-test threshold (see CObjectsC.cpp),
         // discarding much of soft-edged grass. Use alpha blending instead.
         SetObjectTransparency(rs.source, 2);
