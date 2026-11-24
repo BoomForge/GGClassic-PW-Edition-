@@ -300,15 +300,7 @@ void grass_loop ( void )
     static bool pwWasMixed = false;
     const bool pwMixed = PWGrassMix::RenderEnabled() && t.visuals.vegetationmode != 0
         && t.hardwareinfoglobals.nograss == 0;
-    if (pwMixed)
-    {
-        PWGrassMix::Refresh(CameraPositionX(0), CameraPositionZ(0),
-            t.terrain.TerrainID, t.terrain.superflat == 1,
-            TERRAIN_SUPERFLAT_HEIGHT, t.terrain.grassmemblock,
-            t.visuals.VegQuantity_f);
-        // Hide the native one-style grid after the terrain update below.
-    }
-    else if (pwWasMixed)
+    if (!pwMixed && pwWasMixed)
     {
         PWGrassMix::ResetInstances();
         if (t.hardwareinfoglobals.nograss == 0)
@@ -357,8 +349,15 @@ void grass_loop ( void )
 	}
     if (pwMixed)
     {
-        // Experimental mixed objects are drawn ALONGSIDE the native grass.
-        // Never replace a working native grid with these unverified objects.
+        // Refresh only AFTER grass_updategrassfrombitmap/UpdateBlitzTerrain:
+        // the extra species must read the current painted mask, not the
+        // previous frame's image when the vegetation brush was just used.
+        PWGrassMix::Refresh(CameraPositionX(0), CameraPositionZ(0),
+            t.terrain.TerrainID, t.terrain.superflat == 1,
+            TERRAIN_SUPERFLAT_HEIGHT, t.terrain.grassmemblock,
+            t.visuals.VegQuantity_f);
+        // Keep the proven Classic grid visible while verifying the
+        // supplementary shader/material/geometry on the owner's machine.
         ShowVegetationGrid();
     }
 }
