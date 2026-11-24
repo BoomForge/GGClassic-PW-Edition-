@@ -9,6 +9,29 @@
 namespace PWGrassMix {
 constexpr int MaxStyles = 4;
 struct Slot { std::string style; float weight = 0.f; bool enabled = false; };
+// Scales a native grass mesh to the SAME world-size controls used by the
+// Classic vegetation grid. A hidden source object remains at 100%; only
+// visible instances use these percentages (otherwise scale is doubled).
+struct InstanceSizing { float xz = 0.f; float y = 0.f; };
+inline bool ComputeInstanceSizing(float rawWidth, float rawHeight,
+                                  float vegWidth, float vegHeight,
+                                  float stylePercent, InstanceSizing& out) {
+    out = InstanceSizing();
+    if (!std::isfinite(rawWidth) || !std::isfinite(rawHeight) ||
+        !std::isfinite(vegWidth) || !std::isfinite(vegHeight) ||
+        !std::isfinite(stylePercent) || rawWidth < 0.01f ||
+        rawHeight < 0.01f || vegWidth <= 0.f || vegHeight <= 0.f)
+        return false;
+    const float ratio = (std::max)(0.05f, (std::min)(10.f, stylePercent/100.f));
+    const float xz = 100.f * vegWidth * ratio / rawWidth;
+    const float y = 100.f * vegHeight * ratio / rawHeight;
+    if (!std::isfinite(xz) || !std::isfinite(y) || xz <= 0.f || y <= 0.f ||
+        xz > 100000.f || y > 100000.f)
+        return false;
+    out.xz = xz;
+    out.y = y;
+    return true;
+}
 extern Slot slots[MaxStyles];
 extern unsigned revision;
 inline unsigned Hash(unsigned x, unsigned y, unsigned seed = 0x9e3779b9u) {
