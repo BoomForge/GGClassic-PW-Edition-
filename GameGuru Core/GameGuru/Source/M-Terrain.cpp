@@ -1214,6 +1214,7 @@ void imgui_terrain_loop(void)
                         }
                     }
                     bool pwMixChanged = false;
+                    const bool pwMixWasActive = PWGrassMix::Active();
                     for (int i = 0; i < PWGrassMix::MaxStyles; ++i)
                     {
                         PWGrassMix::Slot& slot = PWGrassMix::slots[i];
@@ -1260,16 +1261,19 @@ void imgui_terrain_loop(void)
                                     100.f * slot.weight / total);
                         }
                         ImGui::TextDisabled("Classic remains the first species; preview adds other species.");
-                        ImGui::TextDisabled("Overlay preview limited to 320 instances; ratios are experimental.");
+                        ImGui::TextDisabled("Mixed overlay uses up to 320 extra instances; precise ratios are not yet verified.");
                     }
                     else
                         ImGui::TextDisabled("Select at least two enabled types to mix. One type uses Classic grass.");
 
-                    // This alternate renderer has compiled successfully but
-                    // repeatedly failed visual acceptance. Never activate it
-                    // just by selecting a second style; preserve native grass.
+                    // When a second type is first selected, enable the
+                    // supplementary renderer so the mix actually appears.
+                    // The Classic grass stays visible at all times, and the
+                    // user can explicitly disable secondary grass below.
+                    if (!pwMixWasActive && PWGrassMix::Active())
+                        PWGrassMix::SetPreviewEnabled(true);
                     bool pwPreview = PWGrassMix::PreviewEnabled();
-                    if (ImGui::Checkbox("Preview experimental multi-grass##PWSafeGrassPreview", &pwPreview))
+                    if (ImGui::Checkbox("Show additional grass types##PWSafeGrassPreview", &pwPreview))
                     {
                         PWGrassMix::SetPreviewEnabled(pwPreview);
                         pwMixChanged = true;
