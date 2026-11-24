@@ -11,6 +11,16 @@
 
 > **OWNER-CORRECTED DELIVERY FACT (22 Nov 2026): The current installed PW Edition ALREADY INCLUDES AN IN-ENGINE UPDATER.** Never describe this updater as a future feature, or default to downloading source ZIPs and running `START_PW_TEST_BUILD.cmd` every update. The editor's update command launches the installed `Pixelwolf-GGC-Updater.exe` source-building helper. Distinguish this **existing, owner-confirmed capability** from whether the **latest revision** has passed actual installation and gameplay acceptance; CI compilation is not a local runtime test.
 
+## 24 November 2026 — Discord development reports archived in README
+
+**Owner instruction:** Keep concise public-facing Pixelwolf Edition Discord development updates in the repo's **README.md** as **separate dated historical entries** rather than overwriting or combining posts. This supports future requests to summarize changes and draft fresh Discord posts using the latest handoff and prior published reports.
+
+**Verified implementation:** Added `## Pixelwolf Edition — Discord development updates` above the existing feature tracker in the active development-branch README, with the user's full original **22 November 2026 development overview** and the shorter **24 November 2026 Discord update**, individually headed and listed newest first. Preserved existing README tracker. Future changes should add new dated entries at the top; do not silently rewrite older dated posts. README commit: [`1b8052e7`](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/1b8052e758f4bd7ddfbe946bef135a9c8c3d1fb2).
+
+**Required factual distinction for future Discord posts:** Source merged/committed, GitHub Windows compilation, and owner-tested runtime behaviour are distinct statuses. Never say **multi-grass works**; owner explicitly confirms it still does **not** work. The latest Asset Inspector indexing/search source revision passed Windows x64 CI but has not yet been performance-accepted by the user.
+
+**Links:** [README Discord archive](../README.md#pixelwolf-edition--discord-development-updates); [Asset Inspector handoff](PW_ASSET_INSPECTOR.md).
+
 ## 23 November 2026 — owner accepted preview repairs; performance and search are now P0
 
 **Owner live acceptance:** The latest Asset Inspector rotation and centring update **"worked really well"**. Preserve drag capture, camera framing, native GameGuru toolbar and permanently docked bottom browser. Owner identified **severe lag while the Inspector was loading** and requested a more focused browser: **only DBO and X models**, **one entry per same-name DBO/X pair** (DBO preferred), **names without file extensions**, plus **a search field in the viewer**. This updates the previous broader popup-listing requirement. Keep internal texture lookup and FBX support in the *separate importer*; they need not appear as selectable assets in this model Inspector.
