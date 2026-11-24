@@ -198,9 +198,21 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn("InstanceObject(id, rs.source);", grass)
         # Classic grass templates are 200% scaled. InstanceObject creates
         # independent transforms; the scale/yaw must reach each visible instance.
-        self.assertIn("rs.scale = 200.f * opt.percent / 100.f;", grass)
+        self.assertIn("ComputeInstanceSizing(rs.rawWidth, rs.rawHeight,", grass)
+        self.assertIn("const float bx = ObjectSizeX(rs.source, 0);", grass)
+        self.assertIn("const float by = ObjectSizeY(rs.source, 0);", grass)
+        self.assertIn("ScaleObject(rs.source, 100.f, 100.f, 100.f);", grass)
+        self.assertNotIn("ScaleObject(rs.source, rs.scaleXZ", grass)
+        self.assertIn("SetObjectTransparency(rs.source, 2);", grass)
+        self.assertIn("SetObjectTransparency(id, 2);", grass)
+        self.assertIn("allocatedBase = 230000;", grass)
+        self.assertIn("int id = 125000;", grass)
         self.assertIn("rs.yaw = opt.yaw;", grass)
-        self.assertIn("ScaleObject(id, rs.scale, rs.scale, rs.scale);", grass)
+        self.assertIn("ScaleObject(id, rs.scaleXZ, rs.scaleY, rs.scaleXZ);", grass)
+        self.assertIn("PWGrassMix::Refresh(CameraPositionX(0)", grass)
+        self.assertLess(grass.index("UpdateBlitzTerrain ( CameraPositionX(0),CameraPositionZ(0)"),
+                        grass.index("PWGrassMix::Refresh(CameraPositionX(0)"))
+        self.assertNotIn("SetObjectTransparency(rs.source, 6);", grass)
         self.assertIn("YRotateObject(inst, rs.yaw +", grass)
 
         # Hiding vegetation in the editor also releases PW-created instances.
