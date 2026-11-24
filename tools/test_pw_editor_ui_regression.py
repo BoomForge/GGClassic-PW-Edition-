@@ -194,6 +194,8 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('SetEffectConstantV(rs.effect, "EntityEffectControl", g.characterkitvector);', grass)
         self.assertIn("if (rs.effect > 0) deleteinternaleffect(rs.effect);", grass)
         self.assertIn("PWStyleImport::Same(slots[i].style, g.vegstyle_s.Get())", grass)
+        self.assertIn("if (PWGrassMix::Count() >= 1)", terrain)
+        self.assertNotIn("if (PWGrassMix::Count() == 1)", terrain)
         self.assertIn("Overlay models: ", grass)
         self.assertIn("InstanceObject(id, rs.source);", grass)
         # Classic grass templates are 200% scaled. InstanceObject creates
