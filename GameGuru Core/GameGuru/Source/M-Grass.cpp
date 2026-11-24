@@ -962,21 +962,15 @@ static bool Prepare() {
             lastIssue = "model has empty/invalid grass geometry: " + slots[i].style;
             return false;
         }
-        const float styleRatio=(std::max)(0.05f,(std::min)(10.f,opt.percent/100.f));
-        const float targetWidth = t.visuals.VegWidth_f * styleRatio;
-        const float targetHeight = t.visuals.VegHeight_f * styleRatio;
-        if (targetWidth <= 0.f || targetHeight <= 0.f) {
-            lastIssue = "vegetation width/height is zero";
+        InstanceSizing sizing;
+        if (!ComputeInstanceSizing(rs.rawWidth, rs.rawHeight,
+                t.visuals.VegWidth_f, t.visuals.VegHeight_f,
+                opt.percent, sizing)) {
+            lastIssue = "grass geometry or vegetation size is invalid for " + slots[i].style;
             return false;
         }
-        rs.scaleXZ = 100.f * targetWidth / rs.rawWidth;
-        rs.scaleY = 100.f * targetHeight / rs.rawHeight;
-        if (!std::isfinite(rs.scaleXZ) || !std::isfinite(rs.scaleY) ||
-            rs.scaleXZ <= 0.f || rs.scaleY <= 0.f ||
-            rs.scaleXZ > 100000.f || rs.scaleY > 100000.f) {
-            lastIssue = "grass model scale is invalid for " + slots[i].style;
-            return false;
-        }
+        rs.scaleXZ = sizing.xz;
+        rs.scaleY = sizing.y;
         // The ObjectSize and draw paths multiply BOTH the source model
         // scale and the independent instance scale (see CObjectsC.cpp).
         // Previously scaling both made instance sizes wrong. The source is
