@@ -860,8 +860,9 @@ void Save(const std::string& levelFolder) {
         out << (slots[i].enabled ? 1 : 0) << "|" << slots[i].weight << "|" << slots[i].style << "\n";
 }
 void Load(const std::string& levelFolder) {
-    // Loading another map must never silently reactivate unverified mixed
-    // rendering just because its project contains a grass-mix configuration.
+    // Reset runtime objects while switching maps. Valid saved multi-style
+    // configurations now restore their secondary overlays automatically;
+    // Classic native grass always remains visible as the safe base.
     previewEnabled = false;
     ResetInstances();
     lastIssue.clear();
@@ -883,6 +884,11 @@ void Load(const std::string& levelFolder) {
         slots[i].weight = (std::max)(0.f, (std::min)(100.f, weight));
         slots[i].style = style;
     }
+    // Previously a correctly saved 2+-style mix silently reloaded in
+    // Classic-only mode, so the owner always saw just one grass species.
+    // Allow the optional overlay to resume for a valid saved configuration.
+    // The UI can still turn it off for an immediate Classic-only fallback.
+    previewEnabled = Active();
     ++revision;
 }
 static bool Prepare() {
