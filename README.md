@@ -30,12 +30,115 @@ A> Due to this public repository being hammered by anonymous cloning, we have mo
 
 **Canonical current-state handoff:** [docs/PW_DEVELOPMENT_STATE.md](docs/PW_DEVELOPMENT_STATE.md). For a new chat or a new development revision, read that file on the active development branch, then verify the latest PR commit and CI status before proceeding. It records the current build/runtime distinction, owner-corrected requirements and next acceptance steps. Update and read it back after meaningful changes; historical checklist entries below may be older than the verified handoff.
 
+## Pixelwolf Edition — Discord development updates
+
+This is the chronological archive of short, community-facing development reports. **Each dated post is a separate historical snapshot**: do not silently rewrite an earlier post when the engine changes. Add a new dated entry at the top for future Discord updates, noting fixes, regressions, and the distinction between **committed source**, **Windows build success**, and **user-tested functionality**.
+
+**Important current limitation:** **Multi-grass is not working.** The experimental multiple-grass system has not passed live visual testing. A passing build does not make it functional.
+
+**Posts (newest first):**
+- [24 November 2026 — Asset Inspector and editor stability](#24-november-2026--asset-inspector-and-editor-stability)
+- [22 November 2026 — Original development overview](#22-november-2026--original-development-overview)
+
+### 24 November 2026 — Asset Inspector and editor stability
+
+*Discord-ready development update. This records source changes as of 24 November; the newer model-list/search/performance revision still requires an in-editor test.*
+
+**GAMEGURU CLASSIC — PIXELWOLF EDITION**  
+**Development Update | 24 November 2026**
+
+More progress since the last update! The focus has been improving the Asset Inspector, editor performance and overall stability.
+
+**3D ASSET INSPECTOR**
+- Fixed blank model previews, rotation and centring issues.
+- Added interactive 3D rotation, zoom and improved framing.
+- Simplified the browser to show DBO/X models without duplicate entries or file extensions.
+- Added model search and faster directory indexing.
+- Improved model-loading performance and diagnostics.
+
+**ENGINE & EDITOR**
+- Fixed compilation errors affecting the built-in updater.
+- Improved model preview resource handling.
+- Added further automated regression tests.
+- Preserved the Classic editor layout and familiar workflow.
+
+**CURRENT STATUS**
+- ✅ 3D rotation and centring tested successfully.
+- ✅ Latest Windows x64 build passed.
+- 🔧 New search and performance improvements await in-editor testing.
+- ❌ **Multi-grass rendering still does not work.**
+- 🔧 Further animation and compatibility testing remains.
+
+**The goal remains the same:** Modernise GameGuru Classic without losing what made it simple, accessible and enjoyable to create games with.
+
+*Pixelwolf Edition — actively in development.*
+
+**Technical verification:** [Full Windows x64 success for development commit `42faaf79`](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45170810019). [Asset Inspector engineering handoff](docs/PW_ASSET_INSPECTOR.md). Multi-grass remains a separate unresolved issue; no successful two-species visual test has been recorded.
+
+---
+
+### 22 November 2026 — Original development overview
+
+*Archived original overview, retained as a historical snapshot of the project on 22 November. Subsequent fixes and regressions are documented in later posts above, not retroactively applied here.*
+
+**GAMEGURU CLASSIC — PIXELWOLF EDITION**  
+**Development Update | 22 November 2026**
+
+I have been upgrading GameGuru Classic into a more modern, flexible game engine while preserving its familiar workflow and backwards compatibility.
+
+**EDITOR & WORKFLOW**
+- Traditional engine layout: scene hierarchy left, viewport centre, properties right, asset browser bottom.
+- Restored Classic-style UI colours and improved original toolbar icon recovery.
+- Integrated asset browser with folders, search and thumbnails.
+- Reduced unnecessary delays during asset placement.
+- Nested entity hierarchy, parenting, grouped movement and custom folders.
+- Built-in Lua script editor with syntax highlighting, autocomplete, command library and direct script editing.
+- Optional real-time editor shadows at extended viewing distances.
+
+**GRAPHICS & ASSETS**
+- Added PNG texture support alongside existing DDS.
+- Improved FBX importing, Blender/Mixamo compatibility and texture detection.
+- Better handling of missing textures and problematic models.
+- Added animated transparency/emissive PBR shader.
+- Expanded skeletal rig and animation inspection tools.
+- Began Model Importer 2 and Character Creator 2 research and development.
+
+**ENGINE & PERFORMANCE**
+- Improved level transition safety and error handling.
+- Optional caching and prefetching for faster repeat level loading.
+- Improved engine cleanup between levels to reduce instability.
+- Added loading diagnostics and performance profiling.
+- Investigating editor-to-game loading bottlenecks.
+
+**RPG & GAMEPLAY SYSTEMS**
+- Added optional health, lives, weapons and ammunition continuity between levels.
+- New Lua functions for carrying quest flags, counters and custom values between areas.
+- Foundation for larger interconnected RPG worlds.
+
+**UPDATES & MAINTENANCE**
+- Built-in update menu with external installer.
+- Automatic downloads, integrity checks, backups and rollback safeguards.
+- Windows x64 build support and GitHub automated testing.
+- Latest updater crash identified and corrected.
+
+**CURRENT STATUS**
+
+Most upgrades are implemented in development source, with automated checks passing. Full Windows gameplay testing and visual verification are still underway.
+
+Original icon restoration, editor performance, animation compatibility and some loading improvements remain subject to testing.
+
+Project: Pixelwolf — GameGuru Classic Edition
+
+**Historical clarification:** This report predates later Asset Inspector improvements. As of 24 November, **multi-grass still does not work** and is explicitly tracked as an outstanding defect.
+
+---
+
 ## Pixelwolf Edition — Feature Upgrade Tracker
 
 **Project:** [GGClassic PW Edition](https://github.com/BoomForge/GGClassic-PW-Edition-)  
 **Development branch:** [work/pw-community-integration-20261121](https://github.com/BoomForge/GGClassic-PW-Edition-/tree/work/pw-community-integration-20261121)  
 **Review:** [Draft PR #1](https://github.com/BoomForge/GGClassic-PW-Edition-/pull/1)  
-**Last updated:** 22 November 2026
+**Last updated:** 24 November 2026
 
 The goal is a **fast, familiar first-person world builder** for an early-2000s-style 3D RPG that will grow gradually over a long period. DDS support must remain intact. New graphics formats are **additional**, not replacements.
 
