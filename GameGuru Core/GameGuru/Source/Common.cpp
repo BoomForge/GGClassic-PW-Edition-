@@ -13,6 +13,7 @@
 #include <wininet.h>
 #include "M-WelcomeSystem.h"
 #include "Common-Keys.h"
+#include "PW-DisplayOptions.h"
 #include "CFtpC.h"
 #include "..\..\Dark Basic Public Shared\Dark Basic Pro SDK\Shared\Objects\ShadowMapping\cShadowMaps.h"
 #include "..\..\Dark Basic Public Shared\Include\CObjectsC.h"
@@ -34,6 +35,10 @@
 
 // Used for Free Weekend Promotion Build 
 //#define STEAMOWNERSHIPCHECKFREEWEEKEND
+
+// Startup display selection is standalone-only; retained across initial setup.
+static bool pwDisplayActive=false;
+static PWDisplay::Choice pwDisplayChoice;
 
 // core externs to globals
 extern LPSTR gRefCommandLineString;
@@ -4017,17 +4022,76 @@ void FPSC_Setup ( void )
 			// Allow _e_ usage
 			SetCanUse_e_(1);
 	
+            // Newly exported PW games opt in through setup.ini. Older games
+            // and VR keep their original startup path; restart transitions
+            // reuse the confirmed preference without interrupting gameplay.
+            pwDisplayActive=false;
+            const std::string pwDisplayRoot=g.fpscrootdir_s.Get();
+            const std::string pwSetup=PWLevelFlow::Root(pwDisplayRoot)+"setup.ini";
+            if(g.gvrmode==0 && g.globals.riftmode==0 &&
+                GetPrivateProfileIntA("GAMERUN","pwdisplayoptions",0,pwSetup.c_str())==1) {
+                PWDisplay::Dialog dialog;
+                dialog.desktopW=GetDesktopWidth();dialog.desktopH=GetDesktopHeight();
+                RECT work={};SystemParametersInfoA(SPI_GETWORKAREA,0,&work,0);
+                RECT border={0,0,0,0};AdjustWindowRectEx(&border,WS_OVERLAPPEDWINDOW,FALSE,0);
+                dialog.modes=PWDisplay::Modes(work.right-work.left-(border.right-border.left),
+                    work.bottom-work.top-(border.bottom-border.top));
+                const PWDisplay::Choice safe=PWDisplay::Safe(dialog.modes,dialog.desktopW,dialog.desktopH);
+                PWDisplay::Choice last=safe;
+                const bool previous=PWDisplay::Read(pwDisplayRoot,last)&&PWDisplay::Valid(last,dialog.modes,dialog.desktopW,dialog.desktopH);
+                if(!previous)last=safe;
+                const bool interrupted=PWDisplay::HasPending(pwDisplayRoot);
+                dialog.selection=interrupted?safe:last;
+                bool chosen=false;
+                if(g.iStandaloneIsReloading==0&&!interrupted)chosen=PWDisplay::Configure(dialog);
+                if(interrupted) {
+                    MessageBoxW(nullptr,L"The previous display change was interrupted. Starting with safe display settings.",L"Display recovery",MB_OK|MB_ICONINFORMATION);
+                    last=safe;
+                }
+                if(!chosen)dialog.selection=last;
+                if(PWDisplay::Valid(dialog.selection,dialog.modes,dialog.desktopW,dialog.desktopH)) {
+                    // Never try an unconfirmed mode if the crash-recovery marker
+                    // cannot be written. Safe windowed or previously valid mode only.
+                    const bool changed=chosen&&(!previous||!PWDisplay::Same(dialog.selection,last));
+                    const bool marked=changed&&PWDisplay::MarkPending(pwDisplayRoot);
+                    if(changed&&!marked)dialog.selection=last;
+                    auto apply=[&](const PWDisplay::Choice& c) {
+                        SetWindowModeOn(); // keep DXGI windowed; fullscreen is borderless
+                        SetWindowSettings(c.fullscreen?0:1,0,0);
+                        t.bkwidth=c.width;t.bkheight=c.height;
+                        SetDisplayModeMODBACKBUFFER(c.width,c.height,32,g.gvsync,0,0,c.width,c.height);
+                        SetWindowSize(c.width,c.height);
+                        if(c.fullscreen)SetWindowPosition(0,0);
+                        else SetWindowPosition(work.left+(work.right-work.left-c.width)/2,work.top+(work.bottom-work.top-c.height)/2);
+                        ShowWindow();
+                        g.gdisplaywidth=c.width;g.gdisplayheight=c.height;g.gdisplaydepth=32;g.gfullscreen=0;
+                        pwDisplayChoice=c;
+                    };
+                    apply(dialog.selection);
+                    if(marked) {
+                        if(PWDisplay::Confirm(g_pGlob->hWnd,dialog)) {
+                            if(PWDisplay::Save(pwDisplayRoot,dialog.selection))PWDisplay::ClearPending(pwDisplayRoot);
+                            else {apply(last);PWDisplay::ClearPending(pwDisplayRoot);}
+                        } else {apply(last);PWDisplay::ClearPending(pwDisplayRoot);}
+                    } else if(interrupted) {
+                        if(PWDisplay::Save(pwDisplayRoot,safe))PWDisplay::ClearPending(pwDisplayRoot);
+                    }
+                    pwDisplayActive=true;
+                    timestampactivity(0,"PW startup display options applied");
+                }
+            }
+
 			//  do not need for loading page
 			timestampactivity(0,"_game_hidemouse");
 			game_hidemouse ( );
 	
 			//  Set FULLSCREEN MODE (or keep windowed mode)
-			if (  g.gfullscreen == 1  )  SetWindowModeOff (  );
+			if ( !pwDisplayActive && g.gfullscreen == 1 ) SetWindowModeOff ( );
 	
 			//  set resolution for game
 			timestampactivity(0,"set resolution for game");
-			t.tdisplaymodeselected=0;
-			if ( g.globals.riftmode>0 ) 
+			t.tdisplaymodeselected=pwDisplayActive?1:0;
+			if ( !pwDisplayActive && g.globals.riftmode>0 ) 
 			{
 				g.globals.riftmoderesult = 0;
 				if ( g.globals.riftmoderesult == 0 ) 
@@ -4080,9 +4144,9 @@ void FPSC_Setup ( void )
 		g_fVR920Sensitivity = g.gvrmodemag / 100.0f;
 	
 		//  option use use correct aspect ratio?
-		if (  g.gaspectratio == 1 ) 
+		if ( g.gaspectratio == 1 || pwDisplayActive )
 		{
-			t.aspect_f=GetDesktopWidth() ; t.aspect_f=t.aspect_f/GetDesktopHeight();
+			t.aspect_f=pwDisplayActive?float(pwDisplayChoice.width):float(GetDesktopWidth()); t.aspect_f=t.aspect_f/(pwDisplayActive?float(pwDisplayChoice.height):float(GetDesktopHeight()));
 			g.realaspect_f=t.aspect_f;
 		}
 	}
@@ -4263,10 +4327,16 @@ void FPSC_Setup ( void )
 	if ( t.game.gameisexe == 1 )
 	{
 		//  Must show the window (editor EXE hides by default)
-		SetWindowSettings ( 0, 0, 0 );
-		WindowToFront ( "Game Guru Standalone Executable" );
-		SetWindowSize ( GetDesktopWidth(), GetDesktopHeight() );
-		ShowWindow(); MaximiseWindow();
+		if(!pwDisplayActive) {
+            SetWindowSettings ( 0, 0, 0 );
+            WindowToFront ( "Game Guru Standalone Executable" );
+            SetWindowSize ( GetDesktopWidth(), GetDesktopHeight() );
+            ShowWindow(); MaximiseWindow();
+        } else {
+            // Do not maximise a selected windowed resolution.
+            WindowToFront ( "Game Guru Standalone Executable" );
+            ShowWindow();
+        }
 		DisableEscapeKey();
 
 		// clear screen

@@ -116,6 +116,8 @@ Acceptance criteria:
 
 ### P1 — Basic game display options (windowed/fullscreen and resolution)
 
+**25 November M1 source progress:** Native startup choice, compatible windowed resolution list, borderless desktop fullscreen, saved preference, timed confirmation and interrupted-start recovery. New exports opt in via setup.ini; existing exports and VR retain Classic behaviour. Full Windows and standalone validation remain; exclusive fullscreen/secondary-monitor/in-game selection deferred.
+
 **User request:** A straightforward options menu allowing the player to select **windowed or fullscreen** and choose a **screen resolution**. An uncomplicated settings window presented at game startup is an acceptable alternative to a complete in-game Options menu. This is a general feature for exported games of any genre.
 
 Acceptance criteria:

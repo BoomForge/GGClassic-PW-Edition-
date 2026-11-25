@@ -5,6 +5,8 @@ on:
     paths:
       - "GameGuru Core/GameGuru/Include/PW-LevelFlow.h"
       - "GameGuru Core/GameGuru/Include/PW-PlayerProfile.h"
+      - "GameGuru Core/GameGuru/Include/PW-DisplayOptions.h"
+      - "GameGuru Core/GameGuru/Source/Common.cpp"
       - "GameGuru Core/GameGuru/Shaders and Scripts/scriptbank/global.lua"
       - "GameGuru Core/GameGuru/Shaders and Scripts/scriptbank/pw_transition_state.lua"
       - "GameGuru Core/GameGuru/Include/PW-FPMCache.h"
@@ -29,7 +31,7 @@ jobs:
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do set "VS_PATH=%%i"
           if not defined VS_PATH exit /b 1
           call "%VS_PATH%\Common7\Tools\VsDevCmd.bat" -arch=x64 >nul
-          cl.exe /nologo /std:c++14 /EHsc /W4 /WX /I "GameGuru Core\GameGuru\Include" "tools\test_pw_level_flow_win.cpp" /Fe:pw-level-flow-test.exe
+          cl.exe /nologo /std:c++14 /EHsc /W4 /WX /I "GameGuru Core\GameGuru\Include" "tools\test_pw_level_flow_win.cpp" /Fe:pw-level-flow-test.exe user32.lib
           if errorlevel 1 exit /b 1
       - name: Test level preflight, cache invalidation and archive prefetch
         shell: pwsh

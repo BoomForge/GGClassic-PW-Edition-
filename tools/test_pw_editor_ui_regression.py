@@ -160,6 +160,22 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn("t.te=oldEntity;", weapon)
         self.assertIn("physics_explodesphere ( );", weapon)
 
+    def test_standalone_display_options_preserve_legacy_startup(self):
+        common = (ROOT / "GameGuru Core/GameGuru/Source/Common.cpp").read_text(encoding="utf-8")
+        export = (ROOT / "GameGuru Core/GameGuru/Source/M-MapFile.cpp").read_text(encoding="utf-8")
+        display = (ROOT / "GameGuru Core/GameGuru/Include/PW-DisplayOptions.h").read_text(encoding="utf-8")
+        self.assertIn('GetPrivateProfileIntA("GAMERUN","pwdisplayoptions",0', common)
+        self.assertIn("g.iStandaloneIsReloading==0&&!interrupted", common)
+        self.assertIn("PWDisplay::MarkPending", common)
+        self.assertIn("PWDisplay::Confirm", common)
+        self.assertIn("if(!pwDisplayActive)", common)
+        self.assertIn("SetDisplayModeMODBACKBUFFER(c.width,c.height", common)
+        self.assertIn("SetWindowModeOn();", common)
+        self.assertIn("EnumDisplaySettingsA", display)
+        self.assertIn("d.seconds=15;", display)
+        self.assertIn("PWProfile::Atomic", display)
+        self.assertGreaterEqual(export.count('pwdisplayoptions=1'), 2)
+
     def test_custom_asset_removal_is_recoverable_and_scoped(self):
         self.assertIn('Delete imported asset...', GRID)
         self.assertIn('BeginPopupModal("Delete imported asset##PWRemoveConfirm"', GRID)

@@ -3,6 +3,7 @@
 #include "PW-LevelFlow.h"
 #include "PW-FPMCache.h"
 #include "PW-PlayerProfile.h"
+#include "PW-DisplayOptions.h"
 #include <cassert>
 #include <cstdio>
 #include <string>
@@ -137,6 +138,22 @@ int main()
     envelope.back()='X';
     assert(!PWProfile::Decode(envelope,loaded));
     assert(PWProfile::CurrentLevel(mapbank,"mapbank\\Interiors\\cave.fpm",area));
-    printf("PW LevelFlow + FPM cache + profile storage contract checks passed.\n");
+    const std::vector<PWDisplay::Size> modes={{800,600},{1280,720}};
+    const auto safe=PWDisplay::Safe(modes,1920,1080);
+    assert(!safe.fullscreen&&safe.width==1280&&safe.height==720);
+    assert(PWDisplay::Valid(safe,modes,1920,1080));
+    auto bad=safe;bad.width=9999;
+    assert(!PWDisplay::Valid(bad,modes,1920,1080));
+    const auto full=PWDisplay::Desktop(1920,1080);
+    assert(PWDisplay::Valid(full,modes,1920,1080));
+    assert(!PWDisplay::Valid(full,modes,1280,720));
+    assert(PWDisplay::Save(root,safe));
+    PWDisplay::Choice saved;
+    assert(PWDisplay::Read(root,saved)&&PWDisplay::Same(saved,safe));
+    assert(PWDisplay::MarkPending(root)&&PWDisplay::HasPending(root));
+    PWDisplay::ClearPending(root);assert(!PWDisplay::HasPending(root));
+    Put(PWDisplay::SettingsPath(root),"garbage");
+    assert(!PWDisplay::Read(root,saved));
+    printf("PW LevelFlow + FPM cache + profile + display contract checks passed.\n");
     return 0;
 }
