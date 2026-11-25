@@ -1108,13 +1108,21 @@ static void DrawProbe(float cameraX, float cameraZ) {
     }
     // Place directly in front of camera at a fixed depth, not on the
     // grass mask: this intentionally bypasses terrain sampling and physics.
-    const float degrees=0.01745329251994329577f;
-    const float yaw=CameraAngleY(0)*degrees;
-    const float pitch=CameraAngleX(0)*degrees;
-    const float cx=cameraX+std::sin(yaw)*260.f;
-    const float cz=cameraZ+std::cos(yaw)*260.f;
-    const float cy=CameraPositionY(0)-std::sin(pitch)*260.f;
-    const float dx=std::cos(yaw)*65.f, dz=-std::sin(yaw)*65.f;
+    // Use the actual camera look vector from ccamerac.h, NOT assumed
+    // GameGuru pitch/yaw conventions. This makes the reference test visible
+    // while looking up, down or across the terrain.
+    const float lx=GetCameraLookX(0);
+    const float ly=GetCameraLookY(0);
+    const float lz=GetCameraLookZ(0);
+    const float full=std::sqrt(lx*lx+ly*ly+lz*lz);
+    if (!std::isfinite(full) || full<0.0001f) return;
+    const float xdir=lx/full, ydir=ly/full, zdir=lz/full;
+    const float cx=cameraX+xdir*260.f;
+    const float cy=CameraPositionY(0)+ydir*260.f;
+    const float cz=cameraZ+zdir*260.f;
+    const float horizontal=std::sqrt(xdir*xdir+zdir*zdir);
+    const float dx=horizontal>0.0001f ? zdir*65.f/horizontal : 65.f;
+    const float dz=horizontal>0.0001f ? -xdir*65.f/horizontal : 0.f;
     PositionObject(probeCube,cx-dx,cy,cz-dz);
     PositionObject(probeModel,cx+dx,cy,cz+dz);
     YRotateObject(probeModel,rs.yaw);
