@@ -773,6 +773,19 @@ static bool ready = false;
 static bool previewEnabled = false; // SAFETY: off by default until verified on the owner's GPU.
 static std::string lastIssue;
 static int allocatedBase = 0;
+// These are actual outcomes of painted-mask sampling, NOT GPU pixel counts.
+static unsigned sampledPainted=0, pickedNative=0, pickedSecondary=0;
+static unsigned allocationFailures=0;
+// Explicit proof controls: one opaque magenta cube and one cloned copy of
+// the real secondary-style mesh. Both are camera-relative, never saved.
+static bool probeEnabled = false;
+static int probeCube = 0, probeModel = 0, probeSlot = -1;
+static void ReleaseProbe() {
+    if (probeCube && ObjectExist(probeCube)) DeleteObject(probeCube);
+    if (probeModel && ObjectExist(probeModel)) DeleteObject(probeModel);
+    probeCube=probeModel=0;
+    probeSlot=-1;
+}
 static int FindFreeId() {
     if (!allocatedBase)
         // Dedicated object bank: do not compete with editor importer/realtime
@@ -802,6 +815,7 @@ bool OwnsGrid() {
 }
 void InvalidateMask() { lastCameraCellX = lastCameraCellZ = -999999; }
 void ResetInstances() {
+    ReleaseProbe(); // Remove dependent diagnostic clone before source meshes.
     for (int i = 0; i < MaxStyles; ++i) {
         RenderStyle& rs = render[i];
         for (int id : rs.instances) if (ObjectExist(id)) DeleteObject(id);
@@ -815,6 +829,13 @@ void ResetInstances() {
     lastCameraCellX = lastCameraCellZ = -999999;
     builtRevision = 0;
     allocatedBase = 0;
+    sampledPainted=pickedNative=pickedSecondary=allocationFailures=0;
+}
+bool ProbeEnabled() { return probeEnabled; }
+void SetProbeEnabled(bool enabled) {
+    if (probeEnabled==enabled) return;
+    probeEnabled=enabled;
+    ReleaseProbe();
 }
 void SetPreviewEnabled(bool enabled) {
     if (previewEnabled == enabled) return;
@@ -837,8 +858,17 @@ std::string Diagnostics() {
                 ++markedVisible;
     }
     std::ostringstream out;
-    out << "Overlay models: " << sources << " | objects: " << allocated
-        << " | placed: " << placed << " | visible flags: " << markedVisible;
+    out << "Overlay " << (RenderEnabled() ? "ON" : "OFF")
+        << " | models: " << sources << " | objects: " << allocated
+        << " | placed: " << placed << " | visible flags: " << markedVisible
+        << " | painted mask cells: " << sampledPainted
+        << " | picks native: " << pickedNative
+        << " | picks extra: " << pickedSecondary
+        << " | instance allocation failed: " << allocationFailures;
+    if (probeEnabled)
+        out << " | probe cube: " << probeCube
+            << " / secondary clone: " << probeModel
+            << " (look ahead; magenta cube on left)";
     for (int i = 0; i < MaxStyles; ++i)
         if (slots[i].enabled && slots[i].weight > 0.f && !slots[i].style.empty()) {
             out << " | " << slots[i].style << ": " << render[i].used;
@@ -1021,6 +1051,66 @@ static bool Prepare() {
     builtRevision = revision;
     return true;
 }
+// Distinguish four different failure layers in the LIVE DX11 editor:
+//  1. magenta cube missing: camera/object draw setup or overlay disabled
+//  2. cube visible, real model missing: secondary mesh/shader/atlas draw
+//  3. both visible but natural grass missing: paint-mask/instancing/coverage
+//  4. both and natural grass visible: overlay works; density mix is separate.
+// This is opt-in and creates no content in the saved level.
+static void DrawProbe(float cameraX, float cameraZ) {
+    if (!probeEnabled || !RenderEnabled()) { ReleaseProbe(); return; }
+    int sourceSlot=-1;
+    for (int i=0;i<MaxStyles;++i)
+        if (render[i].source && ObjectExist(render[i].source)) {
+            sourceSlot=i;
+            break;
+        }
+    if (sourceSlot<0) { ReleaseProbe(); return; }
+    if (probeSlot!=sourceSlot) ReleaseProbe();
+    RenderStyle& rs=render[sourceSlot];
+    if (!probeCube) {
+        const int id=FindFreeId();
+        if (!id) { lastIssue="probe: no free diagnostic cube ID"; return; }
+        MakeObjectCube(id, 36.f);
+        if (!ObjectExist(id)) {
+            lastIssue="probe: cannot create diagnostic cube";
+            return;
+        }
+        probeCube=id;
+        SetObjectMask(probeCube,1);
+        SetObjectLight(probeCube,0);
+        SetObjectDiffuse(probeCube,Rgb(255,0,255));
+        SetObjectEmissive(probeCube,Rgb(255,0,255));
+    }
+    if (!probeModel) {
+        const int id=FindFreeId();
+        if (!id) { lastIssue="probe: no free model ID"; return; }
+        CloneObject(id, rs.source);
+        if (!ObjectExist(id)) {
+            lastIssue="probe: cloning secondary grass model failed";
+            return;
+        }
+        probeModel=id;
+        probeSlot=sourceSlot;
+        ScaleObject(probeModel,rs.scaleXZ*2.f,rs.scaleY*2.f,rs.scaleXZ*2.f);
+        SetObjectMask(probeModel,1);
+        SetObjectTransparency(probeModel,2);
+    }
+    // Place directly in front of camera at a fixed depth, not on the
+    // grass mask: this intentionally bypasses terrain sampling and physics.
+    const float degrees=0.01745329251994329577f;
+    const float yaw=CameraAngleY(0)*degrees;
+    const float pitch=CameraAngleX(0)*degrees;
+    const float cx=cameraX+std::sin(yaw)*260.f;
+    const float cz=cameraZ+std::cos(yaw)*260.f;
+    const float cy=CameraPositionY(0)-std::sin(pitch)*260.f;
+    const float dx=std::cos(yaw)*65.f, dz=-std::sin(yaw)*65.f;
+    PositionObject(probeCube,cx-dx,cy,cz-dz);
+    PositionObject(probeModel,cx+dx,cy,cz+dz);
+    YRotateObject(probeModel,rs.yaw);
+    ShowObject(probeCube);
+    ShowObject(probeModel);
+}
 static bool EnsureInstance(RenderStyle& rs, size_t index) {
     while (rs.instances.size() <= index) {
         const int id = FindFreeId();
@@ -1051,11 +1141,13 @@ void Refresh(float cameraX, float cameraZ, int terrainId, bool superflat,
             return;
         }
     }
+    DrawProbe(cameraX,cameraZ);
     const int centerX = static_cast<int>(std::floor(cameraX / 50.f));
     const int centerZ = static_cast<int>(std::floor(cameraZ / 50.f));
     if (lastCameraCellX == centerX && lastCameraCellZ == centerZ) return;
     lastCameraCellX = centerX; lastCameraCellZ = centerZ;
     for (int i = 0; i < MaxStyles; ++i) render[i].used = 0;
+    sampledPainted=pickedNative=pickedSecondary=allocationFailures=0;
 
     // The editor camera is often high above / offset from the grass being
     // painted. A 21x21 (500-unit radius) crop could contain no painted pixels
@@ -1082,13 +1174,24 @@ void Refresh(float cameraX, float cameraZ, int terrainId, bool superflat,
                                     (std::max)(int(ReadMemblockByte(memblockId, nextZ)),
                                                int(ReadMemblockByte(memblockId, nextZ + 4))));
         if (mask <= 0) continue;
+        ++sampledPainted;
         const unsigned hash = Hash(unsigned(cellX), unsigned(cellZ));
         if (Unit(Hash(unsigned(cellX), unsigned(cellZ), 0x42de301u)) >
             (mask / 255.f) * chanceScale) continue;
         const int style = Pick(Unit(hash));
-        if (style < 0 || !render[style].source) continue;
+        if (style < 0) continue;
+        if (!render[style].source) {
+            // Classic's native species is intentionally excluded from this
+            // overlay; log how often our sampler chooses it instead.
+            ++pickedNative;
+            continue;
+        }
+        ++pickedSecondary;
         RenderStyle& rs = render[style];
-        if (!EnsureInstance(rs, rs.used)) continue;
+        if (!EnsureInstance(rs, rs.used)) {
+            ++allocationFailures;
+            continue;
+        }
         const int inst = rs.instances[rs.used++];
         const float x = (cellX + 0.5f) * 50.f +
             (Unit(Hash(unsigned(cellX), unsigned(cellZ), 0xabc123u)) - 0.5f) * 36.f;
