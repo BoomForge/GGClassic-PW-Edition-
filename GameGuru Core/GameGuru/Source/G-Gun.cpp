@@ -3284,6 +3284,11 @@ void gun_updatebulletvisibility ( void )
 	}
 }
 
+// Capture the whole third-person shot at trigger time. Deferred shotgun
+// pellets must not pick a different point when the camera/character moves.
+static PWThirdPerson::Aim pwShotAim;
+static bool pwShotAimValid=false;
+static int pwShotWeapon=0,pwShotFiremode=0;
 void gun_shoot ( void )
 {
 	//  When fire Line (  active )
@@ -3292,10 +3297,19 @@ void gun_shoot ( void )
 		//  170315 - 020 - stop invincible if you shoot
 		g.mp.invincibleTimer = 0;
 
+        pwShotAimValid=false;
+        if(t.playercontrol.thirdperson.enabled==1&&t.gunid>0){
+            float range=g.firemodes[t.gunid][g.firemode].settings.range;
+            if(range<=0.f)range=3000.f;
+            if(t.gun[t.gunid].settings.ismelee==2)range=g.firemodes[t.gunid][0].settings.meleerange;
+            pwShotAimValid=PWThirdPerson::BuildPlayerAim(range,pwShotAim);
+            pwShotWeapon=t.gunid;pwShotFiremode=g.firemode;
+        }
+
 		//  if third person, trigger shot flag
 		if ( t.playercontrol.thirdperson.enabled == 1 ) 
 		{
-			int iWeaponIndex = t.entityelement[t.playercontrol.thirdperson.charactere].eleprof.hasweapon;
+			int iWeaponIndex = t.gunid;
 			if ( iWeaponIndex > 0 )
 			{
 				// this triggers the TPP to rotate to face shot direction
@@ -3425,23 +3439,12 @@ void gun_shoot ( void )
 				//  find starting GetPoint (  for projectile )
 				if (  t.playercontrol.thirdperson.enabled == 1 ) 
 				{
-					//  third person flak (fireball)
-					t.flakangle_f=CameraAngleY(t.terrain.gameplaycamera);
-					t.flakpitch_f=0;
-					t.flakx_f=ObjectPositionX(t.aisystem.objectstartindex);
-					t.flaky_f=ObjectPositionY(t.aisystem.objectstartindex);
-					t.flakz_f=ObjectPositionZ(t.aisystem.objectstartindex);
-					t.tattobj=t.entityelement[t.playercontrol.thirdperson.charactere].attachmentobj;
-					if (  t.tattobj>0 ) 
-					{
-						if (  ObjectExist(t.tattobj) == 1 ) 
-						{
-							t.tattlimb=t.entityelement[t.playercontrol.thirdperson.charactere].attachmentobjfirespotlimb;
-							t.flakx_f=LimbPositionX(t.tattobj,t.tattlimb);
-							t.flaky_f=LimbPositionY(t.tattobj,t.tattlimb);
-							t.flakz_f=LimbPositionZ(t.tattobj,t.tattlimb);
-						}
-					}
+                    // Use the captured muzzle and target direction for projectiles.
+                    if(pwShotAimValid) {
+                        t.flakx_f=pwShotAim.muzzle.x;t.flaky_f=pwShotAim.muzzle.y;t.flakz_f=pwShotAim.muzzle.z;
+                        t.flakangle_f=pwShotAim.yaw;t.flakpitch_f=pwShotAim.pitch;
+                    }
+
 				}
 				else
 				{
@@ -3466,7 +3469,7 @@ void gun_shoot ( void )
 				}
 				//  create and launch projectile
 				t.tProjectileType_s=t.gun[t.gunid].projectile_s  ; weapon_getprojectileid ( );
-				if (  t.tProjectileType>0 ) 
+				if ( t.tProjectileType>0 && (t.playercontrol.thirdperson.enabled==0||pwShotAimValid) )
 				{
 					t.tSourceEntity=0 ; t.tTracerFlag=0;
 					t.tStartX_f=t.flakx_f ; t.tStartY_f=t.flaky_f ; t.tStartZ_f=t.flakz_f;
@@ -3488,11 +3491,14 @@ void gun_shoot ( void )
 		if ( 1 )
 		{
 			t.tradius_f=2000;
-			AICreateSound ( CameraPositionX(), CameraPositionY(), CameraPositionZ(),t.tradius_f,t.tradius_f,-1 );
+			PWThirdPerson::Vec soundOrigin={CameraPositionX(),CameraPositionY(),CameraPositionZ()};
+            int ignored=0;
+            if(t.playercontrol.thirdperson.enabled==1)PWThirdPerson::PlayerOrigin(soundOrigin,ignored);
+            AICreateSound(soundOrigin.x,soundOrigin.y,soundOrigin.z,t.tradius_f,t.tradius_f,-1);
 			g.aidetectnearbymode = 1;
 			g.aidetectnearbycount = 60*4;
-			g.aidetectnearbymodeX_f = CameraPositionX();
-			g.aidetectnearbymodeZ_f = CameraPositionZ();
+			g.aidetectnearbymodeX_f = soundOrigin.x;
+			g.aidetectnearbymodeZ_f = soundOrigin.z;
 		}
 	}
 
@@ -3525,45 +3531,13 @@ void gun_shoot_oneray ( void )
 	// project gun-Line for shot
 	if ( t.playercontrol.thirdperson.enabled == 1 )
 	{
-		// if camera lock, always facing forward when firing
-		float fRangeOfRay = 7000.0f;
-		if ( t.playercontrol.thirdperson.cameralocked == 1 )
-		{
-			int iCharE = t.playercontrol.thirdperson.charactere;
-			float fPlrAngle = ObjectAngleY(t.entityelement[iCharE].obj);
-			t.x1_f = ObjectPositionX(t.entityelement[iCharE].obj);
-			t.y1_f = ObjectPositionY(t.entityelement[iCharE].obj) + 50.0f;
-			t.z1_f = ObjectPositionZ(t.entityelement[iCharE].obj);
-			t.x2_f = NewXValue(t.x1_f, fPlrAngle, 100.0f);
-			t.y2_f = t.y1_f;
-			t.z2_f = NewZValue(t.z1_f, fPlrAngle, 100.0f);
+        if(!pwShotAimValid||pwShotWeapon!=t.gunid||pwShotFiremode!=g.firemode)return;
+        t.range_f=pwShotAim.range;
+        t.x1_f=pwShotAim.muzzle.x;t.y1_f=pwShotAim.muzzle.y;t.z1_f=pwShotAim.muzzle.z;
+        PositionObject(g.hudbankoffset+3,t.x1_f,t.y1_f,t.z1_f);
+        RotateObject(g.hudbankoffset+3,pwShotAim.pitch+t.tcy_f,pwShotAim.yaw+t.tcx_f,0.f);
+        MoveObject(g.hudbankoffset+3,t.range_f);
 
-			// reduce range and scatter distortion
-			fRangeOfRay = 500.0f;
-			t.tcx_f *= (500.0f/7000.0f);
-			t.tcy_f *= (500.0f/7000.0f);
-		}
-		else
-		{
-			// special TPP shooting (from camera for accurate impact coordinate)
-			t.x1_f = t.gunshootspreadposx;
-			t.y1_f = t.gunshootspreadposy;
-			t.z1_f = t.gunshootspreadposz;
-
-			// work out cross-hair position on screen to distant 3D coordinate
-			int iDisplayWidth = GetDisplayWidth();
-			int iDisplayHeight = GetDisplayHeight();
-			PickScreen2D23D(iDisplayWidth * 0.5f, iDisplayHeight * 0.25f, 7000.0f);
-			t.x2_f = t.gunshootspreadposx + GetPickVectorX();
-			t.y2_f = t.gunshootspreadposy + GetPickVectorY();
-			t.z2_f = t.gunshootspreadposz + GetPickVectorZ();
-		}
-
-		// adjust destination vector with bullet inaccuacies
-		PositionObject ( g.hudbankoffset+3, t.x1_f, t.y1_f, t.z1_f );
-		PointObject ( g.hudbankoffset+3, t.x2_f, t.y2_f, t.z2_f );
-		RotateObject ( g.hudbankoffset+3, ObjectAngleX(g.hudbankoffset+3)+t.tcy_f,ObjectAngleY(g.hudbankoffset+3)+t.tcx_f,ObjectAngleZ(g.hudbankoffset+3) );
-		MoveObject ( g.hudbankoffset+3, fRangeOfRay );
 	}
 	else
 	{

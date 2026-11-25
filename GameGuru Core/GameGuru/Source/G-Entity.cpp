@@ -2060,6 +2060,66 @@ bool LineClear(Vec from,Vec to,int ignoredObject,int targetObject) {
     const int hit=IntersectAll(g.entityviewstartobj,g.entityviewendobj,from.x,from.y,from.z,to.x,to.y,to.z,ignoredObject);
     return hit<=0||(targetObject>0&&hit==targetObject);
 }
+// Resolve the visible aim point, then build the physical trajectory from
+// the weapon. Camera geometry is never used directly as a damage ray.
+bool BuildPlayerAim(float range,Aim& aim) {
+    if(t.playercontrol.thirdperson.enabled!=1||t.player[1].health<=0)return false;
+    range=Clamp(Finite(range,3000.f),1.f,100000.f);
+    Vec body={};int avatar=0;
+    if(!PlayerOrigin(body,avatar))return false;
+    const int e=t.playercontrol.thirdperson.charactere;
+    const auto& player=t.entityelement[e];
+    Vec muzzle=body;
+    // Prefer the VWEAP firespot, then the actual hand socket. Do not use
+    // the hidden first-person HUD model or its limb transforms.
+    const int attachment=player.attachmentobj,fire=player.attachmentobjfirespotlimb;
+    if(attachment>0&&ObjectExist(attachment)&&fire>=0&&LimbExist(attachment,fire)) {
+        muzzle={LimbPositionX(attachment,fire),LimbPositionY(attachment,fire),LimbPositionZ(attachment,fire)};
+    } else {
+        const int bank=player.bankindex;
+        if(bank>0) {
+            const int hand=t.entityprofile[bank].firespotlimb;
+            if(hand>=0&&LimbExist(avatar,hand))
+                muzzle={LimbPositionX(avatar,hand),LimbPositionY(avatar,hand),LimbPositionZ(avatar,hand)};
+        }
+    }
+    // Prevent a weapon poking through cover from bypassing the body-side wall.
+    // Invalid/stale attachment transforms fail closed.
+    if(!InReach(body,muzzle,250.f)||!LineClear(body,muzzle,avatar,0))return false;
+    Vec from={},direction={};
+    if(t.playercontrol.thirdperson.cameralocked==1) {
+        // Locked/isometric mode uses character-forward targeting.
+        from=muzzle;direction=ForwardVector(ObjectAngleY(avatar),0.f);
+    } else {
+        from={CameraPositionX(0),CameraPositionY(0),CameraPositionZ(0)};
+        // Match the existing Classic third-person reticle (50%,25%).
+        PickScreen2D23D(GetDisplayWidth()*0.5f,GetDisplayHeight()*0.25f,range);
+        if(!Direction({GetPickVectorX(),GetPickVectorY(),GetPickVectorZ()},direction))return false;
+    }
+    if(!InReach(body,from,10000.f))return false;
+    const Vec end=Add(from,Scale(direction,range+Length(Sub(from,muzzle))));
+    Vec target=end;
+    float nearest=1.f;
+    if(ODERayTerrain(from.x,from.y,from.z,end.x,end.y,end.z)==1) {
+        const Vec hit={ODEGetRayCollisionX(),ODEGetRayCollisionY(),ODEGetRayCollisionZ()};
+        nearest=ContactFraction(from,end,hit,0.f);
+        target=Add(from,Scale(Sub(end,from),nearest));
+    }
+    if(g.lightmappedobjectoffset>=g.lightmappedobjectoffsetfinish)
+        IntersectAll(87000,87000+g.merged_new_objects-1,0,0,0,0,0,0,-123);
+    else IntersectAll(g.lightmappedobjectoffset,g.lightmappedobjectoffsetfinish,0,0,0,0,0,0,-123);
+    // Camera ray only chooses a target. The actual damage ray starts
+    // at the muzzle and can still hit intervening cover.
+    if(IntersectAll(g.entityviewstartobj,g.entityviewendobj,from.x,from.y,from.z,end.x,end.y,end.z,avatar)>0) {
+        const Vec hit={ChecklistFValueA(6),ChecklistFValueB(6),ChecklistFValueC(6)};
+        const float f=ContactFraction(from,end,hit,0.f);
+        if(f<nearest)target=Add(from,Scale(Sub(end,from),f));
+    }
+    // A wall behind the protagonist may be closer to the orbit camera than
+    // the muzzle. Do not turn the weapon backwards to meet that target.
+    if(Dot(Sub(target,muzzle),direction)<=0.01f)return false;
+    return ResolveAim(muzzle,target,range,aim);
+}
 bool CanInteract(int e,float range) {
     Vec from={},to={};int ignore=0,target=0;
     if(t.player[t.plrid].health<=0||t.game.runasmultiplayer!=0||t.game.gameloop!=1||

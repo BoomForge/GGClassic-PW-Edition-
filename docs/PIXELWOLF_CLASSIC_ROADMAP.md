@@ -134,6 +134,8 @@ Acceptance criteria:
 
 ### Highest active priority — Full native third-person gameplay (25 November 2026 owner request)
 
+**Ranged source progress:** native reticle-to-muzzle aim, body-side clearance, configured hitscan range, captured shot direction and projectile launch pitch/yaw implemented; new tests and live validation pending. Next: locomotion, animation and contextual interactions.
+
 **Weapon switching source progress:** owned preloaded weapons, staged per-instance world attachments, holster and ID recycling implemented. Missing media rejected; custom sockets, cross-level missing gun loading and live acceptance pending.
 
 **Combat/interaction source progress:** body-origin visibility/reach, explicit protagonist exclusion, Lua `PWCanInteract`, player-facing NPCs, obstructed melee and safe damage ranges implemented. Next: integrate weapon switching with attachment lifecycle, ranged aim/muzzle/projectile behaviour, animation and native movement. Runtime acceptance pending.

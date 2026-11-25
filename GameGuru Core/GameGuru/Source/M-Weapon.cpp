@@ -624,6 +624,10 @@ void weapon_projectile_loop ( void )
 							//  ignore the entity object which fires it
 							t.tIgnoreObject = 0;
 							if ( t.WeaponProjectile[t.tProj].sourceEntity>0 && t.WeaponProjectile[t.tProj].sourceEntity<=g.entityelementlist ) t.tIgnoreObject = t.entityelement[t.WeaponProjectile[t.tProj].sourceEntity].obj;
+                            else if(t.WeaponProjectile[t.tProj].sourceEntity==0&&t.playercontrol.thirdperson.enabled==1) {
+                                const int e=t.playercontrol.thirdperson.charactere;
+                                if(e>0&&e<=g.entityelementlist)t.tIgnoreObject=t.entityelement[e].obj;
+                            }
 							t.tEndEntity = g.entityviewstartobj+g.entityelementlist;
 							//Dave - don't need to do raycasts for the nade hitting anything as it is controlled by physics
 							if ( t.WeaponProjectileBase[t.tProjType].resultBounce>0 ) 
@@ -1190,9 +1194,10 @@ void weapon_projectile_make ( bool bUsingVRForAngle )
 	//    tStartX#, tStartY#, tStartZ#, tAngX#, tAngY#, tAngZ#
 	//    gunid,firemode
 
+    const bool pwPlayerMuzzle=t.playercontrol.thirdperson.enabled==1&&t.tSourceEntity==0;
 	//  if third person, scan for character targets and adjust X angle (removed targetting for now)
 	t.tlocktargetonobject=0;
-	if (  t.playercontrol.thirdperson.enabled == 1 && t.playercontrol.thirdperson.cameralocked == 1 ) 
+	if ( !pwPlayerMuzzle && t.playercontrol.thirdperson.enabled == 1 && t.playercontrol.thirdperson.cameralocked == 1 ) 
 	{
 		t.tttbesta_f=500.0;
 		for ( t.ttte = 1 ; t.ttte<=  g.entityelementlist; t.ttte++ )
@@ -1265,7 +1270,7 @@ void weapon_projectile_make ( bool bUsingVRForAngle )
 	//  adjustment to start position to avoid penetrating
 	t.tobj = t.WeaponProjectile[t.tNewProj].tracerObj;
 	t.tweaponlimb=t.WeaponProjectileBase[t.tProjectileType].attachToWeaponLimb;
-	if (  t.tweaponlimb >= 0 ) 
+	if ( !pwPlayerMuzzle && t.tweaponlimb >= 0 ) 
 	{
 		//  use start position described by weapon limb
 		if (  LimbExist(t.currentgunobj,t.tweaponlimb) == 1 ) 
@@ -1285,38 +1290,11 @@ void weapon_projectile_make ( bool bUsingVRForAngle )
 	//  adjustment to start position to avoid penetrating
 	PositionObject (  t.tobj,t.tStartX_f,t.tStartY_f,t.tStartZ_f );
 
-	//  auto targetting removed in favour of camera based targetting (if camera in locked mode)
-	if (  t.playercontrol.thirdperson.enabled == 1 && t.tSourceEntity == 0 ) 
-	{
-		if (  t.playercontrol.thirdperson.cameralocked == 1 ) 
-		{
-			if (  t.tlocktargetonobject>0 ) 
-			{
-				//  camera fixed, targetting help
-				t.tcenterobjy_f=ObjectPositionY(t.tlocktargetonobject)+(35.0f);
-				PointObject (  t.tobj,ObjectPositionX(t.tlocktargetonobject),t.tcenterobjy_f,ObjectPositionZ(t.tlocktargetonobject) );
-				t.tAngX_f=ObjectAngleX(t.tobj);
-				t.tAngZ_f=ObjectAngleZ(t.tobj);
-			}
-			else
-			{
-				//  camera fixed, no target
-				t.tAngX_f=0;
-				t.tAngY_f=CameraAngleY(t.terrain.gameplaycamera) ;
-				t.tAngZ_f=0;
-			}
-		}
-		else
-		{
-			//  nonfixed camera, use users camera view
-			t.tAngX_f=CameraAngleX(t.terrain.gameplaycamera) ;
-			t.tAngY_f=CameraAngleY(t.terrain.gameplaycamera) ;
-			t.tAngZ_f=CameraAngleZ(t.terrain.gameplaycamera) ;
-			t.tAngX_f=t.tAngX_f-13.0f;
-		}
-	}
+    // Player TPP aim is resolved before launch; preserve those exact angles.
 	RotateObject (  t.tobj, t.tAngX_f , t.tAngY_f , t.tAngZ_f );
-	MoveObject (  t.tobj,t.WeaponProjectileBase[t.tProjectileType].avoidPlayerPenetration_f );
+    // Third-person muzzle already lies outside the body; do not skip untested
+    // world space by advancing the projectile through a nearby wall.
+	if(!pwPlayerMuzzle)MoveObject ( t.tobj,t.WeaponProjectileBase[t.tProjectileType].avoidPlayerPenetration_f );
 	t.tStartX_f = ObjectPositionX(t.tobj);
 	t.tStartY_f = ObjectPositionY(t.tobj);
 	t.tStartZ_f = ObjectPositionZ(t.tobj);

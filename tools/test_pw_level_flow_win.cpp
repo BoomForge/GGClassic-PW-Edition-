@@ -192,6 +192,15 @@ int main()
     assert(StrikeDamage(10,10,0)==10&&StrikeDamage(10,10,999)==10);
     assert(StrikeDamage(20,10,0)==10&&StrikeDamage(20,10,10)==20);
     assert(StrikeDamage(-10,-1,123)==0);
+    Aim aim;
+    assert(ResolveAim({10,0,0},{0,0,100},100,aim));
+    assert(aim.direction.x<0&&aim.direction.z>0&&aim.range==100);
+    assert(ResolveAim({0,0,0},{0,10,10},100,aim)&&std::fabs(aim.pitch+45.f)<0.01f);
+    assert(ResolveAim({0,0,0},{10,0,0},100,aim)&&std::fabs(aim.yaw-90.f)<0.01f);
+    assert(!ResolveAim({0,0,0},{0,0,0},100,aim));
+    assert(!ResolveAim({0,0,0},{0,0,1},0,aim));
+    const Vec forward=ForwardVector(90,0);
+    assert(std::fabs(forward.x-1.f)<0.01f&&std::fabs(forward.z)<0.01f);
     assert(EquipAllowed(0,100,false,false));
     assert(EquipAllowed(4,100,true,true));
     assert(!EquipAllowed(4,100,false,true));

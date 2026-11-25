@@ -31,6 +31,26 @@ bool PlayerOrigin(Vec& origin,int& ignoredObject);
 bool EntityTarget(int e,Vec& target,int& object);
 bool LineClear(Vec from,Vec to,int ignoredObject,int targetObject);
 bool CanInteract(int e,float range);
+inline bool Direction(Vec delta,Vec& result) {
+    const float length=Length(delta);
+    if(!std::isfinite(length)||length<0.001f)return false;
+    result=Scale(delta,1.f/length);return true;
+}
+inline Vec ForwardVector(float yaw,float pitch) {
+    const float y=Radians(yaw),p=Radians(pitch),c=std::cos(p);
+    return {std::sin(y)*c,-std::sin(p),std::cos(y)*c};
+}
+struct Aim {Vec muzzle={},target={},direction={};float yaw=0,pitch=0,range=0;};
+inline bool ResolveAim(Vec muzzle,Vec target,float range,Aim& aim) {
+    Vec direction={};
+    if(!std::isfinite(range)||range<=0.f||!Direction(Sub(target,muzzle),direction))return false;
+    aim.muzzle=muzzle;aim.target=target;aim.direction=direction;aim.range=range;
+    aim.yaw=Wrap(std::atan2(direction.x,direction.z)*57.29577951308232f);
+    aim.pitch=std::atan2(-direction.y,std::sqrt(direction.x*direction.x+direction.z*direction.z))*57.29577951308232f;
+    return true;
+}
+bool BuildPlayerAim(float range,Aim& aim);
+
 // Zero means holster, positive requests must be owned and preloaded.
 inline bool EquipAllowed(int requested,int maxWeapon,bool owned,bool hudReady) {
     return requested==0||(requested>0&&requested<=maxWeapon&&owned&&hudReady);

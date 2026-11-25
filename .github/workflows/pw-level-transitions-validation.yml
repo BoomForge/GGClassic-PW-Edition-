@@ -11,6 +11,7 @@ on:
       - "GameGuru Core/GameGuru/Include/PW-ThirdPersonGameplay.h"
       - "GameGuru Core/GameGuru/Source/G-Entity.cpp"
       - "GameGuru Core/GameGuru/Source/G-Gun.cpp"
+      - "GameGuru Core/GameGuru/Source/M-Weapon.cpp"
       - "GameGuru Core/GameGuru/Source/M-LUA-Entity.cpp"
       - "GameGuru Core/GameGuru/Shaders and Scripts/scriptbank/gameplayercontrol.lua"
       - "GameGuru Core/GameGuru/Source/M-Physics.cpp"
