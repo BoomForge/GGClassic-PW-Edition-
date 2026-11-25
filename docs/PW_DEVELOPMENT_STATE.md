@@ -11,6 +11,12 @@
 
 > **OWNER-CORRECTED DELIVERY FACT (22 Nov 2026): The current installed PW Edition ALREADY INCLUDES AN IN-ENGINE UPDATER.** Never describe this updater as a future feature, or default to downloading source ZIPs and running `START_PW_TEST_BUILD.cmd` every update. The editor's update command launches the installed `Pixelwolf-GGC-Updater.exe` source-building helper. Distinguish this **existing, owner-confirmed capability** from whether the **latest revision** has passed actual installation and gameplay acceptance; CI compilation is not a local runtime test.
 
+## 25 November 2026 — native weighted vegetation rewrite (source implementation, CI/runtime pending)
+
+Replaced the separate 320-entity overlay with native species batches inside `SimonReloaded.cpp`. Each grid cell uses the original vegetation mesh builder, shader, terrain/mask updater and visibility lifecycle for each enabled species. The existing density budget is divided using weighted largest-remainder allocation; each species has its own mesh and atlas. The old overlay and probe are removed from the active renderer. The existing UI, FPM configuration and native-only fallback remain. Static guards updated for the native path.
+
+This is a **new source implementation, not verified working graphics**. Check full Windows x64 CI at the new branch head, then use the existing built-in updater and test a disposable painted map with two contrasting grass styles, 50/50 and 25/75, camera movement, repaint/erase, shadow passes, save/reopen and Test Level. Inspect clumps/patch diagnostics. Confirm multiple actual textures on screen before calling fixed. No changes to master or release binaries.
+
 ## 25 November 2026 — multi-grass STILL BROKEN, proof-first DX11 diagnosis (P0)
 
 **Owner's fresh live result:** After the latest updater, **ONLY ONE grass type still appears**. Prior source edits did not deliver multi-species rendering. The owner explicitly requested deep code analysis **without further guesses**. Do not claim the issue is solved or substitute another passing static test for actual rendered grass. The README Discord archive must continue to list multi-grass as broken until confirmed visually.

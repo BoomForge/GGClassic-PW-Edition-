@@ -4,6 +4,7 @@
 #include "CObjectsC.h"
 #include "CMemblocks.h"
 #include "BlitzTerrain.h"
+#include <vector>
 
 
 #define GRASSALPHACLIP 0.41f
@@ -23,6 +24,126 @@ bool **bGridExist;
 int iGrassMemblockThreshhold;
 float fWorldSize;
 bool bDisplayBelowWater;
+
+ // Each grid cell has one native batch per species, all using the original
+ // vegetation shader and native mask/terrain update. No individual entity overlay.
+ struct PWNativeSpecies {
+     int mesh=0, image=0, clumps=0, verts=0;
+     int left=0,right=0,front=0,back=0,top=0,bottom=0;
+     float weight=0;
+     std::vector<int> objects;
+ };
+ static PWNativeSpecies pwSpecies[4];
+ static int pwSpeciesCount=0;
+ static int pwNextObject=230000;
+ static int pwPBRMode=0;
+ static int PWExtraId() {
+     for (int attempts=0; attempts<32000; ++attempts) {
+         const int id=pwNextObject++;
+         if (!ObjectExist(id)) return id;
+     }
+     return 0;
+ }
+ static void PWDeleteExtraObjects() {
+     for (int s=1;s<4;++s) {
+         for (int id:pwSpecies[s].objects) if(id && ObjectExist(id)) DeleteObject(id);
+         pwSpecies[s].objects.clear();
+     }
+     pwNextObject=230000;
+ }
+ void SetPWVegetationMix(int count,const int* meshes,const int* images,const float* weights) {
+     if (pwSpeciesCount || count>1) DeleteVegetationGrid();
+     PWDeleteExtraObjects();
+     for (int s=0;s<4;++s) pwSpecies[s]=PWNativeSpecies();
+     pwSpeciesCount=0;
+     if(count<2 || count>4 || !meshes || !images || !weights) return;
+     for(int s=0;s<count;++s) {
+         if(!GetMeshExist(meshes[s]) || weights[s]<=0) return;
+         pwSpecies[s].mesh=meshes[s]; pwSpecies[s].image=images[s]; pwSpecies[s].weight=weights[s];
+     }
+     pwSpeciesCount=count;
+ }
+ int GetPWVegetationClumpCount(int slot) {
+     return slot>=0 && slot<pwSpeciesCount ? pwSpecies[slot].clumps : 0;
+ }
+ static int PWLayerObject(int slot,int base) {
+     if(slot==0) return base;
+     const int index=base-iGridObjectStart;
+     const auto& objects=pwSpecies[slot].objects;
+     return index>=0 && index<(int)objects.size()?objects[index]:0;
+ }
+ static void PWShowPatch(int base) {
+     if(ObjectExist(base)) ShowObject(base);
+     for(int s=1;s<pwSpeciesCount;++s) {
+         int id=PWLayerObject(s,base); if(id && ObjectExist(id)) ShowObject(id);
+     }
+ }
+ static void PWHidePatch(int base) {
+     if(ObjectExist(base)) HideObject(base);
+     for(int s=1;s<pwSpeciesCount;++s) {
+         int id=PWLayerObject(s,base); if(id && ObjectExist(id)) HideObject(id);
+     }
+ }
+ static void PWTexturePatch(int base) {
+     for(int s=0;s<(pwSpeciesCount?pwSpeciesCount:1);++s) {
+         int id=PWLayerObject(s,base);
+         if(!id || !ObjectExist(id)) continue;
+         TextureObject(id,0,pwSpeciesCount?pwSpecies[s].image:iGrassImg);
+         if(pwPBRMode) TextureObject(id,6,iPBRCubeImg);
+     }
+ }
+ // Preserve the original total clump count. Largest remainder rounding
+ // assigns each clump exactly once; a small nonzero species gets one when
+ // the budget permits. No full-density primary layer or 320-object cap.
+ static void PWConfigureCounts() {
+     if(!pwSpeciesCount) return;
+     const int total=iVegPerMesh+1;
+     float sum=0; for(int s=0;s<pwSpeciesCount;++s) sum+=pwSpecies[s].weight;
+     int used=0;
+     float remainder[4]={};
+     const int minimum=total>=pwSpeciesCount?1:0;
+     for(int s=0;s<pwSpeciesCount;++s) {
+         const float ideal=(total-minimum*pwSpeciesCount)*pwSpecies[s].weight/sum;
+         pwSpecies[s].clumps=minimum+(int)ideal;
+         remainder[s]=ideal-(int)ideal; used+=pwSpecies[s].clumps;
+     }
+     while(used<total) {
+         int best=0; for(int s=1;s<pwSpeciesCount;++s) if(remainder[s]>remainder[best]) best=s;
+         ++pwSpecies[best].clumps; remainder[best]=-1; ++used;
+     }
+     if(pwSpecies[0].clumps==0) { for(int s=1;s<pwSpeciesCount;++s) if(pwSpecies[s].clumps>0) {--pwSpecies[s].clumps; ++pwSpecies[0].clumps; break;} }
+     for(int s=0;s<pwSpeciesCount;++s) {
+         auto& p=pwSpecies[s];
+         if(s) p.objects.assign(iGridSize*iGridSize,0);
+         LockVertexDataForMesh(p.mesh);
+         p.verts=GetVertexDataVertexCount();
+         float l=1e30f,r=-1e30f,f=-1e30f,b=1e30f,top=-1e30f,bot=1e30f;
+         for(int v=0;v<p.verts;++v) {
+             float x=GetVertexDataPositionX(v), y=GetVertexDataPositionY(v), z=GetVertexDataPositionZ(v);
+             if(x<l){l=x;p.left=v;} if(x>r){r=x;p.right=v;}
+             if(z>f){f=z;p.front=v;} if(z<b){b=z;p.back=v;}
+             if(y>top){top=y;p.top=v;} if(y<bot){bot=y;p.bottom=v;}
+         }
+         UnlockVertexData();
+     }
+ }
+ // The legacy single-style routines use global mesh metadata. Scope the
+ // override to a single batch so the ordinary renderer stays compatible.
+ struct PWSpeciesScope {
+     int mesh=iGrassObj,img=iGrassImg,start=iGridObjectStart,per=iVegPerMesh,verts=iGrassClumpVerts;
+     int left=iLeftVert,right=iRightVert,front=iFrontVert,back=iBackVert,top=iTopVert,bottom=iBottomVert;
+     PWSpeciesScope(const PWNativeSpecies& p,int prototype) {
+         iGrassObj=p.mesh; iGrassImg=p.image; iGridObjectStart=prototype;
+         iVegPerMesh=p.clumps-1; iGrassClumpVerts=p.verts;
+         iLeftVert=p.left; iRightVert=p.right; iFrontVert=p.front;
+         iBackVert=p.back; iTopVert=p.top; iBottomVert=p.bottom;
+     }
+     ~PWSpeciesScope() {
+         iGrassObj=mesh;iGrassImg=img;iGridObjectStart=start;iVegPerMesh=per;iGrassClumpVerts=verts;
+         iLeftVert=left;iRightVert=right;iFrontVert=front;iBackVert=back;iTopVert=top;iBottomVert=bottom;
+     }
+ };
+
 
 void InfiniteVegetationConstructor ( void )
 {
@@ -95,7 +216,8 @@ void SetResourceValues(int iGrassObjIN, int iGridObjectStartIN, int iGrassImgIN,
 	if (!bGridMade) return;
 	
 	for (int iObj = iGridObjectStart; iObj < iGridObjectEnd + 1; iObj++){
-		if (ObjectExist(iObj) == 1) SetObjectMask(iObj,iCameraMask);	
+		if (ObjectExist(iObj) == 1) SetObjectMask(iObj,iCameraMask);
+        for(int s=1;s<pwSpeciesCount;++s) { int id=PWLayerObject(s,iObj); if(id && ObjectExist(id)) SetObjectMask(id,iCameraMask); }	
 	}
 }
  
@@ -106,14 +228,15 @@ void SetResourceValues(int iGrassObjIN, int iGridObjectStartIN, int iGrassImgIN,
 
  void DeleteVegetationGrid(void)
 {
-	if (!bGridMade) return;
+	PWDeleteExtraObjects();
+    if (!bGridMade) return;
 
 	for (int iObj = iGridObjectStart; iObj < iGridObjectEnd + 1; iObj++){
 		if (ObjectExist(iObj) == 1) DeleteObject(iObj);
 	}	
 
 	// Delete old grid exist array
-	for (int iG = 0; iG < iGridDimension; iG++){
+	for (int iG = 0; iG <= iGridDimension; iG++){
 		delete [] bGridExist[iG];		
 	}
 	delete [] bGridExist;
@@ -131,9 +254,9 @@ void SetVegetationGridVisible(bool bShow)
 			if (bShow){
 				iX = (int)(ObjectPositionX(iObj)/iVegAreaWidth);
 				iZ = (int)(ObjectPositionZ(iObj)/iVegAreaWidth);
-				if (bGridExist[iX][iZ])	ShowObject(iObj);
+				if (iX>=0 && iZ>=0 && iX<=iGridDimension && iZ<=iGridDimension && bGridExist[iX][iZ]) PWShowPatch(iObj); else PWHidePatch(iObj);
 			}else{
-				HideObject(iObj);
+				PWHidePatch(iObj);
 			}
 		}
 	}
@@ -147,10 +270,10 @@ void SetVegetationGridVisibleForce(bool bShow)
 			if (bShow) {
 				iX = (int)(ObjectPositionX(iObj) / iVegAreaWidth);
 				iZ = (int)(ObjectPositionZ(iObj) / iVegAreaWidth);
-				if (bGridExist[iX][iZ])	ShowObject(iObj);
+				if (iX>=0 && iZ>=0 && iX<=iGridDimension && iZ<=iGridDimension && bGridExist[iX][iZ]) PWShowPatch(iObj); else PWHidePatch(iObj);
 			}
 			else {
-				HideObject(iObj);
+				PWHidePatch(iObj);
 			}
 		}
 	}
@@ -252,7 +375,7 @@ int g_iNumOfVertsInVegMesh = 0;
 float g_fUVPatternForVegMesh[128][5];
 
 // Makes the actual 3D model for the grid square of grass
-void MakeVegPatch(int iVegObj, float fVegHeight, float fVegWidth, int iX, int iZ, int iOptionalSkipGrassMemblock)
+static void MakeVegPatchSingle(int iVegObj, float fVegHeight, float fVegWidth, int iX, int iZ, int iOptionalSkipGrassMemblock)
 {
 	if (!bResourcesSet) return;
 	float fGrassX,fGrassZ,fGrassHeight,fGrassWidth;
@@ -272,6 +395,7 @@ void MakeVegPatch(int iVegObj, float fVegHeight, float fVegWidth, int iX, int iZ
 
 			// create original grass clump
 			MakeObject(iVegObj,iGrassMeshToUse,0);
+            if(pwSpeciesCount>1) OffsetLimb(iVegObj,0,(float)(InfiniteVegetationRnd(iVegAreaWidth)-iVegHalfAreaWidth),0,(float)(InfiniteVegetationRnd(iVegAreaWidth)-iVegHalfAreaWidth));
 			for (int iGrass = 1; iGrass < iVegPerMesh + 1; iGrass++)
 			{
 				// Add and position grass clump in mesh
@@ -308,7 +432,7 @@ void MakeVegPatch(int iVegObj, float fVegHeight, float fVegWidth, int iX, int iZ
 	}
 }
 
-void UpdateVegPatch(int iVegObj, int iTerrainID, float fVegX, float fVegZ)
+static void UpdateVegPatchSingle(int iVegObj, int iTerrainID, float fVegX, float fVegZ, bool flat=false, float flatHeight=0)
 {
 	if (ObjectExist(iVegObj) == 0) return; // Safety check
 	if (MemblockExist(iGrassMemBlock) == 0) return; // Safety check
@@ -319,7 +443,7 @@ void UpdateVegPatch(int iVegObj, int iTerrainID, float fVegX, float fVegZ)
 	float fMemStepRatio = iGrassMemBlockRes/fWorldSize;
 
 	#ifndef NOSTEAMORVIDEO
-	fCenterHeight = (BT_GetGroundHeight(iTerrainID,fVegX,fVegZ));
+	fCenterHeight = flat ? flatHeight : BT_GetGroundHeight(iTerrainID,fVegX,fVegZ);
 	#else
 	fCenterHeight = 0;
 	#endif
@@ -356,7 +480,7 @@ void UpdateVegPatch(int iVegObj, int iTerrainID, float fVegX, float fVegZ)
 		else
 		{
 			#ifndef NOSTEAMORVIDEO
-			fFloor = (BT_GetGroundHeight(iTerrainID,fMiddleX,fMiddleZ)) - fCenterHeight;
+			fFloor = flat ? 0.f : BT_GetGroundHeight(iTerrainID,fMiddleX,fMiddleZ) - fCenterHeight;
 			#endif
 		}
 
@@ -390,6 +514,42 @@ void UpdateVegPatch(int iVegObj, int iTerrainID, float fVegX, float fVegZ)
 	UnlockVertexData();
 }
 
+
+void MakeVegPatch(int base,float height,float width,int x,int z,int skip) {
+    if(!pwSpeciesCount) { MakeVegPatchSingle(base,height,width,x,z,skip); return; }
+    const int index=base-iGridObjectStart;
+    for(int s=0;s<pwSpeciesCount;++s) {
+        auto& p=pwSpecies[s]; if(p.clumps<=0 || p.verts<=0) continue;
+        int id=base;
+        if(s) {
+            if(index<0 || index>=(int)p.objects.size()) continue;
+            id=PWExtraId(); if(!id) continue;
+            p.objects[index]=id;
+        }
+        const int prototype=s?p.objects[0]:iGridObjectStart;
+        if(!prototype) continue;
+        { PWSpeciesScope scope(p,prototype); MakeVegPatchSingle(id,height,width,x,z,skip); }
+        if(ObjectExist(id)) HideObject(id);
+    }
+    PWTexturePatch(base);
+}
+static void PWUpdatePatch(int base,int terrain,float x,float z,bool flat,float height) {
+    if(!pwSpeciesCount) {
+        if(flat) PositionObject(base,x,height,z);
+        else UpdateVegPatchSingle(base,terrain,x,z);
+        return;
+    }
+    for(int s=0;s<pwSpeciesCount;++s) {
+        const auto& p=pwSpecies[s]; if(p.clumps<=0 || p.verts<=0) continue;
+        const int id=PWLayerObject(s,base);
+        if(!id || !ObjectExist(id)) continue;
+        PWSpeciesScope scope(p,s?p.objects[0]:iGridObjectStart);
+        UpdateVegPatchSingle(id,terrain,x,z,flat,height);
+    }
+}
+void UpdateVegPatch(int base,int terrain,float x,float z) {
+    PWUpdatePatch(base,terrain,x,z,false,0);
+}
 // Takes a float and returns an integer clamped between 0 and grass memblock max width
  int ClampToMemblockRes(float fValue)
 {
@@ -513,7 +673,8 @@ void MakeVegetationGrid(int iVegPerMeshIN,  float fVegWidthIN, float fVegHeightI
 	}
 	UnlockVertexData();
 
-	// Now make our veg grid patches
+	PWConfigureCounts();
+    // Now make our veg grid patches
 
 	for (int iX = 0; iX < iGridSize; iX++)
 	{
@@ -634,7 +795,8 @@ void MakeVegetationGridQuick(int iVegPerMeshIN, float fVegWidthIN, float fVegHei
 	}
 	UnlockVertexData();
 
-	// Now make our veg grid patches
+	PWConfigureCounts();
+    // Now make our veg grid patches
 	for (int iX = 0; iX < iGridSize; iX++)
 	{
 		for (int iZ = 0; iZ < iGridSize; iZ++)
@@ -720,15 +882,16 @@ void MakeVegetationGridQuick(int iVegPerMeshIN, float fVegWidthIN, float fVegHei
 					fVegZ = (float)(iZ * iVegAreaWidth + iVegHalfAreaWidth);
 					if (bSuperFlat)
 					{
-						PositionObject(iVegObj,fVegX,fSuperFlatHeight,fVegZ);
+						PWUpdatePatch(iVegObj,0,fVegX,fVegZ,true,fSuperFlatHeight);
 					}
 					else
 					{
 						UpdateVegPatch(iVegObj,iTerrainID,fVegX,fVegZ);
 					}
-					ShowObject(iVegObj);
+					PWShowPatch(iVegObj);
 				}
 			}
+            else PWHidePatch(iGridObjectStart+(iZ%iGridSize)+iGridSize*(iX%iGridSize));
 		}
 	}
 }
@@ -782,7 +945,7 @@ void UpdateVegetation(bool bSuperFlat, float fViewPointX, float fViewPointZ, int
 					// if determined for use, create it now
 
 					// show veg chunk
-					ShowObject(iVegObj);
+					PWShowPatch(iVegObj);
 
 					// veg position and updating step
 					fVegX = (float)(iX * iVegAreaWidth + iVegHalfAreaWidth);
@@ -793,7 +956,7 @@ void UpdateVegetation(bool bSuperFlat, float fViewPointX, float fViewPointZ, int
 					{ 
 						if (bSuperFlat)
 						{
-							PositionObject(iVegObj,fVegX,fSuperFlatHeight,fVegZ);
+							PWUpdatePatch(iVegObj,0,fVegX,fVegZ,true,fSuperFlatHeight);
 						}
 						else
 						{
@@ -803,7 +966,7 @@ void UpdateVegetation(bool bSuperFlat, float fViewPointX, float fViewPointZ, int
 				}
 				else
 				{
-					HideObject(iVegObj);
+					PWHidePatch(iVegObj);
 				}
 			}
 		}
@@ -823,7 +986,7 @@ void UpdateVegetation(bool bSuperFlat, float fViewPointX, float fViewPointZ, int
  void UpdateVegZoneBlitzTerrain(float fX1, float fZ1, float fX2, float fZ2, int iTerrainID)
 {
 	UpdateVegZone(false,fX1,fZ1,fX2,fZ2,iTerrainID,0);
-	UpdateGrassTexture(0); // ensure newly added veg object has its texture
+	UpdateGrassTexture(pwPBRMode); // preserve per-species atlas and PBR mode
 }
 
  void UpdateVegZoneSuperFlat(float fX1, float fZ1, float fX2, float fZ2, float fSuperFlatHeight)
@@ -833,27 +996,9 @@ void UpdateVegetation(bool bSuperFlat, float fViewPointX, float fViewPointZ, int
 
  void UpdateGrassTexture ( int iPBRMode )
 {
-	if (!bGridMade) return; // Can't update if grid doesn't exist
-	for (int iObj = iGridObjectStart; iObj < iGridObjectEnd + 1; iObj++)
-	{
-		if (ObjectExist(iObj) == 1)
-		{
-			if ( iPBRMode == 0 )
-			{
-				// non-PBR
-				TextureObject(iObj,0,iGrassImg);
-				//TextureObject(iObj,1,iShadowImg); // not used
-				// texture stage 2 reserved for passed in shadow (not used)
-			}
-			else
-			{
-				// PBR
-				TextureObject ( iObj, 0, iGrassImg ); //Diffuse
-				TextureObject ( iObj, 6, iPBRCubeImg );//EnvironmentMap
-			}
-		}
-	}
-
+    pwPBRMode=iPBRMode;
+    if (!bGridMade) return;
+    for(int iObj=iGridObjectStart;iObj<=iGridObjectEnd;++iObj) PWTexturePatch(iObj);
 
 	#ifndef PRODUCTCLASSIC
 	//PE: Cant do this in classic , as grass will show in editor, and F9 grass paint dont work.
@@ -873,6 +1018,8 @@ void UpdateGrassShader ( int iNewShaderIndex )
 		if (ObjectExist(iObj) == 1)
 		{
 			SetObjectEffect ( iObj, iNewShaderIndex );
+            for(int s=1;s<pwSpeciesCount;++s) {int id=PWLayerObject(s,iObj); if(id && ObjectExist(id)) SetObjectEffect(id,iNewShaderIndex);}
+            PWTexturePatch(iObj);
 		}
 	}	
 }

@@ -531,9 +531,8 @@ void imgui_terrain_loop(void)
 			t.terrain.grassupdateafterterrain = 1;
 			grass_loop();
 			t.terrain.grassupdateafterterrain = 0;
-            // The native Classic species always remains the reliable base.
-            // PW's separate secondary species are overlay objects, not a
-            // replacement for the original vegetation renderer.
+            // The native vegetation grid owns all enabled species.
+            // Native visibility covers every species batch.
             ShowVegetationGrid();
 			visuals_justshaderupdate();
 			iLastUpdateVeg = Timer();
@@ -1278,8 +1277,6 @@ void imgui_terrain_loop(void)
                         PWGrassMix::SetPreviewEnabled(pwPreview);
                         pwMixChanged = true;
                     }
-                    // Always show whether the overlay is enabled, even
-                    // before the user finds/toggles the optional checkbox.
                     const std::string pwGrassDiag = PWGrassMix::Diagnostics();
                     ImGui::TextWrapped("%s",pwGrassDiag.c_str());
                     if (ImGui::Button("Copy grass diagnostics##PWGrassCopy"))
@@ -1287,24 +1284,7 @@ void imgui_terrain_loop(void)
                     if (!PWGrassMix::PreviewEnabled())
                         ImGui::TextDisabled("Safe mode: Classic grass remains visible; selected mix is saved.");
                     else
-                    {
-                        ImGui::TextDisabled("Secondary grass overlay preview. Classic base remains visible.");
-                        // Visually distinguish why a secondary style is
-                        // missing rather than guessing from visible flags.
-                        // A magenta cube proves standard objects can reach
-                        // the camera; the neighbouring real grass clone tests
-                        // the model/texture/shader independently of painting.
-                        bool pwProbe=PWGrassMix::ProbeEnabled();
-                        if (ImGui::Checkbox("Diagnostic: compare magenta cube and second grass model##PWGrassRenderProbe",&pwProbe))
-                            PWGrassMix::SetProbeEnabled(pwProbe);
-                        if (PWGrassMix::ProbeEnabled())
-                            ImGui::TextDisabled("Look straight ahead: magenta cube left, enlarged second grass right. Not saved.");
-                        ImGui::TextDisabled("Visible flags and placed counts do NOT prove rasterised pixels.");
-                        if (!PWGrassMix::Ready())
-                            ImGui::TextDisabled("Mix assets unavailable or not prepared.");
-                        else if (!PWGrassMix::OwnsGrid())
-                            ImGui::TextDisabled("Mix has no populated objects; Classic grass remains visible.");
-                    }
+                        ImGui::TextDisabled("Native weighted grass batches share terrain density, mask and shaders.");
                     if (pwMixChanged)
                     {
                         PWGrassMix::Dirty();

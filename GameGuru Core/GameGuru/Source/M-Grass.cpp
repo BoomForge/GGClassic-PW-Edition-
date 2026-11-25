@@ -16,6 +16,8 @@
 #include <vector>
 
 
+namespace PWGrassMix { bool PrepareNative(); }
+
 // Global
 int g_iSuperTriggerFullGrassReveal = 0;
 
@@ -133,6 +135,9 @@ void grass_init ( void )
 		grass_loadgrass ( );
 	}
 
+	// Load all selected style meshes/atlases before creating native patches.
+    PWGrassMix::PrepareNative();
+
 	//  calculate how big our grid of vegetation is
 	grass_setgrassgridandfade ( );
 
@@ -156,6 +161,8 @@ void grass_init ( void )
 		MakeVegetationGrid(4.0f*t.visuals.VegQuantity_f, t.visuals.VegWidth_f, t.visuals.VegHeight_f, terrain_veg_areawidth, t.terrain.vegetationgridsize, t.tTerrainID, iTrimUsingGrassMemblock , true );
 	else
 		MakeVegetationGrid( 4.0f*t.visuals.VegQuantity_f,t.visuals.VegWidth_f,t.visuals.VegHeight_f,terrain_veg_areawidth,t.terrain.vegetationgridsize,t.tTerrainID, iTrimUsingGrassMemblock , false );
+
+    UpdateGrassTexture(g.gpbroverride);
 
 	//  small lookup for memblock painting circles
 	Dim ( t.curve_f,100 );
@@ -317,19 +324,6 @@ void grass_setgrassgridandfade ( void )
 
 void grass_loop ( void )
 {
-    // Weighted PW mix uses real per-style model instances chosen from the
-    // same painted vegetation mask, instead of a cosmetic blend slider.
-    static bool pwWasMixed = false;
-    const bool pwMixed = PWGrassMix::RenderEnabled() && t.visuals.vegetationmode != 0
-        && t.hardwareinfoglobals.nograss == 0;
-    if (!pwMixed && pwWasMixed)
-    {
-        PWGrassMix::ResetInstances();
-        if (t.hardwareinfoglobals.nograss == 0)
-            ShowVegetationGrid();
-    }
-    pwWasMixed = pwMixed;
-
 	// early exit if no veg used
 	if ( t.visuals.vegetationmode == 0  )  return;
 
@@ -369,19 +363,7 @@ void grass_loop ( void )
 			UpdateBlitzTerrain ( CameraPositionX(0),CameraPositionZ(0),t.terrain.TerrainID,g.postprocessimageoffset+5 );
 		}
 	}
-    if (pwMixed)
-    {
-        // Refresh only AFTER grass_updategrassfrombitmap/UpdateBlitzTerrain:
-        // the extra species must read the current painted mask, not the
-        // previous frame's image when the vegetation brush was just used.
-        PWGrassMix::Refresh(CameraPositionX(0), CameraPositionZ(0),
-            t.terrain.TerrainID, t.terrain.superflat == 1,
-            TERRAIN_SUPERFLAT_HEIGHT, t.terrain.grassmemblock,
-            t.visuals.VegQuantity_f);
-        // Keep the proven Classic grid visible while verifying the
-        // supplementary shader/material/geometry on the owner's machine.
-        ShowVegetationGrid();
-    }
+
 }
 
 void grass_clearregion ( void )
@@ -755,156 +737,40 @@ void grass_paint(void)
 namespace PWGrassMix {
 Slot slots[MaxStyles];
 unsigned revision = 1;
-struct RenderStyle {
-    int source = 0;
-    int image = 0;
-    int effect = 0; // Own standard entity shader; raw vegetation DBO has none.
-    float scaleXZ = 200.f;
-    float scaleY = 200.f;
-    float rawWidth = 0.f, rawHeight = 0.f;
-    float yaw = 0.f;
-    std::vector<int> instances;
-    size_t used = 0;
-};
+
+struct RenderStyle { int mesh=0, image=0, slot=-1; bool owned=false; };
 static RenderStyle render[MaxStyles];
-static unsigned builtRevision = 0;
-static int lastCameraCellX = -999999, lastCameraCellZ = -999999;
-static bool ready = false;
-static bool previewEnabled = false; // SAFETY: off by default until verified on the owner's GPU.
+static int nativeCount=0;
+static bool ready=false, previewEnabled=false;
 static std::string lastIssue;
-static int allocatedBase = 0;
-// These are actual outcomes of painted-mask sampling, NOT GPU pixel counts.
-static unsigned sampledPainted=0, pickedNative=0, pickedSecondary=0;
-static unsigned allocationFailures=0;
-// Explicit proof controls: one opaque magenta cube and one cloned copy of
-// the real secondary-style mesh. Both are camera-relative, never saved.
-static bool probeEnabled = false;
-static int probeCube = 0, probeModel = 0, probeSlot = -1;
-static void ReleaseProbe() {
-    if (probeCube && ObjectExist(probeCube)) DeleteObject(probeCube);
-    if (probeModel && ObjectExist(probeModel)) DeleteObject(probeModel);
-    probeCube=probeModel=0;
-    probeSlot=-1;
-}
-static int FindFreeId() {
-    if (!allocatedBase)
-        // Dedicated object bank: do not compete with editor importer/realtime
-        // entities. The Asset Inspector uses 220000..220899 separately.
-        allocatedBase = 230000;
-    for (int attempt = 0; attempt < 16000; ++attempt) {
-        const int id = allocatedBase++;
-        if (id > 0 && !ObjectExist(id)) return id;
+bool Ready(){return ready;}
+bool PreviewEnabled(){return previewEnabled;}
+bool RenderEnabled(){return previewEnabled && Active();}
+bool OwnsGrid(){return ready && nativeCount>1;}
+bool ProbeEnabled(){return false;}
+void SetProbeEnabled(bool){}
+void SetInstancesVisible(bool){} // native grid visibility covers every batch
+void InvalidateMask(){} // native painted mask is refreshed by Classic
+void Refresh(float,float,int,bool,float,int,float){} // legacy call compatibility
+void ResetInstances(){
+    SetPWVegetationMix(0,nullptr,nullptr,nullptr);
+    for(auto& rs:render){
+        if(rs.owned){
+            if(rs.mesh && GetMeshExist(rs.mesh)) DeleteMesh(rs.mesh);
+            if(rs.image && ImageExist(rs.image)) DeleteImage(rs.image);
+        }
+        rs=RenderStyle();
     }
-    return 0;
+    nativeCount=0; ready=false;
 }
-static int FindFreeImageId() {
-    // Avoid the thumbnail/asset-ID banks and the Asset Inspector images.
-    int id = 125000;
-    for (int n = 0; n < 16000; ++n, ++id)
-        if (!ImageExist(id)) return id;
-    return 0;
-}
-bool Ready() { return ready; }
-bool PreviewEnabled() { return previewEnabled; }
-bool RenderEnabled() { return previewEnabled && Active(); }
-bool OwnsGrid() {
-    if (!ready || !RenderEnabled()) return false;
-    for (int i = 0; i < MaxStyles; ++i)
-        if (render[i].used > 0) return true;
-    return false;
-}
-void InvalidateMask() { lastCameraCellX = lastCameraCellZ = -999999; }
-void ResetInstances() {
-    ReleaseProbe(); // Remove dependent diagnostic clone before source meshes.
-    for (int i = 0; i < MaxStyles; ++i) {
-        RenderStyle& rs = render[i];
-        for (int id : rs.instances) if (ObjectExist(id)) DeleteObject(id);
-        rs.instances.clear();
-        if (rs.source && ObjectExist(rs.source)) DeleteObject(rs.source);
-        if (rs.image && ImageExist(rs.image)) DeleteImage(rs.image);
-        if (rs.effect > 0) deleteinternaleffect(rs.effect);
-        rs = RenderStyle();
-    }
-    ready = false;
-    lastCameraCellX = lastCameraCellZ = -999999;
-    builtRevision = 0;
-    allocatedBase = 0;
-    sampledPainted=pickedNative=pickedSecondary=allocationFailures=0;
-}
-bool ProbeEnabled() { return probeEnabled; }
-void SetProbeEnabled(bool enabled) {
-    if (probeEnabled==enabled) return;
-    probeEnabled=enabled;
-    ReleaseProbe();
-}
-void SetPreviewEnabled(bool enabled) {
-    if (previewEnabled == enabled) return;
-    previewEnabled = enabled;
-    lastIssue.clear();
-    // Clear stale objects whenever preview changes.
-    // Never leave an opt-in render probe live after disabling the overlay.
-    if (!enabled) probeEnabled=false;
-    ResetInstances();
-    Dirty();
-}
-std::string Diagnostics() {
-    int sources = 0, allocated = 0, placed = 0, markedVisible = 0;
-    for (int i = 0; i < MaxStyles; ++i) {
-        const RenderStyle& rs = render[i];
-        if (rs.source && ObjectExist(rs.source)) ++sources;
-        allocated += int(rs.instances.size());
-        placed += int(rs.used);
-        for (size_t j = 0; j < rs.used && j < rs.instances.size(); ++j)
-            if (ObjectExist(rs.instances[j]) && GetVisible(rs.instances[j]) == 1)
-                ++markedVisible;
-    }
+void SetPreviewEnabled(bool enabled){if(previewEnabled!=enabled){previewEnabled=enabled; Dirty();}}
+std::string Diagnostics(){
     std::ostringstream out;
-    out << "Overlay " << (RenderEnabled() ? "ON" : "OFF")
-        << " | models: " << sources << " | objects: " << allocated
-        << " | placed: " << placed << " | visible flags: " << markedVisible
-        << " | painted mask cells: " << sampledPainted
-        << " | picks native: " << pickedNative
-        << " | picks extra: " << pickedSecondary
-        << " | instance allocation failed: " << allocationFailures;
-    if (probeEnabled)
-        out << " | probe cube: " << probeCube
-            << " / secondary clone: " << probeModel
-            << " (look ahead; magenta cube on left)";
-    for (int i = 0; i < MaxStyles; ++i)
-        if (slots[i].enabled && slots[i].weight > 0.f && !slots[i].style.empty()) {
-            out << " | " << slots[i].style << ": " << render[i].used;
-            if (render[i].source && ObjectExist(render[i].source))
-                out << " (mesh " << render[i].rawWidth << "x"
-                    << render[i].rawHeight << ", scaled "
-                    << render[i].scaleXZ << "%/" << render[i].scaleY << "%)";
-        }
-    if (!lastIssue.empty()) out << " | issue: " << lastIssue;
-    else if (ready && placed == 0) out << " | issue: no painted samples populated";
+    out << "Native grass mix " << (RenderEnabled()?"ON":"OFF");
+    for(int s=0;s<nativeCount;++s)
+        out << " | " << slots[render[s].slot].style << ": " << GetPWVegetationClumpCount(s) << " clumps/patch";
+    if(!lastIssue.empty()) out << " | issue: " << lastIssue;
     return out.str();
-}
-void SetInstancesVisible(bool visible) {
-    // Classic hides vegetation during cascade-shadow rendering. The
-    // diagnostic cube/model must be hidden during the same render pass.
-    if (probeCube && ObjectExist(probeCube)) {
-        if (visible && probeEnabled) ShowObject(probeCube);
-        else HideObject(probeCube);
-    }
-    if (probeModel && ObjectExist(probeModel)) {
-        if (visible && probeEnabled) ShowObject(probeModel);
-        else HideObject(probeModel);
-    }
-    if (!ready) return;
-    for (int i = 0; i < MaxStyles; ++i) {
-        const RenderStyle& rs = render[i];
-        for (size_t j = 0; j < rs.instances.size(); ++j) {
-            const int id = rs.instances[j];
-            if (!ObjectExist(id)) continue;
-            if (visible && j < rs.used)
-                ShowObject(id);
-            else
-                HideObject(id);
-        }
-    }
 }
 static std::string ConfigPath(const std::string& folder) {
     if (folder.empty()) return "pw_grassmix.cfg";
@@ -925,7 +791,6 @@ void Load(const std::string& levelFolder) {
     // configurations now restore their secondary overlays automatically;
     // Classic native grass always remains visible as the safe base.
     previewEnabled = false;
-    probeEnabled = false; // Diagnostic scene elements never survive a map load.
     ResetInstances();
     lastIssue.clear();
     for (int i = 0; i < MaxStyles; ++i) slots[i] = Slot();
@@ -953,277 +818,51 @@ void Load(const std::string& levelFolder) {
     previewEnabled = Active();
     ++revision;
 }
-static bool Prepare() {
-    ResetInstances();
-    lastIssue.clear();
-    for (int i = 0; i < MaxStyles; ++i) {
-        if (!slots[i].enabled || slots[i].weight <= 0.f || slots[i].style.empty())
-            continue;
-        // Classic still renders the selected native species. Do not place
-        // a second copy of the same species on top of it in overlay preview.
-        if (PWStyleImport::Same(slots[i].style, g.vegstyle_s.Get()))
-            continue;
-        const std::string dir = std::string("vegbank\\") + slots[i].style;
-        std::string model = dir + "\\veg.DBO";
-        if (FileExist((LPSTR)model.c_str()) == 0) model = dir + "\\veg.X";
-        if (FileExist((LPSTR)model.c_str()) == 0) {
-            lastIssue = "missing veg.DBO/veg.X for " + slots[i].style;
-            return false;
-        }
-        std::string atlas = dir + "\\grass.dds";
-        if (FileExist((LPSTR)atlas.c_str()) == 0) atlas = dir + "\\grass.png";
-        if (FileExist((LPSTR)atlas.c_str()) == 0) atlas = dir + "\\grass.jpg";
-        if (FileExist((LPSTR)atlas.c_str()) == 0) atlas = dir + "\\grass.jpeg";
-        if (FileExist((LPSTR)atlas.c_str()) == 0) atlas = dir + "\\grass.bmp";
-        if (FileExist((LPSTR)atlas.c_str()) == 0) atlas = dir + "\\grass.tga";
-        if (FileExist((LPSTR)atlas.c_str()) == 0) {
-            lastIssue = "missing grass atlas for " + slots[i].style;
-            return false;
-        }
-        RenderStyle& rs = render[i];
-        rs.source = FindFreeId();
-        rs.image = FindFreeImageId();
-        if (!rs.source || !rs.image) {
-            lastIssue = "no free grass model/texture resource ID";
-            return false;
-        }
-        LoadObject((LPSTR)model.c_str(), rs.source);
-        if (!ObjectExist(rs.source)) {
-            lastIssue = "could not load model for " + slots[i].style;
-            return false;
-        }
-        LoadImage((LPSTR)atlas.c_str(), rs.image);
-        if (!ImageExist(rs.image)) {
-            lastIssue = "could not load grass atlas for " + slots[i].style;
-            return false;
-        }
-        // Native vegetation calls UpdateGrassShader() for its own generated
-        // grids. These are independent regular 3D objects, and without a
-        // conventional object effect they can be marked visible but render
-        // no pixels in the DX11 editor. Importer uses the same basic shader.
-        char basicEffect[] = "effectbank\\reloaded\\entity_basic.fx";
-        char pbrEffect[] = "effectbank\\reloaded\\apbr_basic.fx";
-        rs.effect = loadinternaleffectunique(g.gpbroverride == 1 ? pbrEffect : basicEffect, 1);
-        if (rs.effect <= 0) {
-            lastIssue = "could not load object shader for " + slots[i].style;
-            return false;
-        }
-        SetObjectEffect(rs.source, rs.effect);
-        // The importer has to restore base textures after SetObjectEffect:
-        // attaching a shader can clear the earlier mesh texture stages.
-        TextureObject(rs.source, rs.image);
-        const PWEnvironmentStyle::Settings opt = PWEnvironmentStyle::Read(dir);
-        rs.yaw = opt.yaw;
-        // The stock vegetation builder scales its imported base mesh AND
-        // applies the VegWidth/VegHeight sliders when it creates the grid.
-        // Our independent 3D instances previously applied only 200% and could
-        // become tiny specks next to the full-size native grass. Normalise
-        // each native style's genuine mesh bounds to the same world units as
-        // the sliders, preserving the optional cloned-style size factor.
-        const float bx = ObjectSizeX(rs.source, 0);
-        const float by = ObjectSizeY(rs.source, 0);
-        const float bz = ObjectSizeZ(rs.source, 0);
-        rs.rawWidth = (std::max)(std::fabs(bx), std::fabs(bz));
-        rs.rawHeight = std::fabs(by);
-        if (!std::isfinite(rs.rawWidth) || !std::isfinite(rs.rawHeight) ||
-            rs.rawWidth < 0.01f || rs.rawHeight < 0.01f) {
-            lastIssue = "model has empty/invalid grass geometry: " + slots[i].style;
-            return false;
-        }
-        InstanceSizing sizing;
-        if (!ComputeInstanceSizing(rs.rawWidth, rs.rawHeight,
-                t.visuals.VegWidth_f, t.visuals.VegHeight_f,
-                opt.percent, sizing)) {
-            lastIssue = "grass geometry or vegetation size is invalid for " + slots[i].style;
-            return false;
-        }
-        rs.scaleXZ = sizing.xz;
-        rs.scaleY = sizing.y;
-        // The ObjectSize and draw paths multiply BOTH the source model
-        // scale and the independent instance scale (see CObjectsC.cpp).
-        // Previously scaling both made instance sizes wrong. The source is
-        // hidden and must remain at its native 100% transform; each instance
-        // receives the actual world-size scale and per-style yaw once.
-        ScaleObject(rs.source, 100.f, 100.f, 100.f);
-        // Mode 6 had a hard 0xCF alpha-test threshold (see CObjectsC.cpp),
-        // discarding much of soft-edged grass. Use alpha blending instead.
-        SetObjectTransparency(rs.source, 2);
-        SetObjectMask(rs.source, 1);
-        // Entity basic effect clips badly without its standard importer
-        // control value. Own the effect so this cannot alter other entities.
-        MakeVector4(g.characterkitvector);
-        SetVector4(g.characterkitvector, 500000, 1, 0, 0);
-        SetEffectConstantV(rs.effect, "EntityEffectControl", g.characterkitvector);
-        DeleteVector4(g.characterkitvector);
-        HideObject(rs.source);
-    }
-    ready = true;
-    builtRevision = revision;
-    return true;
-}
-// Distinguish four different failure layers in the LIVE DX11 editor:
-//  1. magenta cube missing: camera/object draw setup or overlay disabled
-//  2. cube visible, real model missing: secondary mesh/shader/atlas draw
-//  3. both visible but natural grass missing: paint-mask/instancing/coverage
-//  4. both and natural grass visible: overlay works; density mix is separate.
-// This is opt-in and creates no content in the saved level.
-static void DrawProbe(float cameraX, float cameraZ) {
-    if (!probeEnabled || !RenderEnabled()) { ReleaseProbe(); return; }
-    int sourceSlot=-1;
-    for (int i=0;i<MaxStyles;++i)
-        if (render[i].source && ObjectExist(render[i].source)) {
-            sourceSlot=i;
-            break;
-        }
-    if (sourceSlot<0) { ReleaseProbe(); return; }
-    if (probeSlot!=sourceSlot) ReleaseProbe();
-    RenderStyle& rs=render[sourceSlot];
-    if (!probeCube) {
-        const int id=FindFreeId();
-        if (!id) { lastIssue="probe: no free diagnostic cube ID"; return; }
-        MakeObjectCube(id, 36.f);
-        if (!ObjectExist(id)) {
-            lastIssue="probe: cannot create diagnostic cube";
-            return;
-        }
-        probeCube=id;
-        SetObjectMask(probeCube,1);
-        SetObjectLight(probeCube,0);
-        SetObjectDiffuse(probeCube,Rgb(255,0,255));
-        SetObjectEmissive(probeCube,Rgb(255,0,255));
-    }
-    if (!probeModel) {
-        const int id=FindFreeId();
-        if (!id) { lastIssue="probe: no free model ID"; return; }
-        CloneObject(id, rs.source);
-        if (!ObjectExist(id)) {
-            lastIssue="probe: cloning secondary grass model failed";
-            return;
-        }
-        probeModel=id;
-        probeSlot=sourceSlot;
-        ScaleObject(probeModel,rs.scaleXZ*2.f,rs.scaleY*2.f,rs.scaleXZ*2.f);
-        SetObjectMask(probeModel,1);
-        SetObjectTransparency(probeModel,2);
-    }
-    // Place directly in front of camera at a fixed depth, not on the
-    // grass mask: this intentionally bypasses terrain sampling and physics.
-    // Use the actual camera look vector from ccamerac.h, NOT assumed
-    // GameGuru pitch/yaw conventions. This makes the reference test visible
-    // while looking up, down or across the terrain.
-    const float lx=GetCameraLookX(0);
-    const float ly=GetCameraLookY(0);
-    const float lz=GetCameraLookZ(0);
-    const float full=std::sqrt(lx*lx+ly*ly+lz*lz);
-    if (!std::isfinite(full) || full<0.0001f) return;
-    const float xdir=lx/full, ydir=ly/full, zdir=lz/full;
-    const float cx=cameraX+xdir*260.f;
-    const float cy=CameraPositionY(0)+ydir*260.f;
-    const float cz=cameraZ+zdir*260.f;
-    const float horizontal=std::sqrt(xdir*xdir+zdir*zdir);
-    const float dx=horizontal>0.0001f ? zdir*65.f/horizontal : 65.f;
-    const float dz=horizontal>0.0001f ? -xdir*65.f/horizontal : 0.f;
-    PositionObject(probeCube,cx-dx,cy,cz-dz);
-    PositionObject(probeModel,cx+dx,cy,cz+dz);
-    YRotateObject(probeModel,rs.yaw);
-    ShowObject(probeCube);
-    ShowObject(probeModel);
-}
-static bool EnsureInstance(RenderStyle& rs, size_t index) {
-    while (rs.instances.size() <= index) {
-        const int id = FindFreeId();
-        if (!id) return false;
-        InstanceObject(id, rs.source);
-        if (!ObjectExist(id)) return false;
-        // InstanceObject creates an independent transform and does NOT copy
-        // the source object's 200% native grass scaling.
-        ScaleObject(id, rs.scaleXZ, rs.scaleY, rs.scaleXZ);
-        SetObjectTransparency(id, 2);
-        SetObjectMask(id, 1);
-        rs.instances.push_back(id);
-    }
-    return true;
-}
-void Refresh(float cameraX, float cameraZ, int terrainId, bool superflat,
-             float flatHeight, int memblockId, float quantity) {
-    if (!RenderEnabled()) return;
-    if (!MemblockExist(memblockId)) {
-        lastIssue = "painted grass mask is not loaded";
-        return;
-    }
-    if (!ready || builtRevision != revision) {
-        if (!Prepare()) {
-            ResetInstances();
-            // Keep old Classic renderer visible if a mix references bad assets;
-            // caller continues to handle its native grass grid.
-            return;
-        }
-    }
-    DrawProbe(cameraX,cameraZ);
-    const int centerX = static_cast<int>(std::floor(cameraX / 50.f));
-    const int centerZ = static_cast<int>(std::floor(cameraZ / 50.f));
-    if (lastCameraCellX == centerX && lastCameraCellZ == centerZ) return;
-    lastCameraCellX = centerX; lastCameraCellZ = centerZ;
-    for (int i = 0; i < MaxStyles; ++i) render[i].used = 0;
-    sampledPainted=pickedNative=pickedSecondary=allocationFailures=0;
 
-    // The editor camera is often high above / offset from the grass being
-    // painted. A 21x21 (500-unit radius) crop could contain no painted pixels
-    // even while the old vegetation grid was full. Search outward in rings
-    // so we reach 2400 units but still prefer nearby grass first.
-    // At most 320 real objects survive; never create a level-wide grid.
-    unsigned count = 0;
-    const float chanceScale = (std::max)(0.15f, (std::min)(1.f, quantity / 20.f));
-    for (int ring = 0; ring <= 48 && count < 320; ++ring)
-    for (int dz = -ring; dz <= ring && count < 320; ++dz)
-    for (int dx = -ring; dx <= ring && count < 320; ++dx) {
-        if (ring > 0 && std::abs(dx) != ring && std::abs(dz) != ring) continue;
-        const int cellX = centerX + dx, cellZ = centerZ + dz;
-        if (cellX < 0 || cellZ < 0 || cellX >= MAXTEXTURESIZE / 2 ||
-            cellZ >= MAXTEXTURESIZE / 2) continue;
-        const int texX = cellX * 2, texZ = cellZ * 2;
-        const int offset = 12 + (texX + texZ * MAXTEXTURESIZE) * 4 + 2;
-        // Native paint uses 25-unit pixels; one mixed cell spans 2x2 of
-        // those pixels. Reading only its first corner missed sparse strokes.
-        const int nextX = offset + 4;
-        const int nextZ = offset + MAXTEXTURESIZE * 4;
-        const int mask = (std::max)((std::max)(int(ReadMemblockByte(memblockId, offset)),
-                                                  int(ReadMemblockByte(memblockId, nextX))),
-                                    (std::max)(int(ReadMemblockByte(memblockId, nextZ)),
-                                               int(ReadMemblockByte(memblockId, nextZ + 4))));
-        if (mask <= 0) continue;
-        ++sampledPainted;
-        const unsigned hash = Hash(unsigned(cellX), unsigned(cellZ));
-        if (Unit(Hash(unsigned(cellX), unsigned(cellZ), 0x42de301u)) >
-            (mask / 255.f) * chanceScale) continue;
-        const int style = Pick(Unit(hash));
-        if (style < 0) continue;
-        if (!render[style].source) {
-            // Classic's native species is intentionally excluded from this
-            // overlay; log how often our sampler chooses it instead.
-            ++pickedNative;
-            continue;
+bool PrepareNative(){
+    lastIssue.clear();
+    if(!RenderEnabled()) return false;
+    int meshes[MaxStyles]={}, images[MaxStyles]={};
+    float weights[MaxStyles]={};
+    // Native base first; all other slots use distinct mesh and atlas IDs.
+    int primary=-1;
+    for(int s=0;s<MaxStyles;++s)
+        if(slots[s].enabled && slots[s].weight>0 && PWStyleImport::Same(slots[s].style,g.vegstyle_s.Get())) {primary=s;break;}
+    if(primary<0){lastIssue="native base style unavailable";return false;}
+    render[0].mesh=t.tGrassObj; render[0].image=t.tGrassImg; render[0].slot=primary;
+    meshes[0]=t.tGrassObj; images[0]=t.tGrassImg; weights[0]=slots[primary].weight; nativeCount=1;
+    for(int s=0;s<MaxStyles;++s){
+        if(s==primary || !slots[s].enabled || slots[s].weight<=0 || slots[s].style.empty()) continue;
+        const std::string dir=std::string("vegbank\\")+slots[s].style;
+        std::string model=dir+"\\veg.DBO";
+        if(!FileExist((LPSTR)model.c_str())) model=dir+"\\veg.X";
+        std::string atlas;
+        const char* extensions[]={".dds",".png",".jpg",".jpeg",".bmp",".tga"};
+        for(const char* ext:extensions){std::string candidate=dir+"\\grass"+ext;if(FileExist((LPSTR)candidate.c_str())){atlas=candidate;break;}}
+        if(!FileExist((LPSTR)model.c_str()) || atlas.empty()){
+            lastIssue="missing native mesh/atlas for "+slots[s].style; ResetInstances();return false;
         }
-        ++pickedSecondary;
-        RenderStyle& rs = render[style];
-        if (!EnsureInstance(rs, rs.used)) {
-            ++allocationFailures;
-            continue;
-        }
-        const int inst = rs.instances[rs.used++];
-        const float x = (cellX + 0.5f) * 50.f +
-            (Unit(Hash(unsigned(cellX), unsigned(cellZ), 0xabc123u)) - 0.5f) * 36.f;
-        const float z = (cellZ + 0.5f) * 50.f +
-            (Unit(Hash(unsigned(cellX), unsigned(cellZ), 0xdde091u)) - 0.5f) * 36.f;
-        const float y = superflat ? flatHeight : BT_GetGroundHeight(terrainId, x, z);
-        PositionObject(inst, x, y, z);
-        YRotateObject(inst, rs.yaw +
-            Unit(Hash(unsigned(cellX), unsigned(cellZ), 0xd123a0u)) * 360.f);
-        ShowObject(inst);
-        ++count;
+        auto& rs=render[nativeCount]; rs.owned=true;rs.slot=s;
+        for(int id=229000;id<230000;++id) if(!ObjectExist(id)&&!GetMeshExist(id)){rs.mesh=id;break;}
+        for(int id=125000;id<126000;++id) if(!ImageExist(id)){rs.image=id;break;}
+        if(!rs.mesh||!rs.image){lastIssue="no free vegetation resource IDs";ResetInstances();return false;}
+        LoadObject((LPSTR)model.c_str(),rs.mesh);
+        if(!ObjectExist(rs.mesh)){lastIssue="could not load grass mesh for "+slots[s].style;ResetInstances();return false;}
+        const auto opt=PWEnvironmentStyle::Read(dir);
+        const float scale=200.f*opt.percent/100.f;
+        ScaleObject(rs.mesh,scale,scale,scale);
+        if(opt.yaw!=0.f) YRotateObject(rs.mesh,opt.yaw);
+        MakeMeshFromObject(rs.mesh,rs.mesh);
+        DeleteObject(rs.mesh);
+        SetImageAutoMipMap(1);
+        LoadImage((LPSTR)atlas.c_str(),rs.image);
+        SetImageAutoMipMap(0);
+        if(!GetMeshExist(rs.mesh)||!ImageExist(rs.image)){lastIssue="could not prepare native grass assets for "+slots[s].style;ResetInstances();return false;}
+        meshes[nativeCount]=rs.mesh; images[nativeCount]=rs.image; weights[nativeCount]=slots[s].weight; ++nativeCount;
     }
-    for (int i = 0; i < MaxStyles; ++i)
-        for (size_t j = render[i].used; j < render[i].instances.size(); ++j)
-            HideObject(render[i].instances[j]);
+    if(nativeCount<2){ResetInstances();return false;}
+    SetPWVegetationMix(nativeCount,meshes,images,weights);
+    ready=true;
+    return true;
 }
 } // namespace PWGrassMix
