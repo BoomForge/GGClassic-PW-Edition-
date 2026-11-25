@@ -16,6 +16,18 @@ int main() {
     assert(Pick(0.999f) == 1);
     assert(Hash(100, 200) == Hash(100, 200));
     assert(Hash(100, 200) != Hash(101, 200));
+    // Verify the same deterministic seeded hash as the live painter chooses
+    // both species over a painted patch; this is NOT a GPU-render proof.
+    slots[0].weight = slots[1].weight = 50.f;
+    int selectedNative=0, selectedSecondary=0;
+    for (unsigned z=100;z<132;++z)
+        for (unsigned x=100;x<132;++x) {
+            const int species=Pick(Unit(Hash(x,z)));
+            if (species==0) ++selectedNative;
+            if (species==1) ++selectedSecondary;
+        }
+    assert(selectedNative>350);
+    assert(selectedSecondary>350);
     // Normalised world dimensions must respect native VegWidth/VegHeight,
     // custom-style size settings, and MUST apply scale only once to instances.
     InstanceSizing size;
