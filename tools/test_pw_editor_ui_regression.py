@@ -218,6 +218,10 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('ReleaseProbe(); // Remove dependent diagnostic clone before source meshes.', grass)
         self.assertIn('Diagnostic: compare magenta cube and second grass model##PWGrassRenderProbe', terrain)
         self.assertIn('PWGrassMix::SetProbeEnabled(pwProbe);', terrain)
+        self.assertIn('ImGui::Button("Copy grass diagnostics##PWGrassCopy")', terrain)
+        self.assertIn('ImGui::SetClipboardText(pwGrassDiag.c_str());', terrain)
+        self.assertIn('if (probeCube && ObjectExist(probeCube))', grass)
+        self.assertIn('if (probeModel && ObjectExist(probeModel))', grass)
         self.assertIn("InstanceObject(id, rs.source);", grass)
         # Classic grass templates are 200% scaled. InstanceObject creates
         # independent transforms; the scale/yaw must reach each visible instance.
