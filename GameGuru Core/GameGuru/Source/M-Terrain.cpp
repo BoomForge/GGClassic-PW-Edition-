@@ -1284,8 +1284,18 @@ void imgui_terrain_loop(void)
                     {
                         ImGui::TextDisabled("Secondary grass overlay preview. Classic base remains visible.");
                         const std::string pwGrassDiag = PWGrassMix::Diagnostics();
-                        ImGui::TextUnformatted(pwGrassDiag.c_str());
-                        ImGui::TextDisabled("Visible flags do not prove blades were drawn on screen.");
+                        ImGui::TextWrapped("%s",pwGrassDiag.c_str());
+                        // Visually distinguish why a secondary style is
+                        // missing rather than guessing from visible flags.
+                        // A magenta cube proves standard objects can reach
+                        // the camera; the neighbouring real grass clone tests
+                        // the model/texture/shader independently of painting.
+                        bool pwProbe=PWGrassMix::ProbeEnabled();
+                        if (ImGui::Checkbox("Diagnostic: compare magenta cube and second grass model##PWGrassRenderProbe",&pwProbe))
+                            PWGrassMix::SetProbeEnabled(pwProbe);
+                        if (PWGrassMix::ProbeEnabled())
+                            ImGui::TextDisabled("Look straight ahead: magenta cube left, enlarged second grass right. Not saved.");
+                        ImGui::TextDisabled("Visible flags and placed counts do NOT prove rasterised pixels.");
                         if (!PWGrassMix::Ready())
                             ImGui::TextDisabled("Mix assets unavailable or not prepared.");
                         else if (!PWGrassMix::OwnsGrid())
