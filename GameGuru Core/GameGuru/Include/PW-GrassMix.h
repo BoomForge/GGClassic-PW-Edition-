@@ -55,6 +55,10 @@ inline bool Active() { return Count() >= 2; }
 bool PreviewEnabled();
 bool RenderEnabled();
 void SetPreviewEnabled(bool enabled);
+// Runtime diagnostic: show a bright primitive beside a large real secondary
+// model in front of the editor camera. Opt-in only; never saved in levels.
+bool ProbeEnabled();
+void SetProbeEnabled(bool enabled);
 std::string Diagnostics();
 inline int Pick(float unit) {
     float total = 0.f;
