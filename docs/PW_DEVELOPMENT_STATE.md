@@ -2,7 +2,7 @@
 
 **Purpose:** This is the canonical *short handoff* for continuing development in a new ChatGPT conversation. It is updated after meaningful, verified changes. Read this before treating an older chat transcript, roadmap item, or PR body as current state.
 
-**State checked:** 23 November 2026  
+**State checked:** 25 November 2026  
 **Repository:** https://github.com/BoomForge/GGClassic-PW-Edition-  
 **Active development branch:** `work/pw-community-integration-20261121`  
 **Draft pull request:** https://github.com/BoomForge/GGClassic-PW-Edition-/pull/1  
@@ -10,6 +10,20 @@
 **Confirmed previous Windows x64 full compile:** [run #45012104941](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45012104941), **success**, for the _still broken in live editor_ disappearance-fix revision `0bd43d92`. This demonstrates compilation does not validate multi-grass visuals. The latest **Asset Inspector blank-preview and file-filter correction** has [full Windows x64 build #45158073815](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45158073815) still **in progress** at `73eee8d2`; its [UI regression guards #45158073857](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45158073857) **passed**, and [Windows import/cleanup validation #45158073936](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45158073936) **passed**. Newer source/doc commits trigger additional builds; check current HEAD result before installing. Updater is already integrated into the owner's editor. **Recheck Actions before claiming the latest full build passed.** The separate Windows updater EXE is already part of the owner's build; it also [compiled successfully at `9248ed24`](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/44999138922).
 
 > **OWNER-CORRECTED DELIVERY FACT (22 Nov 2026): The current installed PW Edition ALREADY INCLUDES AN IN-ENGINE UPDATER.** Never describe this updater as a future feature, or default to downloading source ZIPs and running `START_PW_TEST_BUILD.cmd` every update. The editor's update command launches the installed `Pixelwolf-GGC-Updater.exe` source-building helper. Distinguish this **existing, owner-confirmed capability** from whether the **latest revision** has passed actual installation and gameplay acceptance; CI compilation is not a local runtime test.
+
+## 25 November 2026 — multi-grass STILL BROKEN, proof-first DX11 diagnosis (P0)
+
+**Owner's fresh live result:** After the latest updater, **ONLY ONE grass type still appears**. Prior source edits did not deliver multi-species rendering. The owner explicitly requested deep code analysis **without further guesses**. Do not claim the issue is solved or substitute another passing static test for actual rendered grass. The README Discord archive must continue to list multi-grass as broken until confirmed visually.
+
+**Code-established design failure:** The implementation is not a proportional multi-grass engine: Classic's full-density native vegetation draws the primary type; `PWGrassMix::Refresh` adds only up to **320 separate extra objects** and discards selections of the native type. This cannot honour the requested 50/50 or 25/75 mix. The actual underlying Dark Basic `InstanceObject`, source texture, transparent sorting, visibility and render path were read directly. **Whether the secondary DBO draws any pixels on the user's GPU remains unknown**, and changing shaders/scales again without evidence would repeat the previous mistakes.
+
+**Evidence-generating code committed on development branch:** `M-Grass.cpp` now counts real painted-mask hits, native-vs-extra sample picks and failed extra-object allocations. `M-Terrain.cpp` displays those stats with **Copy grass diagnostics** and an opt-in **Diagnostic: compare magenta cube and second grass model**. The test draws an opaque magenta cube plus a large actual secondary grass **clone** directly in front of the current camera (uses real camera look vector, not guessed pitch). It is not part of the saved level, is cleaned up on unload/disable, and follows shadow-pass visibility. The normal grass renderer and Classic fallback remain untouched. Targeted Python assertions and deterministic C++ mix-distribution checks were updated. Diagnostic implementation commits from [`0d97b6a9`](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/0d97b6a9389ee5c47d141e74a429f71e5d88eb93) through [`57976ac5`](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/57976ac54b8fa0a07e0628582bf19c533c8e97a7).
+
+**Install/build gate:** Recheck latest branch x64 CI for the diagnostic code after the last source/test change; never say compiled based on an earlier SHA. Use the existing in-editor updater ONLY after full Windows x64 CI is green. Do not distribute new ZIPs. This is a **diagnostic stage, not a finished feature**.
+
+**Decision tree from one real owner test:** Choose two clearly distinct stock grass styles, enable **Show additional grass types**, then enable the magenta-cube/model diagnostic. Copy the counters and observe the viewport. Cube missing = camera/render path. Cube visible, grass clone missing = model material/shader/texture or geometry. Both visible but scattered grass missing = placement/instancing/coverage. If painted/extra picks are zero = missing assets/mask/selection; investigate before changing GPU code. Once at least two species visibly render, replace the non-proportional Classic+320 overlay with a genuine weighted and performance-bounded multi-style renderer.
+
+**Source of detailed procedure and history:** [PW_WORKSPACE_SKY_GRASS_IMPORT.md](PW_WORKSPACE_SKY_GRASS_IMPORT.md). No code-only test can prove the graphics are visible on the owner's actual editor.
 
 ## 24 November 2026 — deep multi-grass renderer correction (P0; awaiting visual acceptance)
 
