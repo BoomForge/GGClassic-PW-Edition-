@@ -14,6 +14,7 @@
 #include "M-WelcomeSystem.h"
 #include "Common-Keys.h"
 #include "PW-DisplayOptions.h"
+#include "PW-GameplayControls.h"
 #include "CFtpC.h"
 #include "..\..\Dark Basic Public Shared\Dark Basic Pro SDK\Shared\Objects\ShadowMapping\cShadowMaps.h"
 #include "..\..\Dark Basic Public Shared\Include\CObjectsC.h"
@@ -39,6 +40,33 @@
 // Startup display selection is standalone-only; retained across initial setup.
 static bool pwDisplayActive=false;
 static PWDisplay::Choice pwDisplayChoice;
+static bool pwControlsActive=false;
+static PWControls::Bindings pwControls=PWControls::Classic();
+static PWControls::Bindings pwControlDefaults=PWControls::Classic();
+static std::string pwControlsRoot;
+bool PWGameplayControlsActive(){return pwControlsActive && t.game.gameisexe==1 && t.game.runasmultiplayer==0;}
+int PWGameplayKey(int logical,int fallback) {
+    int index=PWControls::Index(logical);
+    return PWGameplayControlsActive()&&index>=0?KeyState(pwControls[static_cast<size_t>(index)]):KeyState(fallback);
+}
+static void PWOpenControls(HWND owner) {
+    PWControls::Dialog d;
+    d.root=pwControlsRoot;d.defaults=pwControlDefaults;d.selected=pwControlsActive?pwControls:pwControlDefaults;
+    if(PWControls::Configure(owner,d)){pwControls=d.selected;pwControlsActive=true;}
+}
+static void PWInitControls(const std::string& root) {
+    pwControlsRoot=root;pwControlsActive=false;
+    PWControls::Bindings defaults={};
+    for(size_t i=0;i<defaults.size();++i){
+        const auto& action=PWControls::Actions()[i];
+        const int logical=action.setup>0 && t.listkey[action.setup]>0?t.listkey[action.setup]:action.logical;
+        defaults[i]=logical>=1&&logical<=255?g.keymap[logical]:0;
+    }
+    // Preserve unusual developer defaults until the player explicitly opts in.
+    pwControlDefaults=PWControls::Valid(defaults)?defaults:PWControls::Classic();
+    pwControls=pwControlDefaults;
+    pwControlsActive=PWControls::Read(root,pwControls);
+}
 
 // core externs to globals
 extern LPSTR gRefCommandLineString;
@@ -4028,9 +4056,12 @@ void FPSC_Setup ( void )
             pwDisplayActive=false;
             const std::string pwDisplayRoot=g.fpscrootdir_s.Get();
             const std::string pwSetup=PWLevelFlow::Root(pwDisplayRoot)+"setup.ini";
+            const bool pwControlsEnabled=g.gvrmode==0&&g.globals.riftmode==0&&GetPrivateProfileIntA("GAMERUN","pwcontrols",0,pwSetup.c_str())==1;
+            if(pwControlsEnabled)PWInitControls(pwDisplayRoot);else pwControlsActive=false;
             if(g.gvrmode==0 && g.globals.riftmode==0 &&
                 GetPrivateProfileIntA("GAMERUN","pwdisplayoptions",0,pwSetup.c_str())==1) {
                 PWDisplay::Dialog dialog;
+                if(pwControlsEnabled)dialog.controls=PWOpenControls;
                 dialog.desktopW=GetDesktopWidth();dialog.desktopH=GetDesktopHeight();
                 RECT work={};SystemParametersInfoA(SPI_GETWORKAREA,0,&work,0);
                 RECT border={0,0,0,0};AdjustWindowRectEx(&border,WS_OVERLAPPEDWINDOW,FALSE,0);
@@ -4080,6 +4111,7 @@ void FPSC_Setup ( void )
                     timestampactivity(0,"PW startup display options applied");
                 }
             }
+            if(pwControlsEnabled && !pwDisplayActive && g.iStandaloneIsReloading==0)PWOpenControls(nullptr);
 
 			//  do not need for loading page
 			timestampactivity(0,"_game_hidemouse");

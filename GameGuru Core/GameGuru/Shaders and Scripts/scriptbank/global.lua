@@ -263,6 +263,17 @@ local function pwProfileParse(payload)
  if not pwTransitionModule.parse(scalars) then return nil end
  return stats,scalars
 end
+-- Semantic gameplay queries. Raw InKey/ScanCode retain their meaning.
+function PWActionDown(action)
+ local keys={
+  move_forward=g_KeyPressW,move_backward=g_KeyPressS,move_left=g_KeyPressA,move_right=g_KeyPressD,
+  jump=g_KeyPressSPACE,crouch=g_KeyPressC,reload=g_KeyPressR,lean_left=g_KeyPressQ,
+  interact=g_KeyPressE,sprint=g_KeyPressSHIFT,action_f=g_KeyPressF,action_j=g_KeyPressJ,
+  use=g_PlrKeyRETURN,action_z=g_PlrKeyZ
+ }
+ return keys[action]==1
+end
+
 function PWProfileSave(name)
  if not pwProfileName(name) or not PWProfileWriteRaw or not pwTransitionModule or not pwTransitionModule.export then return false end
  local stats={g_PlayerHealth,g_PlayerLives,GetPlayerWeaponID()}

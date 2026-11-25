@@ -358,13 +358,15 @@ void lua_loop_begin ( void )
 	#endif
 
 	//  Quick detection of E key
+    extern bool PWGameplayControlsActive();
+    extern int PWGameplayKey(int logical,int fallback);
 	if (  t.aisystem.processplayerlogic == 1 ) 
 	{
-		if (  t.player[t.plrid].health>0  )  t.tKeyPressE = KeyState(18); else t.tKeyPressE = 0;
+		if (  t.player[t.plrid].health>0  )  t.tKeyPressE = PWGameplayKey(18,18); else t.tKeyPressE = 0;
 	}
 	else
 	{
-		t.tKeyPressE=KeyState(g.keymap[18]);
+		t.tKeyPressE=PWGameplayKey(18,g.keymap[18]);
 	}
 	if ( g.gxbox == 1 ) 
 	{
@@ -379,25 +381,25 @@ void lua_loop_begin ( void )
 	}
 	#endif
 	LuaSetInt ( "g_KeyPressE",t.tKeyPressE );
-	LuaSetInt ( "g_KeyPressQ",KeyState(g.keymap[16]) );
+	LuaSetInt ( "g_KeyPressQ",PWGameplayKey(16,g.keymap[16]) );
 
 	// 241115 - other common keys which might require SIMULTANEOUS detection (bot control)
-	LuaSetInt ( "g_KeyPressW", KeyState(g.keymap[17]) );
-	LuaSetInt ( "g_KeyPressA", KeyState(g.keymap[30]) );
-	LuaSetInt ( "g_KeyPressS", KeyState(g.keymap[31]) );
-	LuaSetInt ( "g_KeyPressD", KeyState(g.keymap[32]) );
-	LuaSetInt ( "g_KeyPressR", KeyState(g.keymap[19]) );
-	LuaSetInt ( "g_KeyPressF", KeyState(g.keymap[33]) );
-	LuaSetInt ( "g_KeyPressC", KeyState(g.keymap[46]) );
+	LuaSetInt ( "g_KeyPressW", PWGameplayKey(17,g.keymap[17]) );
+	LuaSetInt ( "g_KeyPressA", PWGameplayKey(30,g.keymap[30]) );
+	LuaSetInt ( "g_KeyPressS", PWGameplayKey(31,g.keymap[31]) );
+	LuaSetInt ( "g_KeyPressD", PWGameplayKey(32,g.keymap[32]) );
+	LuaSetInt ( "g_KeyPressR", PWGameplayKey(19,g.keymap[19]) );
+	LuaSetInt ( "g_KeyPressF", PWGameplayKey(33,g.keymap[33]) );
+	LuaSetInt ( "g_KeyPressC", PWGameplayKey(46,g.keymap[46]) );
 	//LuaSetInt ( "g_KeyPressJ", !!done in player control code!! );
-	LuaSetInt ( "g_KeyPressSPACE", KeyState(g.keymap[57]) );
+	LuaSetInt ( "g_KeyPressSPACE", PWGameplayKey(57,g.keymap[57]) );
 	LuaSetInt ( "g_KeyPressALT"  , KeyState(g.keymap[56]));
 
 	// shift key for running/etc
 	#ifdef VRTECH
 	int tKeyPressShift = 0;
-	if ( KeyState(g.keymap[42]) ) tKeyPressShift = 1;
-	if ( KeyState(g.keymap[54]) ) tKeyPressShift = 1;
+	if ( PWGameplayKey(42,g.keymap[42]) ) tKeyPressShift = 1;
+	if ( (!PWGameplayControlsActive() && KeyState(g.keymap[54])) ) tKeyPressShift = 1;
 	if ( g.vrglobals.GGVREnabled > 0 && g.vrglobals.GGVRUsingVRSystem == 1 )
 	{
 		if ( GGVR_RightController_Grip() == 1 )
@@ -405,7 +407,7 @@ void lua_loop_begin ( void )
 	}
 	LuaSetInt ( "g_KeyPressSHIFT", tKeyPressShift );
 	#else
-	LuaSetInt ( "g_KeyPressSHIFT", KeyState(g.keymap[42]) | KeyState(g.keymap[54]) );
+	LuaSetInt ( "g_KeyPressSHIFT", PWGameplayKey(42,g.keymap[42]) | (!PWGameplayControlsActive() && KeyState(g.keymap[54])) );
 	#endif
 
 	if ( g.luaactivatemouse != 0 )

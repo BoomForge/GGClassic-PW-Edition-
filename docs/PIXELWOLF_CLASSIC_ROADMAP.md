@@ -105,6 +105,8 @@ Acceptance criteria:
 
 ### P1 — Player-configurable controls / key rebinding
 
+**25 November M1 source progress:** Startup Controls dialog, 14 keyboard actions, persistent validated per-game bindings, duplicate detection and project/Classic reset. Native player and common Lua action queries use the separate mapping. Raw keys unchanged; mouse/controller rebinding and full in-game options remain open. Windows/live acceptance pending.
+
 **User request:** A normal game's Options > Controls interface for player-defined controls, despite many existing GameGuru Lua scripts hard-coding their input keys. This affects general keyboard/mouse/controller gameplay, not just weapon binding.
 
 Acceptance criteria:

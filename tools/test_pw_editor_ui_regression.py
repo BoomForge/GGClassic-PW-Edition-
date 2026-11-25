@@ -160,6 +160,20 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn("t.te=oldEntity;", weapon)
         self.assertIn("physics_explodesphere ( );", weapon)
 
+    def test_gameplay_controls_are_separate_from_raw_keymap(self):
+        common = (ROOT / "GameGuru Core/GameGuru/Source/Common.cpp").read_text(encoding="utf-8")
+        physics = (ROOT / "GameGuru Core/GameGuru/Source/M-Physics.cpp").read_text(encoding="utf-8")
+        lua = (ROOT / "GameGuru Core/GameGuru/Source/M-LUA.cpp").read_text(encoding="utf-8")
+        header = (ROOT / "GameGuru Core/GameGuru/Include/PW-GameplayControls.h").read_text(encoding="utf-8")
+        self.assertIn("dialog.controls=PWOpenControls;", common)
+        self.assertIn("pwControlsActive=PWControls::Read(root,pwControls);", common)
+        self.assertIn("PWGameplayKey(17,g.keymap[t.plrkeyW])", physics)
+        self.assertIn("PWGameplayKey(18,18)", lua)
+        self.assertIn("!PWGameplayControlsActive() && ControlKey()", physics)
+        self.assertIn("if(!Valid(next))", header)
+        self.assertIn("PWProfile::Atomic", header)
+        self.assertIn("Reset defaults", header)
+
     def test_standalone_display_options_preserve_legacy_startup(self):
         common = (ROOT / "GameGuru Core/GameGuru/Source/Common.cpp").read_text(encoding="utf-8")
         export = (ROOT / "GameGuru Core/GameGuru/Source/M-MapFile.cpp").read_text(encoding="utf-8")

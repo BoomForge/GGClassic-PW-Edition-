@@ -81,7 +81,7 @@ public:
     const DLGTEMPLATE* Data()const {return reinterpret_cast<const DLGTEMPLATE*>(words.data());}
 };
 enum {ModeId=101,ResolutionId=102,InfoId=103};
-struct Dialog {Choice selection;std::vector<Size> modes;int desktopW=0,desktopH=0;bool keep=false;int seconds=15;};
+struct Dialog {Choice selection;std::vector<Size> modes;int desktopW=0,desktopH=0;bool keep=false;int seconds=15;void (*controls)(HWND)=nullptr;};
 inline void UpdateMode(HWND window,Dialog& d) {
     bool full=SendDlgItemMessageW(window,ModeId,CB_GETCURSEL,0,0)==1;
     EnableWindow(GetDlgItem(window,ResolutionId),full?FALSE:TRUE);
@@ -112,6 +112,7 @@ inline INT_PTR CALLBACK ConfigureProc(HWND window,UINT msg,WPARAM wp,LPARAM lp) 
             if(d->modes.empty())SendDlgItemMessageW(window,ModeId,CB_SETCURSEL,1,0);
             UpdateMode(window,*d);return TRUE;
         }
+        if(LOWORD(wp)==104&&d->controls){d->controls(window);return TRUE;}
         if(LOWORD(wp)==IDCANCEL){EndDialog(window,IDCANCEL);return TRUE;}
         if(LOWORD(wp)==IDOK){
             bool full=SendDlgItemMessageW(window,ModeId,CB_GETCURSEL,0,0)==1;
@@ -127,12 +128,13 @@ inline INT_PTR CALLBACK ConfigureProc(HWND window,UINT msg,WPARAM wp,LPARAM lp) 
     return FALSE;
 }
 inline bool Configure(Dialog& d) {
-    Template t(L"Display options",7,117);
+    Template t(L"Display options",d.controls?8:7,117);
     t.Item(201,0x82,SS_LEFT,9,8,230,12,L"Choose your display settings");
     t.Item(202,0x82,SS_LEFT,9,26,58,12,L"Display mode");
     t.Item(ModeId,0x85,WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,72,24,168,64,L"");
     t.Item(ResolutionId,0x85,WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,72,46,168,78,L"");
     t.Item(InfoId,0x82,SS_LEFT,9,70,232,19,L"");
+    if(d.controls)t.Item(104,0x80,WS_TABSTOP|BS_PUSHBUTTON,9,94,80,15,L"Controls...");
     t.Item(IDOK,0x80,WS_TABSTOP|BS_DEFPUSHBUTTON,111,94,61,15,L"Start game");
     t.Item(IDCANCEL,0x80,WS_TABSTOP|BS_PUSHBUTTON,179,94,61,15,L"Cancel");
     return DialogBoxIndirectParamW(GetModuleHandleW(nullptr),t.Data(),nullptr,ConfigureProc,reinterpret_cast<LPARAM>(&d))==IDOK;

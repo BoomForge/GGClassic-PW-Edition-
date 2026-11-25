@@ -4,6 +4,7 @@
 #include "PW-FPMCache.h"
 #include "PW-PlayerProfile.h"
 #include "PW-DisplayOptions.h"
+#include "PW-GameplayControls.h"
 #include <cassert>
 #include <cstdio>
 #include <string>
@@ -154,6 +155,21 @@ int main()
     PWDisplay::ClearPending(root);assert(!PWDisplay::HasPending(root));
     Put(PWDisplay::SettingsPath(root),"garbage");
     assert(!PWDisplay::Read(root,saved));
-    printf("PW LevelFlow + FPM cache + profile + display contract checks passed.\n");
+    auto bindings=PWControls::Classic();
+    assert(PWControls::Valid(bindings));
+    bindings[PWControls::Forward]=200;
+    assert(PWControls::Valid(bindings));
+    assert(PWControls::Save(root,bindings));
+    PWControls::Bindings restoredBindings={};
+    assert(PWControls::Read(root,restoredBindings)&&restoredBindings==bindings);
+    auto conflict=bindings;conflict[PWControls::Backward]=200;
+    assert(!PWControls::Save(root,conflict));
+    assert(PWControls::Read(root,restoredBindings)&&restoredBindings==bindings);
+    conflict=bindings;conflict[PWControls::Forward]=1;
+    assert(!PWControls::Valid(conflict));
+    Put(PWControls::Path(root),"PWCONTROLS1\n200\n");
+    assert(!PWControls::Read(root,restoredBindings)&&restoredBindings==bindings);
+    assert(PWControls::Index(18)==PWControls::Interact);
+    printf("PW LevelFlow + FPM cache + profile + display + controls contract checks passed.\n");
     return 0;
 }
