@@ -669,6 +669,12 @@ function gameplayercontrol.lookmove()
 		end
 		-- when camera overridden, do not allow movement
 		if ( GetCameraOverride() ~= 1 and GetCameraOverride() ~= 3 ) then
+			local nativeMove, nativeSpeed = false, 1
+			if PWNativeThirdPersonMove then nativeMove, nativeSpeed = PWNativeThirdPersonMove(g_MouseClickControl, true) end
+			if nativeMove then
+				SetGamePlayerControlBasespeed(nativeSpeed)
+				SetGamePlayerControlMaxspeed(GetGamePlayerControlTopspeed()*GetGamePlayerControlBasespeed())
+			else
 			if ( GetGamePlayerStateEditModeActive() ~= 0 ) then 
 				if ( GetGamePlayerStatePlrKeyShift() == 1 or GetGamePlayerStatePlrKeyShift2() == 1 ) then 
 					SetGamePlayerControlBasespeed(4.0)
@@ -735,12 +741,15 @@ function gameplayercontrol.lookmove()
 					end
 				end
 			end
+			end -- legacy movement fallback
 		else
 			-- camera overridden players cannot move themselves
+			if PWNativeThirdPersonMove then PWNativeThirdPersonMove(0,false) end
 			SetGamePlayerControlMovement(0)
 		end
 	else
-		--  dead players cannot move themselves
+		--  dead or animation-locked players cannot move themselves
+		if PWNativeThirdPersonMove then PWNativeThirdPersonMove(0,false) end
 		SetGamePlayerControlMovement(0)
 	end
 
@@ -1183,6 +1192,8 @@ function gameplayercontrol.control()
 			return
 		end
 		
+		-- Native locomotion animation coordinator uses the existing C++ char_loop.
+		if not (PWNativeThirdPersonAnimate and PWNativeThirdPersonAnimate()) then
 		-- control animation of third person character
 		SetGamePlayerStateCharAnimIndex(GetGamePlayerControlThirdpersonCharacterIndex())
 		CopyCharAnimState(GetGamePlayerStateCharAnimIndex(),0)
@@ -1274,6 +1285,8 @@ function gameplayercontrol.control()
 		-- restore entry in character array
 		SetCharAnimStateE(0,0)
 		CopyCharAnimState(0,GetGamePlayerStateCharAnimIndex())
+
+		end -- legacy animation fallback
 
 		-- Native camera/facing replaces the legacy Lua camera on supported builds.
 		-- Keep the old path for old engine binaries and explicit compatibility mode.

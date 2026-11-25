@@ -7009,16 +7009,84 @@ static int PWProfileListRaw(lua_State* L) {
 }
 // Native third-person camera and character facing. The shared player
 // controller still owns animation, input, physics and weapon policy.
+static bool PWNativeThirdPersonReady(int& e,int& avatar) {
+    const auto& tp=t.playercontrol.thirdperson;
+    const int body=t.aisystem.objectstartindex;
+    char legacy[4]={};
+    e=tp.charactere;avatar=0;
+    if((GetEnvironmentVariableA("GGCPW_LEGACY_THIRDPERSON",legacy,sizeof(legacy))==1&&legacy[0]=='1')||
+        tp.enabled!=1||e<=0||e>g.entityelementlist||body<=0||!ObjectExist(body)||
+        t.game.runasmultiplayer!=0||g.gvrmode!=0||g.globals.riftmode!=0||t.conkit.editmodeactive!=0)return false;
+    avatar=t.entityelement[e].obj;
+    return avatar>0&&ObjectExist(avatar)&&t.entityelement[e].ragdollified==0;
+}
+// Compute third-person locomotion from the same remapped digital actions used
+// by the native physics controller. Keep its existing acceleration/slope and
+// jump integration, rather than teleporting the avatar.
+static int PWNativeThirdPersonMove(lua_State* L) {
+    using namespace PWThirdPerson;
+    int e=0,avatar=0;
+    if(lua_gettop(L)!=2||!PWNativeThirdPersonReady(e,avatar)){
+        lua_pushboolean(L,0);return 1;
+    }
+    const int buttons=static_cast<int>(lua_tointeger(L,1));
+    const bool allowed=lua_toboolean(L,2)!=0&&t.plrhasfocus!=0&&t.player[1].health>0&&
+        g.luacameraoverride!=1&&g.luacameraoverride!=3;
+    const auto& tp=t.playercontrol.thirdperson;
+    // RMB is aim, including the simultaneous LMB+RMB state (bitmask 3).
+    t.playercontrol.camrightmousemode=allowed&&(buttons&2)!=0?1:0;
+    const bool aim=t.playercontrol.camrightmousemode!=0||tp.shotfired!=0||tp.camerafollow==0;
+    const auto m=DecideMovement(CameraAngleY(0),t.plrkeyW,t.plrkeyA,t.plrkeyS,t.plrkeyD,
+        t.plrkeySHIFT==1||t.plrkeySHIFT2==1,t.playercontrol.canrun!=0,aim,false,allowed);
+    t.playercontrol.movement=m.moving?1:0;
+    if(m.moving)t.playercontrol.movey_f=m.direction;
+    t.playercontrol.isrunning=m.running?1:0;
+    // Return the base speed to the shared setter so the existing physics
+    // frequency scaling remains identical to the FPS path.
+    lua_pushboolean(L,1);lua_pushnumber(L,m.speed);return 2;
+}
+static int PWNativeThirdPersonAnimate(lua_State* L) {
+    using namespace PWThirdPerson;
+    int e=0,avatar=0;
+    if(!PWNativeThirdPersonReady(e,avatar)){lua_pushboolean(L,0);return 1;}
+    const int index=t.playercontrol.thirdperson.characterindex;
+    if(index<=0||index>g.charanimindexmax||t.charanimstates[index].obj!=avatar){
+        lua_pushboolean(L,0);return 1;
+    }
+    const auto& tp=t.playercontrol.thirdperson;
+    const bool aim=t.playercontrol.camrightmousemode!=0||tp.shotfired!=0||tp.camerafollow==0;
+    const bool moving=t.playercontrol.movement!=0&&t.player[1].health>0&&g.luacameraoverride!=1&&g.luacameraoverride!=3;
+    t.charanimstate=t.charanimstates[index];
+    t.charanimstate.e=e;
+    t.charanimcontrols[index].moving=MovementAnimation(moving,t.playercontrol.isrunning!=0,
+        aim,t.playercontrol.movey_f,t.playercontrol.cy_f);
+    const float polarity=GetSpeed(avatar)<0.f?-1.f:1.f;
+    SetObjectSpeed(avatar,t.entityelement[e].speedmodulator_f*t.charanimstate.animationspeed_f*polarity*2.5f*g.timeelapsed_f);
+    // This is the same engine animation state machine used by the original
+    // script. It continues to own melee, reload and authored sequences.
+    char_loop();
+    const int original=t.charanimstate.originale;
+    if(original>0&&original<=g.entityelementlist&&t.charanimstate.obj==avatar&&ObjectExist(avatar)){
+        const int bank=t.entityelement[original].bankindex;
+        if(bank>0){
+            const int anim=t.entityprofile[bank].startofaianim+t.csi_stoodvault[1];
+            const float first=t.entityanim[bank][anim].start,last=t.entityanim[bank][anim].finish;
+            const float hold=JumpHoldFrame(first,last,t.entityprofile[bank].jumphold);
+            const float frame=GetFrame(avatar);
+            if(hold>=0.f&&t.playercontrol.jumpmode==1&&frame>=first&&frame<=last&&frame>hold)
+                SetObjectFrame(avatar,hold);
+        }
+    }
+    t.charanimstate.e=0;
+    t.charanimstates[index]=t.charanimstate;
+    lua_pushboolean(L,1);return 1;
+}
 static int PWNativeThirdPersonUpdate(lua_State* L) {
     using namespace PWThirdPerson;
     const auto& tp=t.playercontrol.thirdperson;
-    const int e=tp.charactere,body=t.aisystem.objectstartindex;
-    char legacy[4]={};
-    if(GetEnvironmentVariableA("GGCPW_LEGACY_THIRDPERSON",legacy,sizeof(legacy))==1&&legacy[0]=='1' ||
-        tp.enabled!=1||e<=0||e>g.entityelementlist||body<=0||!ObjectExist(body)||
-        t.game.runasmultiplayer!=0||g.gvrmode!=0||t.conkit.editmodeactive!=0) {lua_pushboolean(L,0);return 1;}
-    const int avatar=t.entityelement[e].obj;
-    if(avatar<=0||!ObjectExist(avatar)||t.entityelement[e].ragdollified!=0){lua_pushboolean(L,0);return 1;}
+    const int body=t.aisystem.objectstartindex;
+    int e=0,avatar=0;
+    if(!PWNativeThirdPersonReady(e,avatar)){lua_pushboolean(L,0);return 1;}
     const Vec player={ObjectPositionX(body),ObjectPositionY(body),ObjectPositionZ(body)};
     const float yaw=Finite(t.playercontrol.finalcameraangley_f,CameraAngleY(0));
     const float pitch=Clamp(Signed(Finite(t.playercontrol.finalcameraanglex_f-tp.camerafocus,0.f)),-65.f,80.f);
@@ -7030,7 +7098,8 @@ static int PWNativeThirdPersonUpdate(lua_State* L) {
     PositionObject(avatar,player.x,player.y-35.f,player.z);
     const bool aiming=t.playercontrol.camrightmousemode==1||tp.shotfired==1||tp.camerafollow==0;
     const float current=ObjectAngleY(avatar);
-    const float desired=aiming?yaw:Facing(yaw,t.plrkeyW,t.plrkeyA,t.plrkeyS,t.plrkeyD,current);
+    const bool canFace=t.player[1].health>0&&t.plrhasfocus!=0&&g.luacameraoverride!=1&&g.luacameraoverride!=3;
+    const float desired=!canFace?current:(aiming?yaw:(t.playercontrol.movement!=0?t.playercontrol.movey_f:current));
     RotateObject(avatar,0.f,ApproachAngle(current,desired,dt),0.f);
     t.playercontrol.thirdperson.shotfired=0;
     // Preserve authored cutscene overrides, including angle-only overrides.
@@ -7079,6 +7148,8 @@ static int PWCanInteract(lua_State* L) {
 void addFunctions()
 {
     lua_register(lua,"PWCanInteract",PWCanInteract);
+    lua_register(lua,"PWNativeThirdPersonMove",PWNativeThirdPersonMove);
+    lua_register(lua,"PWNativeThirdPersonAnimate",PWNativeThirdPersonAnimate);
     lua_register(lua,"PWNativeThirdPersonUpdate",PWNativeThirdPersonUpdate);
     lua_register(lua,"PWProfileWriteRaw",PWProfileWriteRaw);
     lua_register(lua,"PWProfileListRaw",PWProfileListRaw);
