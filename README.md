@@ -34,7 +34,7 @@ A> Due to this public repository being hammered by anonymous cloning, we have mo
 
 This is the chronological archive of short, community-facing development reports. **Each dated post is a separate historical snapshot**: do not silently rewrite an earlier post when the engine changes. Add a new dated entry at the top for future Discord updates, noting fixes, regressions, and the distinction between **committed source**, **Windows build success**, and **user-tested functionality**.
 
-**Important current limitation:** **Multi-grass is not working.** The experimental multiple-grass system has not passed live visual testing. A passing build does not make it functional.
+**Current status (25 November 2026): Multi-grass rendering is working — owner confirmed.** The native weighted vegetation rewrite replaced the failed experimental overlay. Weight accuracy, save/reopen and standalone regression checks remain. Earlier dated Discord posts below are historical snapshots.
 
 **Posts (newest first):**
 - [24 November 2026 — Asset Inspector and editor stability](#24-november-2026--asset-inspector-and-editor-stability)
@@ -138,7 +138,7 @@ Project: Pixelwolf — GameGuru Classic Edition
 **Project:** [GGClassic PW Edition](https://github.com/BoomForge/GGClassic-PW-Edition-)  
 **Development branch:** [work/pw-community-integration-20261121](https://github.com/BoomForge/GGClassic-PW-Edition-/tree/work/pw-community-integration-20261121)  
 **Review:** [Draft PR #1](https://github.com/BoomForge/GGClassic-PW-Edition-/pull/1)  
-**Last updated:** 24 November 2026
+**Last updated:** 25 November 2026
 
 The goal is a **fast, familiar first-person world builder** for an early-2000s-style 3D RPG that will grow gradually over a long period. DDS support must remain intact. New graphics formats are **additional**, not replacements.
 

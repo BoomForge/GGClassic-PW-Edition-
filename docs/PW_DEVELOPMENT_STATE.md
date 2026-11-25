@@ -11,6 +11,12 @@
 
 > **OWNER-CORRECTED DELIVERY FACT (22 Nov 2026): The current installed PW Edition ALREADY INCLUDES AN IN-ENGINE UPDATER.** Never describe this updater as a future feature, or default to downloading source ZIPs and running `START_PW_TEST_BUILD.cmd` every update. The editor's update command launches the installed `Pixelwolf-GGC-Updater.exe` source-building helper. Distinguish this **existing, owner-confirmed capability** from whether the **latest revision** has passed actual installation and gameplay acceptance; CI compilation is not a local runtime test.
 
+## 25 November 2026 — owner confirms native multi-grass WORKING
+
+**Owner live acceptance:** Following the native vegetation rewrite, the owner reported “Working STOKED!” on 25 November 2026. Simultaneous multi-grass rendering is therefore owner-confirmed working; close the previous one-species rendering defect. Source implementation: [ed02b02](https://github.com/BoomForge/GGClassic-PW-Edition-/commit/ed02b02dad016f7290d0bd9d05d6a3de0ecaa23c). Preserve the native weighted vegetation batches and do not restore the failed 320-object overlay. Exact installed SHA, quantitative weights, save/reopen, standalone, performance and edge-case regressions were not separately reported; these remain verification tasks, not a reason to reopen the resolved basic rendering defect.
+
+**Next priorities:** Safe custom asset deletion, direct non-explosive projectile damage, persistent player profiles, controls/display options, and Model Importer 2 / Character Creator 2. Preserve all previously accepted editor functionality.
+
 ## 25 November 2026 — native weighted vegetation rewrite (source implementation, CI/runtime pending)
 
 Replaced the separate 320-entity overlay with native species batches inside `SimonReloaded.cpp`. Each grid cell uses the original vegetation mesh builder, shader, terrain/mask updater and visibility lifecycle for each enabled species. The existing density budget is divided using weighted largest-remainder allocation; each species has its own mesh and atlas. The old overlay and probe are removed from the active renderer. The existing UI, FPM configuration and native-only fallback remain. Static guards updated for the native path.
@@ -218,7 +224,7 @@ Use `START_PW_TEST_BUILD.cmd` and the separate `PW-TestInstall\\Guru-MapEditor.e
 
 ## Next actions, in priority order
 
-### P0 — Verify Asset Inspector rendering; separately finish multi-grass
+### P0 — Remaining verification after owner-confirmed multi-grass fix
 
 - [x] Commit Asset Inspector source repair: only viewable models/textures in tree; no setup files or thumbnails; independent preview shader, resource IDs, model framing, texture sidecars and retry.
 - [x] Diagnose owner's integrated updater C2059 failure in GitHub full x64 job log; fix extra parenthesis in M-GridEdit.cpp (`ade4a423`) and add balancing regression guard (`a6ae4579`).
@@ -226,9 +232,7 @@ Use `START_PW_TEST_BUILD.cmd` and the separate `PW-TestInstall\\Guru-MapEditor.e
 - [x] **Record third grass failure:** earlier overlap/instance/mask fixes compiled but did **not** fix the actual all-grass-disappears bug.
 - [x] Add a **safe default**: selecting multiple grass types no longer automatically hides Classic; experimental PW rendering requires explicit preview opt-in. Add diagnostic resource/instance/visible-flag information in the editor.
 - [x] Trace missing standard object shader on secondary grass source objects; add unique entity effect, set importer control constant, rebind per-style atlas *after* shader; overlay secondary species while retaining native grid; skip duplication of native species.
-- [ ] **True simultaneous multi-grass remains visually UNVERIFIED.** Await preview screenshot showing two distinct species, along with per-style object count. Then tune genuine visible weight distribution, wind, shadow and game export.
-- [ ] Confirm full Windows x64 compile of **shader-backed secondary overlay** and latest source/UI checks; check latest Actions status.
-- [ ] With existing in-editor updater, install the **new overlay revision**; on a disposable map select two styles and tick **Preview experimental multi-grass**. Confirm Classic remains visible AND the second type is visible; capture per-style diagnostics and viewport. Preview OFF remains native-only safety mode, not multi-grass acceptance.
+- [x] **True simultaneous multi-grass rendering — owner confirmed working 25 November.** Native weighted renderer replaces the overlay. Remaining grass checks: quantitative weight distribution, wind, shadow, save/reopen and standalone export.
 - [ ] If a *single* imported grass style still flickers with mix disabled, examine actual texture transparency and native UV atlas compatibility before changing shader/material processing.
 - [x] Earlier Asset Inspector-inclusive full Windows x64 compile succeeded in run #44994266761.
 - [x] Implement/source-check the **safer local build/staging path** and acceptance checklist; Windows local-script validation passed in run #44999063741. No compiled proprietary artifact has been published.
