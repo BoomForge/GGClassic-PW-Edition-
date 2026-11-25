@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - "GameGuru Core/GameGuru/Include/PW-LevelFlow.h"
+      - "GameGuru Core/GameGuru/Include/PW-PlayerProfile.h"
+      - "GameGuru Core/GameGuru/Shaders and Scripts/scriptbank/global.lua"
+      - "GameGuru Core/GameGuru/Shaders and Scripts/scriptbank/pw_transition_state.lua"
       - "GameGuru Core/GameGuru/Include/PW-FPMCache.h"
       - "GameGuru Core/GameGuru/Source/M-Game.cpp"
       - "GameGuru Core/GameGuru/Source/M-MapFile.cpp"

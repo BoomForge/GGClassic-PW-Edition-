@@ -1068,6 +1068,11 @@ void lua_loop_finish ( void )
 		t.luaaction_s=LuaMessageDesc();
 
 		int iLen = t.luaaction_s.Len();
+        if(strcmp(t.luaaction_s.Get(),"pwprofileload")==0) {
+            extern void PWProfileRequestLoad(const char*);
+            PWProfileRequestLoad(LuaMessageString());
+            continue;
+        }
 
 		//PE: Move most used to top.
 		if (iLen == 11)

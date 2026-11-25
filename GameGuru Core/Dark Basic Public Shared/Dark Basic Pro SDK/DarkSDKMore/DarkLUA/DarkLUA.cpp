@@ -26,6 +26,7 @@
 
 // DarkLUA needs access to the T global (but could be in two locations)
 #include "..\..\..\..\GameGuru\Include\gameguru.h"
+#include "..\..\..\..\GameGuru\Include\PW-PlayerProfile.h"
 
 
 // Prototypes
@@ -6981,8 +6982,33 @@ int Include(lua_State *L)
 	return 0;
 }
 
+// Profile save payloads bypass the 256-byte SendMessageS channel.
+static int PWProfileWriteRaw(lua_State* L) {
+    size_t len=0;
+    const char* name=lua_tostring(L,1);
+    const char* payload=lua_tolstring(L,2,&len);
+    PWLevelFlow::Destination level;
+    bool ok=false;
+    if(name&&payload&&len<=PWProfile::MaxPayload&&PWProfile::Name(name)&&
+        t.game.gameisexe==1&&t.game.runasmultiplayer==0&&t.game.gameloop==1&&t.game.levelendingcycle==0&&
+        PWProfile::CurrentLevel(g.mysystem.mapbankAbs_s.Get(),g.projectfilename_s.Get(),level)){
+        PWProfile::Snapshot snapshot;
+        snapshot.level=level.relative;snapshot.payload.assign(payload,len);
+        ok=PWProfile::Save(PWProfile::Root(std::string(g.fpscrootdir_s.Get())+"\\Files",true),name,snapshot);
+    }
+    lua_pushboolean(L,ok?1:0);return 1;
+}
+static int PWProfileListRaw(lua_State* L) {
+    lua_newtable(L);
+    if(t.game.gameisexe!=1||t.game.runasmultiplayer!=0)return 1;
+    const auto names=PWProfile::List(PWProfile::Root(std::string(g.fpscrootdir_s.Get())+"\\Files",false));
+    int index=1;for(const auto& n:names){lua_pushstring(L,n.c_str());lua_rawseti(L,-2,index++);}
+    return 1;
+}
 void addFunctions()
 {
+    lua_register(lua,"PWProfileWriteRaw",PWProfileWriteRaw);
+    lua_register(lua,"PWProfileListRaw",PWProfileListRaw);
 	lua_register(lua, "SendMessage", LuaSendMessage);
 	lua_register(lua, "SendMessageI", LuaSendMessageI);
 	lua_register(lua, "SendMessageF", LuaSendMessageF);

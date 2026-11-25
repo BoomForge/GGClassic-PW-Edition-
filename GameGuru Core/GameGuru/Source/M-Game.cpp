@@ -6,6 +6,7 @@
 #include "gameguru.h"
 #include "PW-LoadTrace.h" // Pixelwolf Edition: opt-in load profiler
 #include "PW-LevelFlow.h" // Pixelwolf Edition: safe area transitions
+#include "PW-PlayerProfile.h"
 #include "cOccluderThread.h"
 #include "CGfxC.h"
 #include "DarkLUA.h"
@@ -42,6 +43,50 @@ int g_iActivelyUsingVRNow = 0;
 // PW Edition: level-to-level player continuity without forcing an EXE restart.
 // Opt-in pending full GameGuru standalone validation. Process-restart mode retains
 // its original GameLoopSaveStats/GameLoopLoadStats behaviour unchanged.
+// Cross-session profile load is explicitly requested. Hold the verified
+// snapshot across an ordinary in-process level restart, never write it into
+// the legacy transition-stat files.
+static PWProfile::Snapshot g_pwPendingProfile;
+static bool g_pwProfilePending=false;
+extern void lua_loop_finish(void);
+static void PWProfileStatus(const char* status) {
+    LuaSetString("g_PWProfileStatus",(LPSTR)status);
+    timestampactivity(0,(LPSTR)status);
+}
+static void PWProfileLua(const char* function) {
+    LuaSetString("g_PWProfilePayload",(LPSTR)g_pwPendingProfile.payload.c_str());
+    LuaSetFunction((LPSTR)function,0,0);
+    LuaCall();
+}
+void PWProfileRequestLoad(const char* name) {
+    if(!name || !PWProfile::Name(name) || t.game.gameisexe!=1 ||
+        t.game.runasmultiplayer!=0 || t.game.gameloop!=1 ||
+        t.game.levelendingcycle!=0 || t.game.allowfragmentation!=1 || g_pwProfilePending) {
+        PWProfileStatus("Profile load requires an active single-player in-process standalone game.");return;
+    }
+    PWProfile::Snapshot snapshot;PWLevelFlow::Destination target;
+    if(!PWProfile::Load(PWProfile::Root(std::string(g.fpscrootdir_s.Get())+"\\Files",false),name,snapshot)||
+        !PWLevelFlow::Resolve(g.mysystem.mapbankAbs_s.Get(),snapshot.level,target)){
+        PWProfileStatus("Profile missing, corrupt, or its saved level is unavailable.");return;
+    }
+    // Ask the same Lua parser that will restore the state to validate the
+    // entire snapshot before fading out or changing the current level.
+    g_pwPendingProfile=snapshot;
+    LuaSetInt("g_PWProfileValid",0);
+    PWProfileLua("PWProfileValidatePending");
+    if(LuaGetInt("g_PWProfileValid")!=1){g_pwPendingProfile=PWProfile::Snapshot();PWProfileStatus("Profile gameplay data is invalid.");return;}
+    g_pwPendingProfile.level=target.relative;
+    g_pwProfilePending=true;
+    PWLevelFlow::Prefetch(target);
+    t.game.jumplevel_s=target.relative.c_str();
+    t.game.levelendingcycle=4000;
+    PWProfileStatus(snapshot.recovered?"Loading recovery copy.":"Loading profile.");
+}
+static bool PWProfileTargetMatches() {
+    PWLevelFlow::Destination current;
+    return g_pwProfilePending && PWProfile::CurrentLevel(g.mysystem.mapbankAbs_s.Get(),g.projectfilename_s.Get(),current) &&
+        PWLevelFlow::Lower(current.relative)==PWLevelFlow::Lower(g_pwPendingProfile.level);
+}
 static bool g_pwInProcessStatsPending = false;
 static bool g_pwInProcessLuaStatsAvailable = false;
 static int g_pwHealthAcrossLevels = 0;
@@ -1774,6 +1819,21 @@ void game_masterroot_gameloop_initcode(int iUseVRTest)
 		g_pwInProcessLuaStatsAvailable = false;
 	}
 
+	// Apply explicit profile after the level has created the player and weapons.
+    if(g_pwProfilePending) {
+        if(PWProfileTargetMatches()) {
+            LuaSetInt("g_PWProfileValid",0);
+            PWProfileLua("PWProfileApplyPending");
+            if(LuaGetInt("g_PWProfileValid")==1) {
+                lua_loop_finish();
+                physics_player_refreshcount();
+                PWProfileStatus(g_pwPendingProfile.recovered?"Profile recovered.":"Profile loaded.");
+            } else PWProfileStatus("Profile restore rejected.");
+        } else PWProfileStatus("Profile destination mismatch; restore cancelled.");
+        g_pwProfilePending=false;g_pwPendingProfile=PWProfile::Snapshot();
+        LuaSetString("g_PWProfilePayload","");
+    }
+
 	// one final command to improve static physics performance
 	physics_finalize ( );
 
@@ -2078,7 +2138,7 @@ void game_masterroot_gameloop_afterloopcode(int iUseVRTest)
 	// Keep Classic's original process-restart state transfer. For ordinary
 	// standalone level jumps, PW Edition can opt into the very same Lua format.
 	// Never carry over stats on quit, multiplayer, or returning to the main menu.
-	const bool pwInProcessJump = t.game.allowfragmentation == 1
+	const bool pwInProcessJump = !g_pwProfilePending && t.game.allowfragmentation == 1
 		&& t.game.gameisexe == 1
 		&& t.game.runasmultiplayer == 0
 		&& t.game.quitflag == 0
@@ -2911,6 +2971,8 @@ void game_preparelevel ( void )
 	{
 		PWLoadTraceScope pwTraceScripts("game.prepare.scripts");
 		lua_init ( );
+        // Quest/inventory scalars must exist before entity _init callbacks.
+        if(PWProfileTargetMatches()) PWProfileLua("PWProfileImportPendingValues");
 		lua_scanandloadactivescripts ( );
 	}
 

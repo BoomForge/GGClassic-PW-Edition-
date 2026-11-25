@@ -234,6 +234,101 @@ function PWClearTransitionValues()
  if pwTransitionModule then pwTransitionModule.clear() end
 end
 
+-- PW Edition persistent named player profiles. Explicit API, no changes
+-- to Classic save slots or automatic profile creation for existing games.
+local function pwProfileName(name)
+ return type(name)=="string" and #name>0 and #name<=32 and name:match("^[%w_%-]+$")~=nil
+end
+local function pwProfileFinite(value,limit,integer)
+ return type(value)=="number" and value==value and value>=-limit and value<=limit
+  and (not integer or math.floor(value)==value)
+end
+local function pwProfileParse(payload)
+ if type(payload)~="string" or #payload>160*1024 or not pwTransitionModule or not pwTransitionModule.parse then return nil end
+ local pos=1
+ local function line()
+  local stop=payload:find("\n",pos,true)
+  if not stop then return nil end
+  local value=payload:sub(pos,stop-1);pos=stop+1;return value
+ end
+ if line()~="PWGAME1" then return nil end
+ local stats={}
+ for i=1,49 do
+  local value=tonumber(line())
+  if not pwProfileFinite(value,i<=43 and 2147483647 or 1000000,i<=43) then return nil end
+  if i<=43 and value<0 then return nil end
+  stats[i]=value
+ end
+ local scalars=payload:sub(pos)
+ if not pwTransitionModule.parse(scalars) then return nil end
+ return stats,scalars
+end
+function PWProfileSave(name)
+ if not pwProfileName(name) or not PWProfileWriteRaw or not pwTransitionModule or not pwTransitionModule.export then return false end
+ local stats={g_PlayerHealth,g_PlayerLives,GetPlayerWeaponID()}
+ for index=1,10 do
+  stats[#stats+1]=GetWeaponSlot(index) or 0
+  stats[#stats+1]=GetWeaponAmmo(index) or 0
+  stats[#stats+1]=GetWeaponClipAmmo(index) or 0
+  stats[#stats+1]=GetWeaponPoolAmmo(index) or 0
+ end
+ for _,value in ipairs({g_PlayerPosX,g_PlayerPosY,g_PlayerPosZ,g_PlayerAngX,g_PlayerAngY,g_PlayerAngZ}) do stats[#stats+1]=value end
+ if #stats~=49 then return false end
+ local lines={"PWGAME1"}
+ for i=1,49 do
+  local v=stats[i]
+  if not pwProfileFinite(v,i<=43 and 2147483647 or 1000000,i<=43) or (i<=43 and v<0) then return false end
+  lines[#lines+1]=string.format("%.17g",v)
+ end
+ local scalars=pwTransitionModule.export()
+ if not scalars then return false end
+ local payload=table.concat(lines,"\n").."\n"..scalars
+ if not pwProfileParse(payload) then return false end
+ local ok=PWProfileWriteRaw(name,payload)
+ g_PWProfileStatus=ok and "Profile saved." or "Profile save failed."
+ return ok
+end
+function PWProfileCheckpoint(name) return PWProfileSave(name) end
+function PWProfileAutosave(name) return PWProfileSave(name) end
+function PWProfileList()
+ return PWProfileListRaw and PWProfileListRaw() or {}
+end
+function PWProfileLoad(name)
+ if not pwProfileName(name) then return false end
+ -- Accepted for asynchronous processing, not a claim the load succeeded.
+ SendMessageS("pwprofileload",name)
+ return true
+end
+function PWProfileValidatePending()
+ g_PWProfileValid=pwProfileParse(g_PWProfilePayload) and 1 or 0
+end
+function PWProfileImportPendingValues()
+ local stats,scalars=pwProfileParse(g_PWProfilePayload)
+ if stats then pwTransitionModule.import(scalars) end
+end
+function PWProfileApplyPending()
+ g_PWProfileValid=0
+ local saved,scalars=pwProfileParse(g_PWProfilePayload)
+ if not saved then return end
+ if not pwTransitionModule.import(scalars) then return end
+ g_PlayerHealth=saved[1];g_PlayerLives=saved[2]
+ SetPlayerHealth(saved[1]);SetPlayerLives(saved[2])
+ local offset=4
+ for index=1,10 do
+  local weapon=saved[offset]
+  SetWeaponSlot(index,weapon,weapon)
+  SetWeaponAmmo(index,saved[offset+1])
+  SetWeaponClipAmmo(index,saved[offset+2])
+  SetWeaponPoolAmmo(index,saved[offset+3])
+  offset=offset+4
+ end
+ ChangePlayerWeaponID(saved[3])
+ SetFreezePosition(saved[44],saved[45],saved[46])
+ SetFreezeAngle(saved[47],saved[48],saved[49])
+ TransportToFreezePosition()
+ g_PWProfileValid=1
+end
+
 function GameLoopSaveStats()
  -- Reuse Classic's existing v1 health/lives and 10 weapon-slot save format.
  -- Avoid leaving a partially written file when the destination is unavailable.

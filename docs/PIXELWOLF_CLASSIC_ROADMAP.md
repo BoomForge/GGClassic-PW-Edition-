@@ -76,6 +76,8 @@ The next performance phase is **measure before changing behaviour**, especially 
 
 ### P0 — Reliable player-profile save/load system (new persistent save subsystem)
 
+**25 November M1 source progress:** Named versioned atomic saves with one recovery copy, Lua save/checkpoint/autosave/list/load API, resolved level, player transform, health/lives, ten weapon/ammo slots and explicit scalar state. In-process standalone load integration staged. See [profile API](PW_PLAYER_PROFILES.md). Menu, rename/delete, automatic scheduling, cross-restart acceptance and full engine tests remain.
+
 **User request:** An older-console-style profile created by the player, where autosave, checkpoint and manual save record all relevant character/world progress in one save file associated with that profile; subsequent sessions read that state when the player loads the profile.
 
 **Important scope distinction:** Current `GGCPW_KEEP_LEVEL_STATS=1` and `PWSetTransitionValue` / `PWGetTransitionValue` support **limited in-process level transitions** and explicitly registered values. They are not full restart-safe per-player save files. Do not present the existing work as completing this request.

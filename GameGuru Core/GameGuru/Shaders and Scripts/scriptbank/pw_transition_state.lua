@@ -80,7 +80,7 @@ local function decode(kind, hex)
  return nil, false
 end
 
-function PW.save()
+function PW.export()
  local names = {}
  for key, value in pairs(values) do
   if not goodkey(key) or not goodvalue(value) then return false end
@@ -88,47 +88,58 @@ function PW.save()
  end
  if #names > MAX_KEYS then return false end
  table.sort(names)
- local file = io.open(path, "wb")
- if not file then return false end
- local ok = file:write("PWSTATE1\n")
- if ok then
-  for _, key in ipairs(names) do
-   local kind, hex = encode(values[key])
-   ok = file:write(key, "|", kind, "|", hex, "\n")
-   if not ok then break end
-  end
+ local lines = {"PWSTATE1"}
+ for _, key in ipairs(names) do
+  local kind, hex = encode(values[key])
+  lines[#lines+1] = key .. "|" .. kind .. "|" .. hex
  end
- if ok then ok = file:write("END\n") end
- local closed = file:close()
- return ok ~= nil and closed ~= nil
+ lines[#lines+1] = "END"
+ return table.concat(lines,"\n") .. "\n"
 end
 
-function PW.load()
- local file = io.open(path, "rb")
- if not file then return false end
- if file:read("*l") ~= "PWSTATE1" then file:close() return false end
- local restored = {}
- local count = 0
- local complete = false
- while count <= MAX_KEYS do
-  local line = file:read("*l")
-  if not line then break end
-  if line == "END" then
-   complete = file:read("*l") == nil
-   break
+function PW.parse(data)
+ if type(data) ~= "string" or #data > 150000 or data:sub(-1) ~= "\n" then return nil end
+ local restored, count, first, complete = {}, 0, true, false
+ for line in data:gmatch("([^\n]*)\n") do
+  if first then
+   if line ~= "PWSTATE1" then return nil end
+   first = false
+  elseif complete then return nil
+  elseif line == "END" then complete = true
+  else
+   if count >= MAX_KEYS or #line > MAX_KEY + MAX_VALUE_BYTES*2+4 then return nil end
+   local key, kind, hex = line:match("^([%w_.%-]+)|([snb])|([%x]*)$")
+   if not goodkey(key) or restored[key] ~= nil then return nil end
+   local value, valid = decode(kind, hex)
+   if not valid then return nil end
+   restored[key] = value
+   count = count + 1
   end
-  if #line > MAX_KEY + MAX_VALUE_BYTES * 2 + 4 then break end
-  local key, kind, hex = line:match("^([%w_.%-]+)|([snb])|([%x]*)$")
-  if not goodkey(key) or restored[key] ~= nil then break end
-  local value, valid = decode(kind, hex)
-  if not valid then break end
-  restored[key] = value
-  count = count + 1
  end
- file:close()
- if not complete then return false end -- never apply partially written/corrupt data
+ if not complete then return nil end
+ return restored
+end
+function PW.import(data)
+ local restored = PW.parse(data)
+ if not restored then return false end
  values = restored
  return true
+end
+function PW.save()
+ local data = PW.export()
+ if not data then return false end
+ local file = io.open(path,"wb")
+ if not file then return false end
+ local ok=file:write(data)
+ local closed=file:close()
+ return ok ~= nil and closed ~= nil
+end
+function PW.load()
+ local file=io.open(path,"rb")
+ if not file then return false end
+ local data=file:read(150001)
+ file:close()
+ return PW.import(data)
 end
 
 return PW

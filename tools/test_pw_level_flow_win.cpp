@@ -2,6 +2,7 @@
 // Test only synthetic data, never real GameGuru content or level archives.
 #include "PW-LevelFlow.h"
 #include "PW-FPMCache.h"
+#include "PW-PlayerProfile.h"
 #include <cassert>
 #include <cstdio>
 #include <string>
@@ -107,6 +108,35 @@ int main()
     assert(!PWFPMCache::SafeRelative("foo\\..\\bar.dat"));
     SetEnvironmentVariableA("GGCPW_FPM_CACHE", NULL);
 
-    printf("PW LevelFlow + FPM cache contract checks passed.\n");
+    // Independent profile storage, atomic replace, recovery and path rules.
+    const std::string profileRoot=PWProfile::Root(root,true);
+    assert(!profileRoot.empty());
+    assert(!PWProfile::Name("../escape"));
+    assert(!PWProfile::Name("COM1"));
+    assert(!PWProfile::Name("nul"));
+    PWProfile::Snapshot first; first.level="Interiors\\cave.fpm";first.payload="PWGAME1\nfirst\n";
+    assert(PWProfile::Save(profileRoot,"Hero",first));
+    PWProfile::Snapshot second=first;second.payload="PWGAME1\nsecond\n";
+    assert(PWProfile::Save(profileRoot,"hero",second));
+    PWProfile::Snapshot loaded;
+    assert(PWProfile::Load(profileRoot,"HERO",loaded)&&loaded.payload==second.payload&&!loaded.recovered);
+    assert(PWProfile::List(profileRoot).size()==1);
+    Put(PWProfile::Path(profileRoot,"hero"),"corrupt");
+    assert(PWProfile::Load(profileRoot,"hero",loaded)&&loaded.payload==first.payload&&loaded.recovered);
+    assert(PWProfile::Save(profileRoot,"hero",second));
+    Put(PWProfile::Path(profileRoot,"hero"),"corrupt again");
+    assert(PWProfile::Load(profileRoot,"hero",loaded)&&loaded.payload==first.payload&&loaded.recovered);
+    assert(!PWProfile::Load(profileRoot,"missing",loaded));
+    assert(!PWProfile::Save(profileRoot,"../escape",first));
+    PWProfile::Snapshot invalid=first;invalid.level="..\\outside.fpm";
+    assert(!PWProfile::Save(profileRoot,"hero",invalid));
+    invalid=first;invalid.payload.assign(PWProfile::MaxPayload+1,'x');
+    assert(!PWProfile::Save(profileRoot,"hero",invalid));
+    std::string envelope;
+    assert(PWProfile::Encode(first,envelope));
+    envelope.back()='X';
+    assert(!PWProfile::Decode(envelope,loaded));
+    assert(PWProfile::CurrentLevel(mapbank,"mapbank\\Interiors\\cave.fpm",area));
+    printf("PW LevelFlow + FPM cache + profile storage contract checks passed.\n");
     return 0;
 }
