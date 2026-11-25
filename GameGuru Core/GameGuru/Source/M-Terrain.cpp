@@ -4466,7 +4466,10 @@ void terrain_shadowupdate ( void )
                     // Restore Classic's grid AND the secondary grass overlay
                     // after the shadow pass; never hide Classic in mixed mode.
                     ShowVegetationGrid();
-                    PWGrassMix::SetInstancesVisible(PWGrassMix::OwnsGrid());
+                    // The source/primitive proof must remain visible even
+                    // when zero painted samples were placed. Each ordinary
+                    // mixed instance is still restricted by its own rs.used.
+                    PWGrassMix::SetInstancesVisible(PWGrassMix::RenderEnabled());
                 }
                 else PWGrassMix::SetInstancesVisible(false);
 			}
