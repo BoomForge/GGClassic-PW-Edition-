@@ -11,6 +11,10 @@
 
 > **OWNER-CORRECTED DELIVERY FACT (22 Nov 2026): The current installed PW Edition ALREADY INCLUDES AN IN-ENGINE UPDATER.** Never describe this updater as a future feature, or default to downloading source ZIPs and running `START_PW_TEST_BUILD.cmd` every update. The editor's update command launches the installed `Pixelwolf-GGC-Updater.exe` source-building helper. Distinguish this **existing, owner-confirmed capability** from whether the **latest revision** has passed actual installation and gameplay acceptance; CI compilation is not a local runtime test.
 
+## 25 November 2026 — texture streaming and memory management roadmap request
+
+Owner requested true texture streaming to address excessive eager loading and memory management in the Classic engine family. Added a dedicated P1 milestone to [the roadmap](PIXELWOLF_CLASSIC_ROADMAP.md#p1--texture-streaming-and-bounded-memory-management-25-november-2026-owner-request): measure current texture lifetimes and RAM/VRAM first, then budgeted residency, background streaming, safe eviction, mip/fallback handling, transition cleanup and measured editor/standalone acceptance. Preserve DDS/PNG and legacy materials. Requested only; no engine changes or performance claims. Current native third-person priority is unchanged.
+
 ## 25 November 2026 — third-person owned weapon selection and attachment source stage
 
 Removed the legacy switching restriction and per-frame forced gun ID. Added native staged player-only world attachment replacement based on the selected owned weapon ID, existing hand firespot and actual vweap media. Refuse missing/ineligible models before freeing old weapon, reuse attachment IDs, support holster and keep ammunition in existing inventory slots. Existing FPS and NPC attachment loader retain their default paths; shared FPE not modified. Supports preloaded HUD guns only for this stage, not arbitrary missing guns/custom rig sockets. Isolated eligibility tests added. Windows build/live verification pending, including death/respawn, profile restore and standalone packaging. Next native ranged aim/muzzle/projectile handling; see `docs/PW_NATIVE_THIRD_PERSON.md`. Multi-grass unchanged.
