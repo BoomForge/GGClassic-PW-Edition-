@@ -23543,6 +23543,105 @@ float ImGuiGetMouseY(void)
 
 #ifdef ENABLEIMGUI
 #include "PW-AssetInspector.h"
+
+// Recoverable custom asset removal. Only the FPE registration is moved;
+// DBO/X, scripts, thumbnails and textures may be shared and are never deleted.
+// Keep the original folder and basename so manual recovery is unambiguous.
+namespace PWAssetRemoval {
+static std::string FullPath(const std::string& path)
+{
+    char buffer[MAX_PATH]={};
+    DWORD n=GetFullPathNameA(path.c_str(),MAX_PATH,buffer,nullptr);
+    if(!n || n>=MAX_PATH) return {};
+    return buffer;
+}
+static std::string Key(std::string path)
+{
+    for(char& c:path) {
+        if(c=='/') c='\\';
+        else if(c>='A' && c<='Z') c=char(c-'A'+'a');
+    }
+    return path;
+}
+static std::string UserRoot()
+{
+    return FullPath(std::string(g.fpscrootdir_s.Get())+"\\Files\\entitybank\\user");
+}
+static bool IsUserFpe(const std::string& path)
+{
+    const std::string root=Key(UserRoot());
+    const std::string key=Key(path);
+    return !root.empty() && key.size()>root.size()+5 &&
+        key.compare(0,root.size()+1,root+"\\")==0 &&
+        key.compare(key.size()-4,4,".fpe")==0;
+}
+// Reject aliases, traversal, alternate data streams and directory junctions.
+// Walk the entire absolute path, not just the final filename.
+static bool NoReparsePoints(const std::string& path)
+{
+    if(path.size()<4 || path[1]!=':' || path[2]!='\\' ||
+        path.find(':',2)!=std::string::npos) return false;
+    size_t start=3;
+    while(start<path.size()) {
+        const size_t end=path.find('\\',start);
+        const std::string leaf=path.substr(start,end==std::string::npos?end:end-start);
+        if(leaf.empty() || leaf=="." || leaf==".." ||
+            leaf.back()=='.' || leaf.back()==' ') return false;
+        const std::string prefix=path.substr(0,end);
+        DWORD attributes=GetFileAttributesA(prefix.c_str());
+        if(attributes==INVALID_FILE_ATTRIBUTES || (attributes&FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+        if(end!=std::string::npos && !(attributes&FILE_ATTRIBUTE_DIRECTORY)) return false;
+        if(end==std::string::npos) return !(attributes&FILE_ATTRIBUTE_DIRECTORY);
+        start=end+1;
+    }
+    return false;
+}
+static bool Validate(const std::string& path,std::string& issue)
+{
+    if(path.empty() || !IsUserFpe(path) || !NoReparsePoints(path)) {
+        issue="Only existing, ordinary .fpe files within Files\\entitybank\\user can be removed.";
+        return false;
+    }
+    const std::string bankRoot=FullPath(std::string(g.fpscrootdir_s.Get())+"\\Files\\entitybank");
+    const std::string target=Key(path);
+    for(int id=1;id<=g.entidmaster;++id) {
+        std::string entry=Key(t.entitybank_s[id].Get());
+        if(entry.compare(0,11,"entitybank\\")==0) entry.erase(0,11);
+        if(entry.empty()) continue;
+        if(Key(FullPath(bankRoot+"\\"+entry))!=target) continue;
+        for(int e=1;e<=g.entityelementlist;++e)
+            if(t.entityelement[e].bankindex==id) {
+                issue="This asset is referenced by the current level. Remove its instances first.";
+                return false;
+            }
+        // A loaded bank entry may also be referenced by the cursor, undo or
+        // cached editor state. Do not invalidate or renumber live bank IDs.
+        issue="This asset is loaded in the current level's entity bank. Save your work, open a clean level or restart the editor, then retry.";
+        return false;
+    }
+    return true;
+}
+static std::string Destination(const std::string& path)
+{
+    return path+".pw-quarantine";
+}
+static bool Quarantine(const std::string& path,std::string& issue)
+{
+    if(!Validate(path,issue)) return false;
+    const std::string dest=Destination(path);
+    if(dest.size()>=MAX_PATH || GetFileAttributesA(dest.c_str())!=INVALID_FILE_ATTRIBUTES) {
+        issue="A recovery file already exists or the recovery path is too long. Nothing was moved.";
+        return false;
+    }
+    // No replace flag: an existing recovery file is never overwritten.
+    if(!MoveFileExA(path.c_str(),dest.c_str(),MOVEFILE_WRITE_THROUGH)) {
+        issue="Windows could not move the asset (error "+std::to_string(GetLastError())+"). Nothing was intentionally deleted.";
+        return false;
+    }
+    return true;
+}
+}
+
 void process_entity_library(void)
 {
 	// The PW asset library is a permanent dock, not an optional external dialog.
@@ -23560,6 +23659,21 @@ void process_entity_library(void)
 		static int uniqueId = 4000; //PE: Also used for imageID for previews.
 		static int loaded_images = 0;
 		static bool multi_selections = false;
+        static std::string pwRemovePending, pwRemoveIssue, pwRemoveNotice, pwRefreshFolder;
+        static bool pwOpenRemove=false;
+        static cFolderItem::sFolderFiles *firstShiftFile=nullptr, *lastShiftFile=nullptr;
+        if(!pwRefreshFolder.empty()) {
+            // Refresh after the previous frame has finished rendering its thumbnail.
+            firstShiftFile=lastShiftFile=nullptr;
+            for(cFolderItem* f=MainEntityList.m_pNext;f;f=f->m_pNext) {
+                if(PWAssetRemoval::Key(PWAssetRemoval::FullPath(f->m_sFolderFullPath.Get()))==pwRefreshFolder) {
+                    RefreshEntityFolder(f->m_sFolderFullPath.Get(),f);
+                    f->m_fLastTimeUpdate=0;
+                    break;
+                }
+            }
+            pwRefreshFolder.clear();
+        }
 		int multi_selections_count = 0;
 		static int lf_multi_selections_count = 0;
 		int olduniqueId = uniqueId;
@@ -23606,6 +23720,7 @@ void process_entity_library(void)
             PWAssetInspector::Open();
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Browse folders and inspect images or 3D assets. Insert models in front of the editor camera.");
+        if(!pwRemoveNotice.empty()) ImGui::TextWrapped("%s",pwRemoveNotice.c_str());
 
 		CheckTutorialAction("TABMARKERS", 54.0f); //Tutorial: check if we are waiting for this action
 		if (current_tab == 1 && bTutorialCheckAction)
@@ -23920,8 +24035,7 @@ void process_entity_library(void)
 
 					bool bFirstShiftHasBeenSeen = false;
 					bool bAnySelectedItemsAvailable = false;
-					static cFolderItem::sFolderFiles * firstShiftFile = NULL;
-					static cFolderItem::sFolderFiles * lastShiftFile = NULL;
+
 
 					for (int splitloop = 0; splitloop < splitsections; splitloop++) {
 
@@ -24354,6 +24468,20 @@ void process_entity_library(void)
 													}
 												}
 
+                                                // Right-click the actual thumbnail (including missing previews).
+                                                if(i==0 && !isMarkers && ImGui::BeginPopupContextItem("##PWRemoveAssetContext")) {
+                                                    const std::string candidate=PWAssetRemoval::FullPath(
+                                                        std::string(myfiles->m_sPath.Get())+"\\"+myfiles->m_sName.Get());
+                                                    if(PWAssetRemoval::IsUserFpe(candidate)) {
+                                                        if(ImGui::MenuItem("Delete imported asset...")) {
+                                                            pwRemovePending=candidate;
+                                                            pwRemoveIssue.clear();
+                                                            pwOpenRemove=true;
+                                                        }
+                                                    } else ImGui::TextDisabled("Only custom user assets can be removed.");
+                                                    ImGui::EndPopup();
+                                                }
+
 												//if (!bEntity_Properties_Window && !g_bCharacterCreatorPlusActivated && !bImporter_Window && i == 0 && ImGui::IsItemHovered()) {
 												if (!bEntity_Properties_Window && !bImporter_Window && i == 0 && ImGui::IsItemHovered()) { //cyb
 
@@ -24590,10 +24718,38 @@ void process_entity_library(void)
 #endif
 		lf_multi_selections_count = multi_selections_count; //Use last frames count.
 
-		ImGui::EndTabBar();
+        ImGui::EndTabBar();
 
+        if(pwOpenRemove) {
+            ImGui::OpenPopup("Delete imported asset##PWRemoveConfirm");
+            pwOpenRemove=false;
+        }
+        if(ImGui::BeginPopupModal("Delete imported asset##PWRemoveConfirm",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextWrapped("Remove this custom asset from the browser?");
+            ImGui::TextWrapped("%s",pwRemovePending.c_str());
+            ImGui::TextWrapped("Only its FPE registration will be moved. Models, textures and scripts stay untouched.");
+            ImGui::TextWrapped("Recovery: rename the following file to remove its .pw-quarantine suffix:");
+            ImGui::TextWrapped("%s",PWAssetRemoval::Destination(pwRemovePending).c_str());
+            ImGui::TextWrapped("Other saved maps have not been checked. Back up maps that use this asset.");
+            if(!pwRemoveIssue.empty()) ImGui::TextWrapped("%s",pwRemoveIssue.c_str());
+            if(ImGui::Button("Move to recovery")) {
+                if(PWAssetRemoval::Quarantine(pwRemovePending,pwRemoveIssue)) {
+                    pwRefreshFolder=PWAssetRemoval::Key(pwRemovePending.substr(0,pwRemovePending.find_last_of('\\')));
+                    pwRemoveNotice="Asset removed from browser. Recovery file: "+PWAssetRemoval::Destination(pwRemovePending);
+                    firstShiftFile=lastShiftFile=nullptr;
+                    CheckTooltipObjectDelete();
+                    pwRemovePending.clear();
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+            ImGui::SameLine();
+            if(ImGui::Button("Cancel")) {
+                pwRemovePending.clear(); pwRemoveIssue.clear(); ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
 
-		if (bAddSelectionToGame) {
+        if (bAddSelectionToGame) {
 
 			DeleteWaypointsAddedToCurrentCursor();
 			CheckTooltipObjectDelete();

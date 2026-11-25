@@ -147,6 +147,22 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertNotIn("InstanceObject(id, rs.source);", grass)
         self.assertNotIn("count < 320", grass)
 
+    def test_custom_asset_removal_is_recoverable_and_scoped(self):
+        self.assertIn('Delete imported asset...', GRID)
+        self.assertIn('BeginPopupModal("Delete imported asset##PWRemoveConfirm"', GRID)
+        self.assertIn('Files\\\\entitybank\\\\user', GRID)
+        self.assertIn('FILE_ATTRIBUTE_REPARSE_POINT', GRID)
+        self.assertIn('t.entityelement[e].bankindex==id', GRID)
+        self.assertIn('id<=g.entidmaster', GRID)
+        self.assertIn('return path+".pw-quarantine";', GRID)
+        self.assertIn('if(!Validate(path,issue)) return false;', GRID)
+        self.assertIn('MoveFileExA(path.c_str(),dest.c_str(),MOVEFILE_WRITE_THROUGH)', GRID)
+        self.assertIn('RefreshEntityFolder(f->m_sFolderFullPath.Get(),f);', GRID)
+        self.assertIn('Other saved maps have not been checked', GRID)
+        removal = GRID.split('namespace PWAssetRemoval {',1)[1].split('void process_entity_library(void)',1)[0]
+        self.assertNotIn('DeleteFile', removal)
+        self.assertNotIn('MOVEFILE_REPLACE_EXISTING', removal)
+
     def test_asset_inspector_keeps_docked_browser_and_uses_real_previews(self):
         inspector = (ROOT / "GameGuru Core/GameGuru/Include/PW-AssetInspector.h").read_text(encoding="utf-8")
         self.assertIn('Asset Inspector...##PWOpenAssetInspector', GRID)

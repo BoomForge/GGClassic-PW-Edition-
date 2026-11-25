@@ -137,6 +137,8 @@ All four requests require source implementation, standalone tests and actual Win
 
 ## Editor UX request — safely remove custom assets (22 November 2026)
 
+**25 November source progress:** Recoverable FPE registration quarantine via bottom browser context menu and confirmation implemented. Restricts removal to ordinary custom user FPE paths, refuses current bank references and never deletes shared model/texture/script files. Cross-map dependency analysis, full runtime validation and optional in-editor recovery remain open.
+
 **User observation:** After the `SerineTest` FBX import produced a green thumbnail and an unusable entity, the owner manually deleted the imported files because there is no convenient in-editor asset deletion. This should be fixed independently of the FBX import defect.
 
 - [ ] Add **Delete imported asset…** to the bottom Asset Browser for verified user-created entities under `Files/entitybank/user/`; do not allow deleting original built-in, Steam, DLC, purchased or shared asset packs through this option.
