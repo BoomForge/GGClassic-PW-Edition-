@@ -165,6 +165,19 @@ All four requests require source implementation, standalone tests and actual Win
 
 **Status:** tracked, not implemented. The separate imported-geometry validation is implemented in source and its automated tests pass, but in-editor deletion and local runtime acceptance remain pending.
 
+## P1 — Texture streaming and bounded memory management (25 November 2026 owner request)
+
+**Status:** requested / not implemented. Owner feedback identifies excessive eager texture loading and poor memory management across the FPS Creator / GameGuru family. Investigate the actual Classic renderer and resource ownership before confirming the cause. Treat as a major engine performance milestone after the current active native third-person work; do not disrupt existing priorities.
+
+- [ ] Audit texture creation, image banks, caches, material references, resource lifetime, CPU copies, VRAM residency and level unload; establish measured peak/steady-state RAM, VRAM, load times and frame-time baselines.
+- [ ] Implement shared texture residency with deduplication, reference-safe eviction and configurable memory budgets; prioritize visible/nearby and critical textures; retain low-resolution mip/fallback textures as needed.
+- [ ] Stream higher-resolution mips or whole textures on demand using background I/O/decode and bounded render-thread GPU uploads; prefetch likely-needed assets, avoid per-frame blocking, and limit pop-in and thrashing.
+- [ ] Release unneeded textures and CPU staging allocations safely on level transitions and repeated Test Level runs; protect active materials and shared resources. Handle device recreation, missing assets and cancellation.
+- [ ] Maintain DDS/PNG and existing material/shader, terrain, sky, grass, lightmap, HUD, editor preview and standalone packaging compatibility. Use a staged opt-in/fallback path until verified.
+- [ ] Add diagnostics for resident bytes, budget, requests, evictions, upload latency and cache hits. Compare identical large texture-heavy levels on modest GPUs; test repeated transitions, rapid movement and long sessions. Demonstrate bounded memory and improved loading without unacceptable frame spikes, missing textures or visible regressions.
+
+**Acceptance:** actual Windows editor and standalone benchmarks, not merely successful compilation. Scope texture streaming separately from future geometry/world streaming; avoid promising a renderer rewrite before the audit.
+
 ## Implementation rules
 
 1. Protect the upstream-compatible `master` branch. Use separate branches and PRs for improvements.
