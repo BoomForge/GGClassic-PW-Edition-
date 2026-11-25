@@ -1278,15 +1278,17 @@ void imgui_terrain_loop(void)
                         PWGrassMix::SetPreviewEnabled(pwPreview);
                         pwMixChanged = true;
                     }
+                    // Always show whether the overlay is enabled, even
+                    // before the user finds/toggles the optional checkbox.
+                    const std::string pwGrassDiag = PWGrassMix::Diagnostics();
+                    ImGui::TextWrapped("%s",pwGrassDiag.c_str());
+                    if (ImGui::Button("Copy grass diagnostics##PWGrassCopy"))
+                        ImGui::SetClipboardText(pwGrassDiag.c_str());
                     if (!PWGrassMix::PreviewEnabled())
                         ImGui::TextDisabled("Safe mode: Classic grass remains visible; selected mix is saved.");
                     else
                     {
                         ImGui::TextDisabled("Secondary grass overlay preview. Classic base remains visible.");
-                        const std::string pwGrassDiag = PWGrassMix::Diagnostics();
-                        ImGui::TextWrapped("%s",pwGrassDiag.c_str());
-                        if (ImGui::Button("Copy grass diagnostics##PWGrassCopy"))
-                            ImGui::SetClipboardText(pwGrassDiag.c_str());
                         // Visually distinguish why a secondary style is
                         // missing rather than guessing from visible flags.
                         // A magenta cube proves standard objects can reach
