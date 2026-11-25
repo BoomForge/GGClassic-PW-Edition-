@@ -137,7 +137,7 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn("ShowVegetationGrid();", terrain)
         self.assertIn("ShowVegetationGrid();", grass)
         self.assertNotIn("if (PWGrassMix::OwnsGrid())\n                        HideVegetationGrid();", terrain)
-        self.assertIn("PWGrassMix::SetInstancesVisible(PWGrassMix::OwnsGrid());", terrain)
+        self.assertIn("PWGrassMix::SetInstancesVisible(PWGrassMix::RenderEnabled());", terrain)
         self.assertIn("Mix has no populated objects; Classic grass remains visible.", terrain)
         self.assertIn("Mix assets unavailable or not prepared.", terrain)
         self.assertIn("bool OwnsGrid();", mix)
@@ -177,7 +177,7 @@ class PWEditorUiRegressions(unittest.TestCase):
         # must be hidden too, then restored only while the mixed renderer owns
         # the painted grass region.
         self.assertIn("PWGrassMix::SetInstancesVisible(false);", terrain)
-        self.assertIn("PWGrassMix::SetInstancesVisible(PWGrassMix::OwnsGrid());", terrain)
+        self.assertIn("PWGrassMix::SetInstancesVisible(PWGrassMix::RenderEnabled());", terrain)
         self.assertIn("void SetInstancesVisible(bool visible);", mix)
         self.assertIn("if (visible && j < rs.used)", grass)
 
