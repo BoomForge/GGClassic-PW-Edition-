@@ -841,8 +841,9 @@ void SetPreviewEnabled(bool enabled) {
     if (previewEnabled == enabled) return;
     previewEnabled = enabled;
     lastIssue.clear();
-    // Clear stale objects whenever preview changes. The next grass_loop()
-    // rebuilds them only if the owner has explicitly opted in.
+    // Clear stale objects whenever preview changes.
+    // Never leave an opt-in render probe live after disabling the overlay.
+    if (!enabled) probeEnabled=false;
     ResetInstances();
     Dirty();
 }
@@ -882,8 +883,16 @@ std::string Diagnostics() {
     return out.str();
 }
 void SetInstancesVisible(bool visible) {
-    // Classic hides vegetation during cascade-shadow rendering. Our own
-    // instance objects must follow the same pass, or they can flicker.
+    // Classic hides vegetation during cascade-shadow rendering. The
+    // diagnostic cube/model must be hidden during the same render pass.
+    if (probeCube && ObjectExist(probeCube)) {
+        if (visible && probeEnabled) ShowObject(probeCube);
+        else HideObject(probeCube);
+    }
+    if (probeModel && ObjectExist(probeModel)) {
+        if (visible && probeEnabled) ShowObject(probeModel);
+        else HideObject(probeModel);
+    }
     if (!ready) return;
     for (int i = 0; i < MaxStyles; ++i) {
         const RenderStyle& rs = render[i];
@@ -916,6 +925,7 @@ void Load(const std::string& levelFolder) {
     // configurations now restore their secondary overlays automatically;
     // Classic native grass always remains visible as the safe base.
     previewEnabled = false;
+    probeEnabled = false; // Diagnostic scene elements never survive a map load.
     ResetInstances();
     lastIssue.clear();
     for (int i = 0; i < MaxStyles; ++i) slots[i] = Slot();
