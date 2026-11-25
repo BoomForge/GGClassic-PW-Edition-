@@ -5,6 +5,8 @@
 // Includes
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-ThirdPersonGameplay.h"
+#include <cstring>
 
 // Externs
 #ifdef VRTECH
@@ -15,8 +17,62 @@ extern GGVR_PlayerData GGVR_Player;
 //  LUA Module
 // 
 
+namespace {
+    PWThirdPerson::InteractionPress pwInteractionPress;
+    int pwInteractionMode=0,pwInteractionTarget=0,pwInteractionPressed=0;
+    // Only stock contextual scripts and deliberately named custom scripts
+    // participate. Ordinary AI, zones, automatic pickups and FPS scripts retain
+    // their original key state and execution schedule.
+    float PWInteractionRange(const char* name) {
+        if(!name)return 0.f;
+        if(std::strcmp(name,"door")==0||std::strcmp(name,"switchmain")==0)return 100.f;
+        if(std::strcmp(name,"doorswitch")==0||std::strcmp(name,"doorswitchanimate")==0||
+            std::strcmp(name,"lightswitch")==0||std::strcmp(name,"key")==0||
+            std::strcmp(name,"weapon")==0||std::strncmp(name,"pw_interact_",12)==0)return 150.f;
+        return 0.f;
+    }
+    void PWUpdateInteraction() {
+        using namespace PWThirdPerson;
+        pwInteractionMode=0;pwInteractionTarget=0;pwInteractionPressed=0;
+        Vec origin={};int avatar=0;
+        char legacy[4]={};
+        const bool useLegacy=GetEnvironmentVariableA("GGCPW_LEGACY_THIRDPERSON",legacy,sizeof(legacy))==1&&legacy[0]=='1';
+        if(!useLegacy&&t.playercontrol.thirdperson.enabled==1&&t.game.runasmultiplayer==0&&
+            g.gvrmode==0&&g.globals.riftmode==0&&t.conkit.editmodeactive==0&&PlayerOrigin(origin,avatar)) {
+            pwInteractionMode=1;
+        }
+        const bool allowed=pwInteractionMode==1&&t.game.gameloop==1&&
+            t.player[t.plrid].health>0&&t.plrhasfocus!=0&&g.luacameraoverride==0&&g.luaactivatemouse==0;
+        if(allowed) {
+            const float yaw=ObjectAngleY(avatar);
+            float best=0.f;
+            for(int e=1;e<=g.entityelementlist;++e) {
+                const auto& ent=t.entityelement[e];
+                if(ent.active==0||ent.staticflag!=0||ent.eleprof.aimain!=1||ent.eleprof.aipreexit>=1||
+                    e==t.playercontrol.thirdperson.charactere)continue;
+                const float range=PWInteractionRange(ent.eleprof.aimainname_lower_s.Get());
+                if(range<=0.f)continue;
+                // Cheap origin distance rejection before querying object bounds.
+                if(!InReach(origin,{ent.x,ent.y,ent.z},range+100.f))continue;
+                Vec target={};int object=0;
+                if(!EntityTarget(e,target,object)||object==avatar||!GetVisible(object))continue;
+                const float score=InteractionScore(origin,target,yaw,range);
+                if(BetterInteraction(score,e,best,pwInteractionTarget)&&LineClear(origin,target,avatar,object)) {
+                    best=score;pwInteractionTarget=e;
+                }
+            }
+        }
+        pwInteractionPressed=pwInteractionPress.Step(t.tKeyPressE!=0,allowed,pwInteractionTarget);
+        LuaSetInt("g_PWInteractionMode",pwInteractionMode);
+        LuaSetInt("g_PWInteractionTarget",pwInteractionTarget);
+        LuaSetInt("g_PWInteractionPressed",pwInteractionPressed);
+        LuaSetInt("g_PWInteractionCaller",0);
+    }
+}
 void lua_init ( void )
 {
+    pwInteractionPress=PWThirdPerson::InteractionPress{};
+    pwInteractionMode=pwInteractionTarget=pwInteractionPressed=0;
 	//  Clear lua bank
 	g.luabankmax=0 ; Dim (  t.luabank_s,g.luabankmax  );
 
@@ -554,6 +610,7 @@ void lua_loop_begin ( void )
 	LuaSetInt ( "g_EntityElementMax", g.entityelementlist );	
 
 	LuaSetInt("g_PlayerUnderwaterMode", g.underwatermode); // PE: underwater mode active.
+	PWUpdateInteraction();
 
 	// 020316 - call the global loop once per cycle (for things like loading game states)
 	if ( t.playercontrol.gameloopinitflag > 0 ) t.playercontrol.gameloopinitflag--;
@@ -1041,8 +1098,17 @@ void lua_loop_allentities ( void )
 									{
 										//t.strwork = cstr(cstr(Lower(t.entityelement[t.e].eleprof.aimainname_s.Get()))+"_main"); //PE: Slow
 										t.strwork = cstr(cstr(t.entityelement[t.e].eleprof.aimainname_lower_s.Get()) + "_main");
-										LuaSetFunction ( t.strwork.Get() ,1,0 );
-										LuaPushInt (  t.e  ); LuaCall (  );
+										const bool managed=pwInteractionMode==1&&PWInteractionRange(t.entityelement[t.e].eleprof.aimainname_lower_s.Get())>0.f;
+                                        if(managed) {
+                                            LuaSetInt("g_PWInteractionCaller",t.e);
+                                            LuaSetInt("g_KeyPressE",pwInteractionPressed==t.e?1:0);
+                                        }
+                                        LuaSetFunction ( t.strwork.Get() ,1,0 );
+                                        LuaPushInt (  t.e  ); LuaCall (  );
+                                        if(managed) {
+                                            LuaSetInt("g_KeyPressE",t.tKeyPressE);
+                                            LuaSetInt("g_PWInteractionCaller",0);
+                                        }
 									}
 								}
 							}

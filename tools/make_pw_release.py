@@ -24,7 +24,7 @@ ALLOWED = re.compile(
     r"(?i)^(Guru-MapEditor\.exe|GameGuru\.exe|pw-updater\.ps1|"
     r"pw-edition-version\.txt|[a-z0-9_.-]+\.dll|"
     r"Files/effectbank/reloaded/[a-z0-9_.-]+\.fx|"
-    r"Files/scriptbank/(?:global|pw_transition_state)\.lua|"
+    r"Files/scriptbank/(?:global|pw_transition_state|gameplayercontrol|key|weapon)\.lua|"
     r"Files/PWTools/pw_glb_to_fbx\.py)$"
 )
 HERE = Path(__file__).resolve().parent

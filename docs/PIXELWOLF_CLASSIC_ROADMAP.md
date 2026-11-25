@@ -134,6 +134,8 @@ Acceptance criteria:
 
 ### Highest active priority — Full native third-person gameplay (25 November 2026 owner request)
 
+**Contextual interaction source progress:** native body-relative target selection, reach/LOS, deterministic ranking, single-press dispatch, stock manual doors/switches and contextual keys/weapons, opt-in custom NPC/chest scripts. Actual dialogue/inventory, editor authoring, advanced movement and gameplay validation remain open.
+
 **Locomotion source progress:** native directional decisions, sprint, aiming/strafe/backpedal and animation state-machine coordination with validated jump hold implemented. Shared physics integration and legacy fallback retained; crouch/custom animation mapping and live acceptance open. Next: contextual interaction dispatch.
 
 **Ranged source progress:** native reticle-to-muzzle aim, body-side clearance, configured hitscan range, captured shot direction and projectile launch pitch/yaw implemented; new tests and live validation pending. Next: locomotion, animation and contextual interactions.

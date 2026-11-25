@@ -74,6 +74,10 @@ g_PlayerDeadTime = 0
 g_Time = 0
 g_TimeElapsed = 0
 g_KeyPressE = 0
+g_PWInteractionMode = 0
+g_PWInteractionTarget = 0
+g_PWInteractionPressed = 0
+g_PWInteractionCaller = 0
 g_KeyPressQ = 0
 g_KeyPressW = 0
 g_KeyPressA = 0
@@ -483,10 +487,19 @@ function GetPlayerDistance( e )
 end
 
 -- Common Action Functions (called by LUA)
+-- Explicit contextual API; older binaries retain their original script behavior.
+function PWInteractionFocused(e)
+ return g_PWInteractionMode == 1 and g_PWInteractionTarget == e
+end
+function PWInteractionPressed(e)
+ return PWInteractionFocused(e) and g_PWInteractionPressed == e
+end
 function Prompt(str)
+ if g_PWInteractionMode == 1 and g_PWInteractionCaller ~= 0 and g_PWInteractionCaller ~= g_PWInteractionTarget then return end
  SendMessageS("prompt",str);
 end
 function PromptDuration(str,v)
+ if g_PWInteractionMode == 1 and g_PWInteractionCaller ~= 0 and g_PWInteractionCaller ~= g_PWInteractionTarget then return end
  SendMessageS("promptduration",v,str);
 end
 function PromptTextSize(v)

@@ -31,6 +31,28 @@ bool PlayerOrigin(Vec& origin,int& ignoredObject);
 bool EntityTarget(int e,Vec& target,int& object);
 bool LineClear(Vec from,Vec to,int ignoredObject,int targetObject);
 bool CanInteract(int e,float range);
+// Lower scores win. Use physical player reach and facing, never orbit-camera distance.
+inline float InteractionScore(Vec origin,Vec target,float yaw,float range) {
+    if(!InReach(origin,target,range)||!std::isfinite(yaw))return -1.f;
+    const Vec d=Sub(target,origin);
+    const float flat=d.x*d.x+d.z*d.z;
+    const float angle=flat<1.f?0.f:std::fabs(Signed(std::atan2(d.x,d.z)*57.29577951308232f-yaw));
+    // Close items directly beneath the player remain accessible.
+    if(angle>80.f&&flat>400.f)return -1.f;
+    return Length(d)/range+angle/180.f;
+}
+inline bool BetterInteraction(float score,int entity,float best,int chosen) {
+    return std::isfinite(score)&&score>=0.f&&entity>0&&
+        (chosen==0||score<best||(score==best&&entity<chosen));
+}
+struct InteractionPress {
+    bool held=true; // require release at level entry
+    int Step(bool down,bool allowed,int target) {
+        const bool rising=down&&!held;
+        held=down;
+        return rising&&allowed&&target>0?target:0;
+    }
+};
 inline bool Direction(Vec delta,Vec& result) {
     const float length=Length(delta);
     if(!std::isfinite(length)||length<0.001f)return false;

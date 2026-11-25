@@ -11,6 +11,23 @@ keyname[e] = name
 end
 
 function key_main(e)
+ if g_PWInteractionMode == 1 then
+  if g_PWInteractionTarget == e then
+   if GetGamePlayerStateXBOX() == 1 then
+    Prompt("Press Y button to pick up "..(keyname[e] or "key"))
+   else
+    Prompt("Press interact to pick up "..(keyname[e] or "key"))
+   end
+   if g_PWInteractionPressed == e then
+    Prompt("Collected "..(keyname[e] or "key"))
+    PlaySound(e,0)
+    Collected(e)
+    Destroy(e)
+    ActivateIfUsed(e)
+   end
+  end
+  return
+ end
  PlayerDist = GetPlayerDistance(e)
  
  -- If in first person collect key only if within 150 distance from the player and if the player is looking in the direction of the key
