@@ -7,6 +7,8 @@ on:
       - "GameGuru Core/GameGuru/Include/PW-PlayerProfile.h"
       - "GameGuru Core/GameGuru/Include/PW-DisplayOptions.h"
       - "GameGuru Core/GameGuru/Include/PW-GameplayControls.h"
+      - "GameGuru Core/GameGuru/Include/PW-ThirdPerson.h"
+      - "GameGuru Core/GameGuru/Shaders and Scripts/scriptbank/gameplayercontrol.lua"
       - "GameGuru Core/GameGuru/Source/M-Physics.cpp"
       - "GameGuru Core/GameGuru/Source/M-LUA.cpp"
       - "GameGuru Core/GameGuru/Source/Common.cpp"

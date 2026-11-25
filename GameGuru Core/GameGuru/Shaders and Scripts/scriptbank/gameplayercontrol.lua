@@ -1275,6 +1275,9 @@ function gameplayercontrol.control()
 		SetCharAnimStateE(0,0)
 		CopyCharAnimState(0,GetGamePlayerStateCharAnimIndex())
 
+		-- Native camera/facing replaces the legacy Lua camera on supported builds.
+		-- Keep the old path for old engine binaries and explicit compatibility mode.
+		if not (PWNativeThirdPersonUpdate and PWNativeThirdPersonUpdate()) then
 		-- transfer first person camera awareness to character
 		tttargetx=GetPlrObjectPositionX()
 		tttargety=GetPlrObjectPositionY()-35.0
@@ -1532,6 +1535,8 @@ function gameplayercontrol.control()
 		if ( GetCameraOverride() ~= 2 and GetCameraOverride() ~= 3 ) then
 			SetCameraAngle ( 0,ttcapverticalangle,GetGamePlayerControlFinalCameraAngley(),GetGamePlayerControlFinalCameraAnglez() )
 		end
+		
+		end -- legacy third-person fallback
 		
 	else
 		-- update camera position

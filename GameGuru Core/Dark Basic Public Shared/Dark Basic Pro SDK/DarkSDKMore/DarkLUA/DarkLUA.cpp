@@ -27,6 +27,7 @@
 // DarkLUA needs access to the T global (but could be in two locations)
 #include "..\..\..\..\GameGuru\Include\gameguru.h"
 #include "..\..\..\..\GameGuru\Include\PW-PlayerProfile.h"
+#include "..\..\..\..\GameGuru\Include\PW-ThirdPerson.h"
 
 
 // Prototypes
@@ -7005,8 +7006,70 @@ static int PWProfileListRaw(lua_State* L) {
     int index=1;for(const auto& n:names){lua_pushstring(L,n.c_str());lua_rawseti(L,-2,index++);}
     return 1;
 }
+// Native third-person camera and character facing. The shared player
+// controller still owns animation, input, physics and weapon policy.
+static int PWNativeThirdPersonUpdate(lua_State* L) {
+    using namespace PWThirdPerson;
+    const auto& tp=t.playercontrol.thirdperson;
+    const int e=tp.charactere,body=t.aisystem.objectstartindex;
+    char legacy[4]={};
+    if(GetEnvironmentVariableA("GGCPW_LEGACY_THIRDPERSON",legacy,sizeof(legacy))==1&&legacy[0]=='1' ||
+        tp.enabled!=1||e<=0||e>g.entityelementlist||body<=0||!ObjectExist(body)||
+        t.game.runasmultiplayer!=0||g.gvrmode!=0||t.conkit.editmodeactive!=0) {lua_pushboolean(L,0);return 1;}
+    const int avatar=t.entityelement[e].obj;
+    if(avatar<=0||!ObjectExist(avatar)||t.entityelement[e].ragdollified!=0){lua_pushboolean(L,0);return 1;}
+    const Vec player={ObjectPositionX(body),ObjectPositionY(body),ObjectPositionZ(body)};
+    const float yaw=Finite(t.playercontrol.finalcameraangley_f,CameraAngleY(0));
+    const float pitch=Clamp(Signed(Finite(t.playercontrol.finalcameraanglex_f-tp.camerafocus,0.f)),-65.f,80.f);
+    static DWORD last=0;static int lastAvatar=0;static Vec lastPosition={};static float fraction=1.f;
+    const DWORD now=GetTickCount();
+    const bool reset=lastAvatar!=avatar||now-last>250||Length(Sub(player,lastPosition))>200.f;
+    const float dt=reset?0.016f:Clamp(static_cast<float>(now-last)*0.001f,0.f,0.1f);
+    last=now;lastAvatar=avatar;lastPosition=player;
+    PositionObject(avatar,player.x,player.y-35.f,player.z);
+    const bool aiming=t.playercontrol.camrightmousemode==1||tp.shotfired==1||tp.camerafollow==0;
+    const float current=ObjectAngleY(avatar);
+    const float desired=aiming?yaw:Facing(yaw,t.plrkeyW,t.plrkeyA,t.plrkeyS,t.plrkeyD,current);
+    RotateObject(avatar,0.f,ApproachAngle(current,desired,dt),0.f);
+    t.playercontrol.thirdperson.shotfired=0;
+    // Preserve authored cutscene overrides, including angle-only overrides.
+    if(g.luacameraoverride==1||g.luacameraoverride==3){lua_pushboolean(L,1);return 1;}
+    const float orbitYaw=tp.camerafollow?yaw:ObjectAngleY(avatar);
+    const Vec pivot={player.x,player.y+Clamp(Finite(tp.cameraheight,100.f)-65.f,-15.f,160.f),player.z};
+    const auto orbit=Build(orbitYaw,pitch,tp.cameradistance,static_cast<float>(tp.camerashoulder),
+        tp.cameraheight-70.f,tp.cameralocked==1);
+    const Vec ideal=Add(pivot,orbit.offset);
+    float allowed=1.f;
+    // Centre and four near-plane clearance rays. Include terrain and static
+    // geometry; retain the existing merged/lightmap collision setup.
+    if(g.lightmappedobjectoffset>=g.lightmappedobjectoffsetfinish)
+        IntersectAll(87000,87000+g.merged_new_objects-1,0,0,0,0,0,0,-123);
+    else IntersectAll(g.lightmappedobjectoffset,g.lightmappedobjectoffsetfinish,0,0,0,0,0,0,-123);
+    const Vec offsets[]={{0,0,0},Scale(orbit.right,8.f),Scale(orbit.right,-8.f),Scale(orbit.up,8.f),Scale(orbit.up,-8.f)};
+    for(const auto& offset:offsets) {
+        const Vec a=Add(pivot,offset),b=Add(ideal,offset);
+        if(ODERayTerrain(a.x,a.y,a.z,b.x,b.y,b.z)==1) {
+            const Vec hit={ODEGetRayCollisionX(),ODEGetRayCollisionY(),ODEGetRayCollisionZ()};
+            const float f=ContactFraction(a,b,hit,6.f);if(f<allowed)allowed=f;
+        }
+        if(IntersectAllEx(g.entityviewstartobj,g.entityviewendobj,a.x,a.y,a.z,b.x,b.y,b.z,avatar,1)>0) {
+            const Vec hit={ChecklistFValueA(6),ChecklistFValueB(6),ChecklistFValueC(6)};
+            const float f=ContactFraction(a,b,hit,6.f);if(f<allowed)allowed=f;
+        }
+    }
+    fraction=reset?allowed:Boom(fraction,allowed,dt,Finite(tp.cameraspeed,50.f)*0.15f);
+    const Vec cam=Add(pivot,Scale(orbit.offset,fraction));
+    PositionCamera(0,cam.x,cam.y,cam.z);
+    if(g.luacameraoverride!=2) {
+        if(tp.cameralocked==1)PointCamera(0,pivot.x,pivot.y,pivot.z);
+        else RotateCamera(0,pitch,orbitYaw,0.f);
+    }
+    lua_pushboolean(L,1);return 1;
+}
+
 void addFunctions()
 {
+    lua_register(lua,"PWNativeThirdPersonUpdate",PWNativeThirdPersonUpdate);
     lua_register(lua,"PWProfileWriteRaw",PWProfileWriteRaw);
     lua_register(lua,"PWProfileListRaw",PWProfileListRaw);
 	lua_register(lua, "SendMessage", LuaSendMessage);

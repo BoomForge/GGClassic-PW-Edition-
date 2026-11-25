@@ -5,6 +5,7 @@
 #include "PW-PlayerProfile.h"
 #include "PW-DisplayOptions.h"
 #include "PW-GameplayControls.h"
+#include "PW-ThirdPerson.h"
 #include <cassert>
 #include <cstdio>
 #include <string>
@@ -170,6 +171,17 @@ int main()
     Put(PWControls::Path(root),"PWCONTROLS1\n200\n");
     assert(!PWControls::Read(root,restoredBindings)&&restoredBindings==bindings);
     assert(PWControls::Index(18)==PWControls::Interact);
-    printf("PW LevelFlow + FPM cache + profile + display + controls contract checks passed.\n");
+    using namespace PWThirdPerson;
+    const auto orbit=Build(0,0,200,20,0,false);
+    assert(std::fabs(orbit.offset.x-20)<0.001f&&std::fabs(orbit.offset.z+200)<0.001f);
+    const auto sideways=Build(90,0,200,0,0,false);
+    assert(std::fabs(sideways.offset.x+200)<0.001f);
+    assert(std::fabs(Facing(0,1,0,0,1,0)-45)<0.001f);
+    assert(Facing(0,1,1,1,1,90)==90);
+    assert(std::fabs(ContactFraction({0,0,0},{0,0,100},{0,0,50},5)-0.45f)<0.001f);
+    assert(Boom(1,0.2f,0.016f,8)==0.2f);
+    assert(Boom(0.2f,1,0.016f,8)>0.2f&&Boom(0.2f,1,0.016f,8)<1);
+    assert(ApproachAngle(359,1,0.1f)>359||ApproachAngle(359,1,0.1f)<1);
+    printf("PW level flow, profiles, display, controls and native third-person math checks passed.\n");
     return 0;
 }

@@ -132,6 +132,10 @@ Acceptance criteria:
 
 **Status:** requested / not implemented. Whether to use a startup dialog or an in-game menu can be chosen during implementation, as long as players can change the minimum two settings.
 
+### Highest active priority — Full native third-person gameplay (25 November 2026 owner request)
+
+Move ahead of Model Importer 2. Native orbit camera and avatar facing source stage committed; full controller, animation, combat, editor setup and lifecycle remain to implement and validate. See [native third-person development plan](PW_NATIVE_THIRD_PERSON.md). Preserve the first-person controller and original script compatibility.
+
 ### Relative priority
 
 1. Stabilise the current importer/editor integration and its existing regression gates.
