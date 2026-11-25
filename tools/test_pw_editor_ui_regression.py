@@ -212,6 +212,10 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertLess(grass.index('DrawProbe(cameraX,cameraZ);'),
                         grass.index('if (lastCameraCellX == centerX && lastCameraCellZ == centerZ) return;'))
         self.assertIn('CloneObject(id, rs.source);', grass)
+        self.assertIn('GetCameraLookX(0);', grass)
+        self.assertIn('GetCameraLookY(0);', grass)
+        self.assertIn('GetCameraLookZ(0);', grass)
+        self.assertIn('if (!std::isfinite(full) || full<0.0001f) return;', grass)
         self.assertIn('MakeObjectCube(id, 36.f);', grass)
         self.assertIn('void SetProbeEnabled(bool enabled);', mix)
         self.assertIn('probeEnabled = false; // Diagnostic scene elements never survive a map load.', grass)
