@@ -47,13 +47,14 @@ namespace {
             const float yaw=ObjectAngleY(avatar);
             float best=0.f;
             for(int e=1;e<=g.entityelementlist;++e) {
-                const auto& ent=t.entityelement[e];
+                auto& ent=t.entityelement[e]; // cStr::Get is non-const in Classic
                 if(ent.active==0||ent.staticflag!=0||ent.eleprof.aimain!=1||ent.eleprof.aipreexit>=1||
                     e==t.playercontrol.thirdperson.charactere)continue;
                 const float range=PWInteractionRange(ent.eleprof.aimainname_lower_s.Get());
                 if(range<=0.f)continue;
-                // Cheap origin distance rejection before querying object bounds.
-                if(!InReach(origin,{ent.x,ent.y,ent.z},range+100.f))continue;
+                // Reject distant objects using live transforms, never stale script coordinates.
+                if(ent.obj<=0||!ObjectExist(ent.obj))continue;
+                if(!InReach(origin,{ObjectPositionX(ent.obj),ObjectPositionY(ent.obj),ObjectPositionZ(ent.obj)},range+100.f))continue;
                 Vec target={};int object=0;
                 if(!EntityTarget(e,target,object)||object==avatar||!GetVisible(object))continue;
                 const float score=InteractionScore(origin,target,yaw,range);

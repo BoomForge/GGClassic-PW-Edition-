@@ -65,6 +65,20 @@ class ReleasePackagingTests(unittest.TestCase):
             self.assertIn("Files/effectbank/reloaded/pw_effect.fx", zipped.namelist())
             self.assertNotIn("testplugin.dll", zipped.namelist())
 
+    def test_contextual_runtime_scripts_are_explicitly_allowed(self):
+        paths = ["Files/scriptbank/" + name for name in
+                 ("global.lua", "pw_transition_state.lua", "gameplayercontrol.lua", "key.lua", "weapon.lua")]
+        for name in paths:
+            target = self.build / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("-- synthetic script")
+        archive, _ = make_release(self.build, "0.1.2", self.root / "scripts", paths)
+        with zipfile.ZipFile(archive) as zipped:
+            for name in paths:
+                self.assertIn(name, zipped.namelist())
+        with self.assertRaises(ValueError):
+            check_name("Files/scriptbank/custom_player_project.lua")
+
     def test_rejects_bad_version_and_missing_executable(self):
         with self.assertRaises(ValueError):
             make_release(self.build, "nightly", self.root / "bad", [])

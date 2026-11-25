@@ -77,6 +77,9 @@ internal static class Program
         "pw-edition-version.txt",
         @"Files\scriptbank\global.lua",
         @"Files\scriptbank\pw_transition_state.lua",
+        @"Files\scriptbank\gameplayercontrol.lua",
+        @"Files\scriptbank\key.lua",
+        @"Files\scriptbank\weapon.lua",
         @"Files\effectbank\reloaded\apbr_animwithtran_emissive.fx",
         @"Files\PWTools\pw_glb_to_fbx.py"
     };
