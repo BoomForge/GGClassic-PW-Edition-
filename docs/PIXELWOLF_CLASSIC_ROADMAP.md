@@ -90,6 +90,8 @@ Acceptance criteria:
 
 ### P0 — Non-explosive projectile collision and direct damage
 
+**25 November source progress:** Corrected direct damage classification, frame-segment player collision, zero-motion ray guard and attacker attribution. Actual gameplay reproduction and regression acceptance remain open; no change to explicit no-damage projectile specs.
+
 **User report:** Non-explosive arrows/bolts and other projectiles allegedly fail to lower the health of the player or active targets; explosive projectiles appear more reliable. This is a **reported bug, not yet reproduced in this fork**. The desired effect enables boomer shooters, dodgeable projectiles and bow-and-arrow combat.
 
 Acceptance criteria:

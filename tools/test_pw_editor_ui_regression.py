@@ -147,6 +147,19 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertNotIn("InstanceObject(id, rs.source);", grass)
         self.assertNotIn("count < 320", grass)
 
+    def test_direct_projectile_damage_uses_swept_hit_and_bullet_semantics(self):
+        weapon = (ROOT / "GameGuru Core/GameGuru/Source/M-Weapon.cpp").read_text(encoding="utf-8")
+        self.assertIn("PWProjectile::FirstContact(", weapon)
+        self.assertIn("if(t.ttdd_f>0.0001f && !pwDirect)", weapon)
+        self.assertIn("if(!pwDirect)", weapon)
+        self.assertIn("if(!ODERayTerrain(", weapon)
+        direct = weapon.split("void weapon_projectileresult_make ( void )",1)[1].split("case WEAPON_PROJECTILERESULT_EXPLODE:",1)[0]
+        self.assertIn("t.tdamagesource=1;", direct)
+        self.assertNotIn("t.tdamagesource=2;", direct)
+        self.assertIn("entity_applydamage ( );", direct)
+        self.assertIn("t.te=oldEntity;", weapon)
+        self.assertIn("physics_explodesphere ( );", weapon)
+
     def test_custom_asset_removal_is_recoverable_and_scoped(self):
         self.assertIn('Delete imported asset...', GRID)
         self.assertIn('BeginPopupModal("Delete imported asset##PWRemoveConfirm"', GRID)

@@ -1,4 +1,5 @@
 #include "PW-GrassMix.h"
+#include "PW-ProjectileContact.h"
 #include <cassert>
 #include <cstdio>
 #include <cmath>
@@ -6,6 +7,15 @@
 namespace PWGrassMix { Slot slots[MaxStyles]; unsigned revision = 0; }
 int main() {
     using namespace PWGrassMix;
+    // Fast direct projectiles, near misses, short segments and stopped physics.
+    float hit=-1;
+    assert(PWProjectile::FirstContact(-100,0,0,100,0,0,0,0,0,10,hit));
+    assert(std::fabs(hit-0.45f)<0.0001f);
+    assert(!PWProjectile::FirstContact(-100,11,0,100,11,0,0,0,0,10,hit));
+    assert(!PWProjectile::FirstContact(-100,0,0,-20,0,0,0,0,0,10,hit));
+    assert(!PWProjectile::FirstContact(-20,0,0,-20,0,0,0,0,0,10,hit));
+    assert(PWProjectile::FirstContact(0,0,0,0,0,0,0,0,0,10,hit) && hit==0);
+    assert(!PWProjectile::FirstContact(0,0,0,1,0,0,0,0,0,0,hit));
     assert(!Active());
     slots[0] = {"Short Grass", 25.f, true};
     slots[1] = {"Tall Grass", 75.f, true};
