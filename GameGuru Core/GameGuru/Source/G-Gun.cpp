@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-ThirdPersonGameplay.h"
 
 
 // global store for weapon shader effect indexes
@@ -204,7 +205,7 @@ void gun_manager ( void )
 		t.gunid = t.entityelement[t.playercontrol.thirdperson.charactere].eleprof.hasweapon;
 		bool bWeaponIsMeleeBased = false;
 		if (t.gunid > 0)
-			if (t.gun[t.gunid].statuspanelcode == 7 || t.gun[t.gunid].statuspanelcode == 8 || t.gun[t.gunid].statuspanelcode == 10) // bow, axe, sword
+			if ((t.gun[t.gunid].statuspanelcode == 7 || t.gun[t.gunid].statuspanelcode == 8 || t.gun[t.gunid].statuspanelcode == 10) && g.firemodes[t.gunid][g.firemode].settings.flakindex <= 0) // legacy melee, not actual projectile weapons
 				bWeaponIsMeleeBased = true;
 		if (t.gunid == 0 || bWeaponIsMeleeBased == true)
 		{
@@ -212,8 +213,9 @@ void gun_manager ( void )
 			if (t.gunclick != 1)	t.gunmustreleasefirst = 0;
 			if (t.gunclick != 0)
 			{
-				if (t.gunclick == 1 && t.gunmustreleasefirst == 0)
+				if (t.gunclick == 1 && t.gunmustreleasefirst == 0 && t.player[1].health>0)
 				{
+                    t.gunmustreleasefirst=1; // a new swing requires release/repress
 					// if third person, detect melee override of LMB shooting
 					int iE = t.playercontrol.thirdperson.charactere;
 					int iWeaponIndex = t.entityelement[iE].eleprof.hasweapon;
@@ -224,7 +226,10 @@ void gun_manager ( void )
 						t.q = t.entityprofile[entid].startofaianim;
 						if (t.entityanim[entid][t.q + t.csi_stoodpunch[1]].start > 0)
 						{
-							t.charanimcontrols[t.playercontrol.thirdperson.characterindex].meleeing = 1;
+							if(t.charanimcontrols[t.playercontrol.thirdperson.characterindex].meleeing==0) {
+                                t.playercontrol.thirdperson.meleestruck=0;
+                                t.charanimcontrols[t.playercontrol.thirdperson.characterindex].meleeing=1;
+                            }
 						}
 						bGunshotOverridden = true;
 					}
@@ -236,7 +241,10 @@ void gun_manager ( void )
 							t.q = t.entityprofile[entid].startofaianim;
 							if (t.entityanim[entid][t.q + t.csi_stoodpunch[1]].start > 0)
 							{
-								t.charanimcontrols[t.playercontrol.thirdperson.characterindex].meleeing = 1;
+								if(t.charanimcontrols[t.playercontrol.thirdperson.characterindex].meleeing==0) {
+                                t.playercontrol.thirdperson.meleestruck=0;
+                                t.charanimcontrols[t.playercontrol.thirdperson.characterindex].meleeing=1;
+                            }
 							}
 							bGunshotOverridden = true;
 						}
@@ -475,74 +483,55 @@ void gun_manager ( void )
 	}
 
 	// TPP Melee Control
-	if ( t.playercontrol.thirdperson.enabled == 1 ) 
-	{
-		if ( t.charanimcontrols[t.playercontrol.thirdperson.characterindex].meleeing != 0 )
-		{
-			// player meleeing, detect strike frames and inflict damage on any entity in front of character
-			int iE = t.playercontrol.thirdperson.charactere;
-			int iObj = t.entityelement[iE].obj;
-			if ( iObj > 0 )
-			{
-				if ( ObjectExist ( iObj ) == 1 )
-				{
-					float fCurrentFrame = GetFrame(iObj);
-					float fCurrentAngle = WrapValue ( ObjectAngleY ( iObj ) );
-					int iEntID = t.entityelement[iE].bankindex;
-					t.q = t.entityprofile[iEntID].startofaianim;
-					float fStrikeRadius = t.entityprofile[iEntID].meleerange;
-					float fStrikeStart = t.entityanim[iEntID][t.q+t.csi_stoodpunch[1]].start;
-					float fStrikeFinish = t.entityanim[iEntID][t.q+t.csi_stoodpunch[1]].finish;
-					float fStrikeThird = (fStrikeFinish-fStrikeStart)/3.0f;
-					fStrikeStart += fStrikeThird;
-					fStrikeFinish -= fStrikeThird;
-					if ( t.entityprofile[iEntID].meleestrikest > 0 )
-					{
-						fStrikeStart = t.entityprofile[iEntID].meleestrikest;
-						fStrikeFinish = t.entityprofile[iEntID].meleestrikefn;
-					}
-					if ( fCurrentFrame < fStrikeStart ) t.playercontrol.thirdperson.meleestruck = 0;
-					if ( fCurrentFrame >= fStrikeStart && fCurrentFrame <= fStrikeFinish && t.playercontrol.thirdperson.meleestruck == 0 )
-					{
-						// is character facing an entity and in range
-						float fCurrentX = ObjectPositionX ( iObj );
-						float fCurrentY = ObjectPositionY ( iObj );
-						float fCurrentZ = ObjectPositionZ ( iObj );
-						for ( int iEE = 1; iEE <= g.entityelementlist; iEE++ )
-						{
-							if ( iEE != iE )
-							{
-								float fDX = t.entityelement[iEE].x - fCurrentX;
-								float fDZ = t.entityelement[iEE].z - fCurrentZ;
-								float fDD = sqrt ( fabs(fDX*fDX)+fabs(fDZ*fDZ) );
-								int entid = t.entityelement[iEE].bankindex;
-								if ( fDD < fStrikeRadius && t.entityelement[iEE].staticflag == 0 && t.entityelement[iEE].health > 0 && t.entityprofile[entid].ismarker == 0 )
-								{
-									if ( fabs ( t.entityelement[iEE].y - fCurrentY ) < 50.0f )
-									{
-										float fDA = WrapValue ( Atan2 ( fDX, fDZ ) );
-										float fCompareA = WrapValue(fabs(fCurrentAngle) - fabs(fDA));
-										if ( fCompareA > 180 ) fCompareA = fCompareA - 360;
-										if ( fabs(fCompareA) < t.entityprofile[iEntID].meleehitangle )
-										{
-											// apply some damage
-											t.tttriggerdecalimpact = 0;
-											t.tdamagesource = 1;
-											int iDamageRange = t.entityprofile[iEntID].meleedamagefn - t.entityprofile[iEntID].meleedamagest;
-											t.tdamage = t.entityprofile[iEntID].meleedamagest + (rand()%iDamageRange);
-											entity_hitentity ( iEE, t.entityelement[iEE].obj );
-											entity_triggerdecalatimpact ( t.entityelement[iEE].x, t.entityelement[iEE].y+50.0f, t.entityelement[iEE].z );
-											t.playercontrol.thirdperson.meleestruck = 1;
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
+    // Native TPP melee: one committed strike window, nearest eligible target,
+    // actual world-space origin and obstruction check. No stale bullet ray.
+    if(t.playercontrol.thirdperson.enabled==1&&t.player[1].health>0) {
+        using namespace PWThirdPerson;
+        const int e=t.playercontrol.thirdperson.charactere,index=t.playercontrol.thirdperson.characterindex;
+        if(e>0&&e<=g.entityelementlist&&index>0&&index<=g.charanimindexmax&&t.charanimcontrols[index].meleeing!=0) {
+            const int obj=t.entityelement[e].obj,bank=t.entityelement[e].bankindex;
+            if(obj>0&&ObjectExist(obj)&&bank>0) {
+                const auto& profile=t.entityprofile[bank];
+                const int anim=profile.startofaianim+t.csi_stoodpunch[1];
+                float begin=t.entityanim[bank][anim].start,finish=t.entityanim[bank][anim].finish;
+                const float third=(finish-begin)/3.f;
+                begin+=third;finish-=third;
+                if(profile.meleestrikest>0){begin=profile.meleestrikest;finish=profile.meleestrikefn;}
+                const float frame=GetFrame(obj);
+                if(finish>=begin&&frame>=begin&&frame<=finish&&t.playercontrol.thirdperson.meleestruck==0) {
+                    // Consume the strike even on a miss; one target per swing.
+                    t.playercontrol.thirdperson.meleestruck=1;
+                    Vec origin={};int ignore=0;
+                    if(PlayerOrigin(origin,ignore)) {
+                        const float yaw=ObjectAngleY(obj);
+                        int best=0,bestObj=0;Vec bestPoint={};float bestDistance=profile.meleerange;
+                        for(int candidate=1;candidate<=g.entityelementlist;++candidate) {
+                            if(candidate==e)continue;
+                            const auto& target=t.entityelement[candidate];
+                            if(target.bankindex<=0||target.staticflag!=0||target.health<=0||target.active==0||
+                                t.entityprofile[target.bankindex].ismarker!=0)continue;
+                            Vec point={};int targetObj=0;
+                            if(!EntityTarget(candidate,point,targetObj)||!GetVisible(targetObj)||
+                                !InMeleeArc(origin,point,yaw,profile.meleerange,profile.meleehitangle,70.f))continue;
+                            const Vec delta=Sub(point,origin);
+                            const float distance=std::sqrt(delta.x*delta.x+delta.z*delta.z);
+                            if((best==0||distance<bestDistance)&&LineClear(origin,point,ignore,targetObj)){
+                                best=candidate;bestObj=targetObj;bestPoint=point;bestDistance=distance;
+                            }
+                        }
+                        if(best>0) {
+                            t.tttriggerdecalimpact=0;t.tdamagesource=1;t.bulletraylimbhit=-1;
+                            t.brayx1_f=origin.x;t.brayy1_f=origin.y;t.brayz1_f=origin.z;
+                            t.brayx2_f=bestPoint.x;t.brayy2_f=bestPoint.y;t.brayz2_f=bestPoint.z;
+                            t.tdamage=StrikeDamage(profile.meleedamagest,profile.meleedamagefn,static_cast<unsigned>(rand()));
+                            entity_hitentity(best,bestObj);
+                            entity_triggerdecalatimpact(bestPoint.x,bestPoint.y,bestPoint.z);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
 	// independent handling (no matter which guns is selected)
 	gun_brass_indi ( );

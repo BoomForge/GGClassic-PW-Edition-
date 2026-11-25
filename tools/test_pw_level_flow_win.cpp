@@ -6,6 +6,7 @@
 #include "PW-DisplayOptions.h"
 #include "PW-GameplayControls.h"
 #include "PW-ThirdPerson.h"
+#include "PW-ThirdPersonGameplay.h"
 #include <cassert>
 #include <cstdio>
 #include <string>
@@ -182,6 +183,15 @@ int main()
     assert(Boom(1,0.2f,0.016f,8)==0.2f);
     assert(Boom(0.2f,1,0.016f,8)>0.2f&&Boom(0.2f,1,0.016f,8)<1);
     assert(ApproachAngle(359,1,0.1f)>359||ApproachAngle(359,1,0.1f)<1);
+    assert(InReach({0,0,0},{0,0,100},100));
+    assert(!InReach({0,0,0},{0,0,101},100));
+    assert(!InReach({0,0,0},{0,80,80},100));
+    assert(InMeleeArc({0,0,0},{0,0,30},359,50,10,20));
+    assert(!InMeleeArc({0,0,0},{0,0,-30},0,50,45,20));
+    assert(!InMeleeArc({0,0,0},{0,30,20},0,50,45,20));
+    assert(StrikeDamage(10,10,0)==10&&StrikeDamage(10,10,999)==10);
+    assert(StrikeDamage(20,10,0)==10&&StrikeDamage(20,10,10)==20);
+    assert(StrikeDamage(-10,-1,123)==0);
     printf("PW level flow, profiles, display, controls and native third-person math checks passed.\n");
     return 0;
 }

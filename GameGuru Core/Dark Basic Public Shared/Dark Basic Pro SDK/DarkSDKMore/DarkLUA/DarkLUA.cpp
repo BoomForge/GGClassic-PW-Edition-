@@ -28,6 +28,7 @@
 #include "..\..\..\..\GameGuru\Include\gameguru.h"
 #include "..\..\..\..\GameGuru\Include\PW-PlayerProfile.h"
 #include "..\..\..\..\GameGuru\Include\PW-ThirdPerson.h"
+#include "..\..\..\..\GameGuru\Include\PW-ThirdPersonGameplay.h"
 
 
 // Prototypes
@@ -7067,8 +7068,17 @@ static int PWNativeThirdPersonUpdate(lua_State* L) {
     lua_pushboolean(L,1);return 1;
 }
 
+static int PWCanInteract(lua_State* L) {
+    const double index=lua_tonumber(L,1),range=lua_tonumber(L,2);
+    const bool valid=lua_gettop(L)==2&&lua_isnumber(L,1)&&lua_isnumber(L,2)&&
+        index>=1&&index<=g.entityelementlist&&std::floor(index)==index&&
+        std::isfinite(range)&&range>0&&range<=1000000.0;
+    lua_pushboolean(L,valid&&PWThirdPerson::CanInteract(static_cast<int>(index),static_cast<float>(range)));
+    return 1;
+}
 void addFunctions()
 {
+    lua_register(lua,"PWCanInteract",PWCanInteract);
     lua_register(lua,"PWNativeThirdPersonUpdate",PWNativeThirdPersonUpdate);
     lua_register(lua,"PWProfileWriteRaw",PWProfileWriteRaw);
     lua_register(lua,"PWProfileListRaw",PWProfileListRaw);

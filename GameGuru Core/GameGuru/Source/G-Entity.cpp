@@ -5,6 +5,7 @@
 #include "stdafx.h"
 #include "gameguru.h"
 #include "CObjectsC.h"
+#include "PW-ThirdPersonGameplay.h"
 
 
 // 
@@ -2017,6 +2018,52 @@ void entity_gettrueplayerpos(void)
 		t.tcamerapositiony_f = CameraPositionY(t.terrain.gameplaycamera);
 		t.tcamerapositionz_f = CameraPositionZ(t.terrain.gameplaycamera);
 	}
+}
+
+namespace PWThirdPerson {
+bool PlayerOrigin(Vec& origin,int& ignoredObject) {
+    ignoredObject=0;
+    if(t.playercontrol.thirdperson.enabled==1) {
+        const int body=t.aisystem.objectstartindex;
+        const int e=t.playercontrol.thirdperson.charactere;
+        if(body<=0||!ObjectExist(body)||e<=0||e>g.entityelementlist)return false;
+        ignoredObject=t.entityelement[e].obj;
+        if(ignoredObject<=0||!ObjectExist(ignoredObject))return false;
+        origin={ObjectPositionX(body),ObjectPositionY(body),ObjectPositionZ(body)};
+    } else {
+        origin={CameraPositionX(t.terrain.gameplaycamera),CameraPositionY(t.terrain.gameplaycamera),CameraPositionZ(t.terrain.gameplaycamera)};
+    }
+    return std::isfinite(origin.x)&&std::isfinite(origin.y)&&std::isfinite(origin.z);
+}
+bool EntityTarget(int e,Vec& target,int& object) {
+    if(e<=0||e>g.entityelementlist)return false;
+    const auto& ent=t.entityelement[e];
+    if(ent.bankindex<=0||ent.obj<=0||!ObjectExist(ent.obj))return false;
+    object=ent.obj;
+    // Aim at actual live object bounds, not stale editor placement.
+    const float height=ObjectSizeY(object,1);
+    target={ObjectPositionX(object),ObjectPositionY(object)+Clamp(Finite(height*0.5f,20.f),8.f,100.f),ObjectPositionZ(object)};
+    return std::isfinite(target.x)&&std::isfinite(target.y)&&std::isfinite(target.z);
+}
+bool LineClear(Vec from,Vec to,int ignoredObject,int targetObject) {
+    if(!InReach(from,to,1000000.f))return false;
+    if(Length(Sub(to,from))<0.001f)return true;
+    // Terrain blocks interactions/strikes just as it blocks ordinary bullets.
+    if(ODERayTerrain(from.x,from.y,from.z,to.x,to.y,to.z)==1)return false;
+    // Populate the same secondary range used by Classic's bullet queries.
+    if(g.lightmappedobjectoffset>=g.lightmappedobjectoffsetfinish)
+        IntersectAll(87000,87000+g.merged_new_objects-1,0,0,0,0,0,0,-123);
+    else IntersectAll(g.lightmappedobjectoffset,g.lightmappedobjectoffsetfinish,0,0,0,0,0,0,-123);
+    const int hit=IntersectAll(g.entityviewstartobj,g.entityviewendobj,from.x,from.y,from.z,to.x,to.y,to.z,ignoredObject);
+    return hit<=0||(targetObject>0&&hit==targetObject);
+}
+bool CanInteract(int e,float range) {
+    Vec from={},to={};int ignore=0,target=0;
+    if(t.player[t.plrid].health<=0||t.game.runasmultiplayer!=0||t.game.gameloop!=1||
+        !PlayerOrigin(from,ignore)||!EntityTarget(e,to,target)||target==ignore||
+        t.entityelement[e].active==0||!GetVisible(target))return false;
+    return InReach(from,to,range)&&LineClear(from,to,ignore,target);
+}
 }
 
 void entity_hasbulletrayhit(void)
