@@ -202,7 +202,22 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn("for (int slotIndex=0; slotIndex<PWGrassMix::MaxStyles; ++slotIndex)", grass)
         self.assertIn("g.vegstyle_s=t.vegstylebank_s[bank];", grass)
         self.assertNotIn("if (PWGrassMix::Count() == 1)", terrain)
-        self.assertIn("Overlay models: ", grass)
+        self.assertIn('out << "Overlay " << (RenderEnabled() ? "ON" : "OFF")', grass)
+        self.assertIn('sampledPainted=pickedNative=pickedSecondary=allocationFailures=0;', grass)
+        self.assertIn('++sampledPainted;', grass)
+        self.assertIn('++pickedNative;', grass)
+        self.assertIn('++pickedSecondary;', grass)
+        self.assertIn('++allocationFailures;', grass)
+        self.assertIn('if (lastCameraCellX == centerX && lastCameraCellZ == centerZ) return;', grass)
+        self.assertLess(grass.index('DrawProbe(cameraX,cameraZ);'),
+                        grass.index('if (lastCameraCellX == centerX && lastCameraCellZ == centerZ) return;'))
+        self.assertIn('CloneObject(id, rs.source);', grass)
+        self.assertIn('MakeObjectCube(id, 36.f);', grass)
+        self.assertIn('void SetProbeEnabled(bool enabled);', mix)
+        self.assertIn('probeEnabled = false; // Diagnostic scene elements never survive a map load.', grass)
+        self.assertIn('ReleaseProbe(); // Remove dependent diagnostic clone before source meshes.', grass)
+        self.assertIn('Diagnostic: compare magenta cube and second grass model##PWGrassRenderProbe', terrain)
+        self.assertIn('PWGrassMix::SetProbeEnabled(pwProbe);', terrain)
         self.assertIn("InstanceObject(id, rs.source);", grass)
         # Classic grass templates are 200% scaled. InstanceObject creates
         # independent transforms; the scale/yaw must reach each visible instance.
