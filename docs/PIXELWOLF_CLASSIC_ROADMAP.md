@@ -134,6 +134,8 @@ Acceptance criteria:
 
 ### Highest active priority — Full native third-person gameplay (25 November 2026 owner request)
 
+**Weapon switching source progress:** owned preloaded weapons, staged per-instance world attachments, holster and ID recycling implemented. Missing media rejected; custom sockets, cross-level missing gun loading and live acceptance pending.
+
 **Combat/interaction source progress:** body-origin visibility/reach, explicit protagonist exclusion, Lua `PWCanInteract`, player-facing NPCs, obstructed melee and safe damage ranges implemented. Next: integrate weapon switching with attachment lifecycle, ranged aim/muzzle/projectile behaviour, animation and native movement. Runtime acceptance pending.
 
 Move ahead of Model Importer 2. Owner clarified that combat and world interaction are the decisive acceptance gate: weapon pickup/equip/switch, melee, ranged, reload, doors, NPCs, pickups, quest objects and obstruction-aware gameplay from the character rather than camera. Prioritise these alongside minimum locomotion, before cosmetic camera polish. Native orbit camera and avatar facing source stage committed; full controller, animation, combat, editor setup and lifecycle remain to implement and validate. See [native third-person development plan](PW_NATIVE_THIRD_PERSON.md). Preserve the first-person controller and original script compatibility.

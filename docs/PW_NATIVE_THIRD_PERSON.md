@@ -25,6 +25,12 @@ Implemented shared C++ player-origin, live entity target and terrain/entity obst
 
 The equip/switch restriction is NOT removed yet: attachment creation currently uses the shared FPE's weapon name, not the per-instance current weapon ID, and the gun manager overwrites its selected weapon from the protagonist's fixed profile. Next work must integrate the attachment lifecycle and equipped slot together, not just remove a guard. Ranged camera-to-muzzle aiming, projectile pitch, melee animation state transitions, context interaction target/action dispatch and native movement remain open.
 
+## Weapon switching and attachment lifecycle — 25 November 2026
+
+Removed the hard-coded third-person equip return and the gun-manager assignment from the authored entity weapon. Existing owned inventory slots, number keys, scroll selection and holster use the normal gun-change flow. A native preflight requires a valid protagonist, owned preloaded HUD weapon, actual vweap.x/DBO and valid hand firespot. The replacement world model loads in a staged reusable attachment ID before the previous one is removed; only the protagonist instance's equipped weapon is changed, never its shared FPE profile. Holster clears the attachment and weapon ID. Existing ammo slots are not reset. Failed preflight leaves the old weapon, and repeated switches recycle attachment IDs. Added isolated equip eligibility checks.
+
+Limitations: supports existing Classic-compatible hand firespot rigs and preloaded weapons only; arbitrary new/missing HUD weapons (including some cross-level profile restores), asset discovery/export packaging, dead-NPC weapon pickup, custom bone/socket authoring and per-weapon character animations remain open. Not a claim of live success; verify first equip, slot changes, holster/re-equip, ammo/reload, missing asset rejection, old attachment deletion, repeated switching and NPC instances sharing the FPE. Next: native aim target/muzzle obstruction and projectile pitch, then animation and interaction dispatch.
+
 ## Remaining implementation order
 1. Trace native physics movement and animation state contracts; extract third-person-specific movement and animation orchestration from Lua without changing first-person.
 2. Native camera-relative movement, turning, free orbit, aiming/strafing, sprint/crouch/jump/fall/land, slope and wall collisions; configurable camera sensitivity, distance, shoulder and target framing. Camera override and indoor clearance tests.

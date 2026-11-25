@@ -11,6 +11,10 @@
 
 > **OWNER-CORRECTED DELIVERY FACT (22 Nov 2026): The current installed PW Edition ALREADY INCLUDES AN IN-ENGINE UPDATER.** Never describe this updater as a future feature, or default to downloading source ZIPs and running `START_PW_TEST_BUILD.cmd` every update. The editor's update command launches the installed `Pixelwolf-GGC-Updater.exe` source-building helper. Distinguish this **existing, owner-confirmed capability** from whether the **latest revision** has passed actual installation and gameplay acceptance; CI compilation is not a local runtime test.
 
+## 25 November 2026 — third-person owned weapon selection and attachment source stage
+
+Removed the legacy switching restriction and per-frame forced gun ID. Added native staged player-only world attachment replacement based on the selected owned weapon ID, existing hand firespot and actual vweap media. Refuse missing/ineligible models before freeing old weapon, reuse attachment IDs, support holster and keep ammunition in existing inventory slots. Existing FPS and NPC attachment loader retain their default paths; shared FPE not modified. Supports preloaded HUD guns only for this stage, not arbitrary missing guns/custom rig sockets. Isolated eligibility tests added. Windows build/live verification pending, including death/respawn, profile restore and standalone packaging. Next native ranged aim/muzzle/projectile handling; see `docs/PW_NATIVE_THIRD_PERSON.md`. Multi-grass unchanged.
+
 ## 25 November 2026 — third-person melee and interaction source repairs
 
 Implemented explicit body-origin visibility and reach queries, protagonist exclusion, terrain/entity line-of-sight, player-relative NPC look/rotate, and `PWCanInteract(e,range)` for Lua. Native melee now consumes one strike per new press, checks nearest eligible target, live object position, arc, height, wall/terrain obstruction, and uses fresh hit coordinates. Fixed equal/inverted damage range handling and do not misclassify configured projectile weapons as legacy melee. Added deterministic isolated math tests. Full engine and standalone validation pending; no automatic interaction dispatch yet.

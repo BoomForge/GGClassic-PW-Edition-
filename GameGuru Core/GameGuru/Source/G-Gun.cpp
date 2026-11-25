@@ -207,12 +207,11 @@ void gun_manager ( void )
             bGunshotOverridden=true;
         else {
             const int bank=t.entityelement[e].bankindex;
-            const int weapon=t.entityelement[e].eleprof.hasweapon;
+            const int weapon=t.gunid;
             if(bank<=0||weapon<0||weapon>g.gunmax)bGunshotOverridden=true;
             else {
-                // Preserve the existing equipped-profile rule until the
-                // attachment and inventory switch migration is complete.
-                t.gunid=weapon;
+                // gun_change owns selected weapon and synchronises the avatar.
+                // Never overwrite the live gun slot from the authored profile.
                 const bool melee=weapon==0||(g.firemodes[weapon][g.firemode].settings.flakindex<=0&&
                     (t.gun[weapon].statuspanelcode==7||t.gun[weapon].statuspanelcode==8||t.gun[weapon].statuspanelcode==10));
                 if(melee) {
@@ -529,22 +528,25 @@ void gun_change ( void )
 			}
 		}
 	}
-	else
-	{
-		if (  t.playercontrol.thirdperson.enabled == 1 ) 
-		{
-			// check if third person has weapon but not yet assigned
-			if ( t.entityelement[t.playercontrol.thirdperson.charactere].eleprof.hasweapon != 0 && t.gunid == 0 )
-			{
-				// allow g.autoloadgun through..
-			}
-			else
-			{
-				// third person character cannot equip new weapons for the moment
-				return;
-			}
-		}
-	}
+    // TPP uses the same inventory selection as FPS. Stage the world attachment
+    // before freeing the old HUD gun; never equip an unowned or missing model.
+    PWThirdPerson::EquipStage pwStage;
+    const bool pwSwitch=t.playercontrol.thirdperson.enabled==1&&g.autoloadgun!=-1;
+    if(pwSwitch){
+        const int requested=g.autoloadgun;
+        bool owned=false,hudReady=false;
+        if(requested>0&&requested<=g.gunmax&&requested<=ArrayCount(t.gun)){
+            for(int slot=1;slot<=10;++slot)if(t.weaponslot[slot].got==requested){owned=true;break;}
+            const int hud=t.gun[requested].obj;
+            hudReady=hud>0&&ObjectExist(hud);
+        }
+        if(!PWThirdPerson::EquipAllowed(requested,g.gunmax,owned,hudReady)||!PWThirdPerson::PrepareEquip(requested,pwStage)){
+            timestampactivity(0,"PW third-person equip rejected: missing inventory, HUD, world model or hand socket");
+            g.autoloadgun=-1;
+            t.gunmode=t.gunid>0?131:5;
+            return;
+        }
+    }
 
 	if ( g.autoloadgun != -1 && g.autoloadgun <= ArrayCount(t.gun) ) 
 	{
@@ -594,6 +596,15 @@ void gun_change ( void )
 		{
 			t.gunid=0;
 		}
+
+        if(pwSwitch){
+            PWThirdPerson::FinishEquip(pwStage,t.gunid==pwStage.weapon);
+            const int index=t.playercontrol.thirdperson.characterindex;
+            if(index>0&&index<=g.charanimindexmax)t.charanimcontrols[index].meleeing=0;
+            t.playercontrol.thirdperson.meleestruck=0;
+            t.playercontrol.thirdperson.shotfired=0;
+            t.gunmustreleasefirst=1;
+        }
 
 		//  Default gun action is to SHOW and reveal gun (then goes to gunmode=5 idle)
 		t.gunmode=131 ; t.keyboardpress=0;

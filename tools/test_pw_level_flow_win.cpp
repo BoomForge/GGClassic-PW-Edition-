@@ -192,6 +192,12 @@ int main()
     assert(StrikeDamage(10,10,0)==10&&StrikeDamage(10,10,999)==10);
     assert(StrikeDamage(20,10,0)==10&&StrikeDamage(20,10,10)==20);
     assert(StrikeDamage(-10,-1,123)==0);
+    assert(EquipAllowed(0,100,false,false));
+    assert(EquipAllowed(4,100,true,true));
+    assert(!EquipAllowed(4,100,false,true));
+    assert(!EquipAllowed(4,100,true,false));
+    assert(!EquipAllowed(-1,100,true,true));
+    assert(!EquipAllowed(101,100,true,true));
     printf("PW level flow, profiles, display, controls and native third-person math checks passed.\n");
     return 0;
 }

@@ -31,4 +31,11 @@ bool PlayerOrigin(Vec& origin,int& ignoredObject);
 bool EntityTarget(int e,Vec& target,int& object);
 bool LineClear(Vec from,Vec to,int ignoredObject,int targetObject);
 bool CanInteract(int e,float range);
+// Zero means holster, positive requests must be owned and preloaded.
+inline bool EquipAllowed(int requested,int maxWeapon,bool owned,bool hudReady) {
+    return requested==0||(requested>0&&requested<=maxWeapon&&owned&&hudReady);
+}
+struct EquipStage {int entity=0,weapon=0,oldObject=0,oldLimb=0,newObject=0,newLimb=0;bool unchanged=false;};
+bool PrepareEquip(int weapon,EquipStage& stage);
+void FinishEquip(const EquipStage& stage,bool commit);
 }

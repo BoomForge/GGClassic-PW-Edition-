@@ -10,6 +10,8 @@
 
 // 
 //  ENTITY GAME CODE
+// Reserved recycled attachment ID, reset with the level attachment bank.
+static int pwThirdPersonSpareAttachment=0;
 // 
 
 void entity_init ( void )
@@ -25,6 +27,7 @@ void entity_init ( void )
 	//  activate all entities and perform any pre-test game setup
 	timestampactivity(0,"Configure entity attachments and AI obstacles");
 	g.entityattachmentindex=0;
+    pwThirdPersonSpareAttachment=0;
 
 	//PE: Could we use collisionmode == 0 and only create it as a box ? and not all faces.
 	//PE: t.tobstype=t.entityprofile[t.entid].forcesimpleobstacle = true;
@@ -2488,7 +2491,7 @@ void entity_triggerdecalatimpact ( float fX, float fY, float fZ )
 	}
 }
 
-void entity_createattachment ( void )
+static void entity_createattachment_core(int weaponOverride,int reuseObject)
 {
 	// Single player character must HOLD the weapon before attaching it
 	t.tischaracterholdingweapon=0;
@@ -2509,18 +2512,24 @@ void entity_createattachment ( void )
 				// all vweaps (that are active)
 				for ( t.tgindex = 1 ; t.tgindex <= g.gunmax; t.tgindex++ )
 				{
-					if ( t.gun[t.tgindex].activeingame == 1 ) 
+					if ( t.gun[t.tgindex].activeingame == 1 || t.tgindex==weaponOverride ) 
 					{
 						t.tweaponname_s=t.gun[t.tgindex].name_s;
 						if ( t.tweaponname_s != "" ) 
 						{
 							// entity has this gun in their hands
 							t.tthasweapon_s = Lower(t.entityprofile[t.entid].hasweapon_s.Get());
-							if ( t.tthasweapon_s == t.tweaponname_s.Lower() ) 
+                            if (weaponOverride>=0?t.tgindex==weaponOverride:(t.tthasweapon_s == t.tweaponname_s.Lower())) 
 							{
 								// go and load this gun (attached to calling entity instance)
-								++g.entityattachmentindex;
-								t.ttobj=g.entityattachmentsoffset+g.entityattachmentindex;
+                                if(weaponOverride>=0&&reuseObject>g.entityattachmentsoffset)
+                                    t.ttobj=reuseObject;
+                                else {
+                                    // 5998/5999 are reserved video/prompt objects.
+                                    if(weaponOverride>=0&&g.entityattachmentsoffset+g.entityattachmentindex+1>=5998)return;
+                                    ++g.entityattachmentindex;
+                                    t.ttobj=g.entityattachmentsoffset+g.entityattachmentindex;
+                                }
 								if (  ObjectExist(t.ttobj) == 1  )  DeleteObject (  t.ttobj );
 
 								// replaced X file load with optional DBO convert/load
@@ -2536,6 +2545,7 @@ void entity_createattachment ( void )
 										t.tdbofile_s="";
 									}
 									LoadObject ( t.tfile_s.Get(), t.ttobj );
+                                    if(weaponOverride>=0&&!ObjectExist(t.ttobj))return;
 									SetObjectFilter (  t.ttobj,2 );
 									if ( Len(t.tdbofile_s.Get()) > 1 ) 
 									{
@@ -2555,8 +2565,10 @@ void entity_createattachment ( void )
 								}
 								else
 								{
+                                    if(weaponOverride>=0)return; // no invisible placeholder for a player weapon
 									MakeObjectTriangle (  t.ttobj,0,0,0,0,0,0,0,0,0 );
 								}
+                                if(weaponOverride>=0&&!ObjectExist(t.ttobj))return;
 								t.entityelement[t.e].attachmentobj=t.ttobj;
 
 								//  Apply object settings
@@ -2643,6 +2655,80 @@ void entity_createattachment ( void )
 			}
 		}
 	}
+}
+
+void entity_createattachment ( void )
+{
+    entity_createattachment_core(-1,0);
+}
+
+namespace PWThirdPerson {
+bool PrepareEquip(int weapon,EquipStage& stage) {
+    const int e=t.playercontrol.thirdperson.charactere;
+    if(e<=0||e>g.entityelementlist)return false;
+    auto& player=t.entityelement[e];
+    const int bank=player.bankindex;
+    if(bank<=0||player.obj<=0||!ObjectExist(player.obj))return false;
+    stage.entity=e;stage.weapon=weapon;stage.oldObject=player.attachmentobj;
+    stage.oldLimb=player.attachmentobjfirespotlimb;
+    if(weapon==0)return true; // holster does not require a hand socket
+    if(weapon>g.gunmax||weapon<0||t.entityprofile[bank].ischaracter!=1)return false;
+    const int hand=t.entityprofile[bank].firespotlimb;
+    if(hand<0||!LimbExist(player.obj,hand))return false;
+    // Check actual third-person world model before discarding any old weapon.
+    cstr model="gamecore\\guns\\";model+=t.gun[weapon].name_s;
+    cstr x=model+"\\vweap.x",dbo=model+"\\vweap.dbo";
+    if(!FileExist(x.Get())&&!FileExist(dbo.Get()))return false;
+    if(player.eleprof.hasweapon==weapon&&stage.oldObject>0&&ObjectExist(stage.oldObject)) {
+        stage.unchanged=true;stage.newObject=stage.oldObject;stage.newLimb=stage.oldLimb;return true;
+    }
+    const int savedE=t.e,savedBank=t.entid,savedWeapon=player.eleprof.hasweapon;
+    const int oldIndex=g.entityattachmentindex;
+    int spare=pwThirdPersonSpareAttachment;
+    if(spare==stage.oldObject)spare=0;
+    // Load into an unused slot while keeping the old visible attachment.
+    t.e=e;t.entid=bank;player.eleprof.hasweapon=weapon;player.attachmentobj=0;
+    player.attachmentobjfirespotlimb=0;
+    entity_createattachment_core(weapon,spare);
+    stage.newObject=player.attachmentobj;stage.newLimb=player.attachmentobjfirespotlimb;
+    player.attachmentobj=stage.oldObject;player.attachmentobjfirespotlimb=stage.oldLimb;
+    player.eleprof.hasweapon=savedWeapon;t.e=savedE;t.entid=savedBank;
+    if(stage.newObject<=0||!ObjectExist(stage.newObject)) {
+        const int failed=spare>0?spare:(g.entityattachmentindex>oldIndex?g.entityattachmentsoffset+g.entityattachmentindex:0);
+        if(failed>0){if(ObjectExist(failed))DeleteObject(failed);pwThirdPersonSpareAttachment=failed;}
+        return false;
+    }
+    HideObject(stage.newObject);
+    pwThirdPersonSpareAttachment=0;
+    return true;
+}
+void FinishEquip(const EquipStage& stage,bool commit) {
+    if(stage.entity<=0||stage.entity>g.entityelementlist)return;
+    if(!commit) {
+        if(!stage.unchanged&&stage.newObject>0){if(ObjectExist(stage.newObject))DeleteObject(stage.newObject);pwThirdPersonSpareAttachment=stage.newObject;}
+        return;
+    }
+    auto& player=t.entityelement[stage.entity];
+    if(!stage.unchanged&&stage.oldObject>0&&stage.oldObject!=stage.newObject) {
+        if(ObjectExist(stage.oldObject))DeleteObject(stage.oldObject);
+        // Both IDs belong to this level's existing attachment range.
+        if(stage.oldObject>g.entityattachmentsoffset&&stage.oldObject<=g.entityattachmentsoffset+g.entityattachmentindex)
+            pwThirdPersonSpareAttachment=stage.oldObject;
+    }
+    player.eleprof.hasweapon=stage.weapon;
+    player.attachmentobj=stage.newObject;
+    player.attachmentobjfirespotlimb=stage.newLimb;
+    if(stage.newObject>0&&ObjectExist(stage.newObject)) {
+        if(g.thirdpersonentityeffect>0){
+            SetObjectEffect(stage.newObject,g.thirdpersonentityeffect);
+            SetEffectConstantF(g.thirdpersonentityeffect,"DepthWriteMode",0.f);
+        }
+        // Immediately place in hand, so no frame is rendered at the origin.
+        ShowObject(stage.newObject);
+        const int oldE=t.e,oldBank=t.entid;t.e=stage.entity;
+        entity_controlattachments();t.e=oldE;t.entid=oldBank;
+    }
+}
 }
 
 void entity_freeattachment ( void )
