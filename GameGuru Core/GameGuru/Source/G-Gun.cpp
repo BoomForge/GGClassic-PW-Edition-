@@ -197,62 +197,39 @@ void gun_manager ( void )
 	if ( t.gunclick == 1 && g.firemodes[t.gunid][g.firemode].settings.disablerunandshoot == 1 && t.playercontrol.isrunning == 1 && t.player[1].state.moving == 1  )  t.gunclick = 0;
 	if ( t.gunclick == 1 && (g.lowfpswarning == 1 || g.lowfpswarning == 2)  )  t.gunclick = 0;
 
-	// Melee control (for TPP) 
-	bool bGunshotOverridden = false;
-	if ( t.playercontrol.thirdperson.enabled == 1 ) 
-	{
-		// sometimes gunid can be zero? (start marker/fantasy ranger=zero)
-		t.gunid = t.entityelement[t.playercontrol.thirdperson.charactere].eleprof.hasweapon;
-		bool bWeaponIsMeleeBased = false;
-		if (t.gunid > 0)
-			if ((t.gun[t.gunid].statuspanelcode == 7 || t.gun[t.gunid].statuspanelcode == 8 || t.gun[t.gunid].statuspanelcode == 10) && g.firemodes[t.gunid][g.firemode].settings.flakindex <= 0) // legacy melee, not actual projectile weapons
-				bWeaponIsMeleeBased = true;
-		if (t.gunid == 0 || bWeaponIsMeleeBased == true)
-		{
-			// use gunclick to detect one off press for melee
-			if (t.gunclick != 1)	t.gunmustreleasefirst = 0;
-			if (t.gunclick != 0)
-			{
-				if (t.gunclick == 1 && t.gunmustreleasefirst == 0 && t.player[1].health>0)
-				{
-                    t.gunmustreleasefirst=1; // a new swing requires release/repress
-					// if third person, detect melee override of LMB shooting
-					int iE = t.playercontrol.thirdperson.charactere;
-					int iWeaponIndex = t.entityelement[iE].eleprof.hasweapon;
-					if (iWeaponIndex == 0)
-					{
-						// but only trigger 'punch' melee if specified in FPE
-						int entid = t.entityelement[iE].bankindex;
-						t.q = t.entityprofile[entid].startofaianim;
-						if (t.entityanim[entid][t.q + t.csi_stoodpunch[1]].start > 0)
-						{
-							if(t.charanimcontrols[t.playercontrol.thirdperson.characterindex].meleeing==0) {
-                                t.playercontrol.thirdperson.meleestruck=0;
-                                t.charanimcontrols[t.playercontrol.thirdperson.characterindex].meleeing=1;
-                            }
-						}
-						bGunshotOverridden = true;
-					}
-					else
-					{
-						if (bWeaponIsMeleeBased == true)
-						{
-							int entid = t.entityelement[iE].bankindex;
-							t.q = t.entityprofile[entid].startofaianim;
-							if (t.entityanim[entid][t.q + t.csi_stoodpunch[1]].start > 0)
-							{
-								if(t.charanimcontrols[t.playercontrol.thirdperson.characterindex].meleeing==0) {
-                                t.playercontrol.thirdperson.meleestruck=0;
-                                t.charanimcontrols[t.playercontrol.thirdperson.characterindex].meleeing=1;
-                            }
-							}
-							bGunshotOverridden = true;
-						}
-					}
-				}
-			}
-		}
-	}
+    // TPP attacks: suppress the ordinary gun trigger for the entire
+    // unarmed/melee press, not merely the first frame of the press.
+    bool bGunshotOverridden=false;
+    if(t.playercontrol.thirdperson.enabled==1) {
+        const int e=t.playercontrol.thirdperson.charactere;
+        const int index=t.playercontrol.thirdperson.characterindex;
+        if(e<=0||e>g.entityelementlist||index<=0||index>g.charanimindexmax)
+            bGunshotOverridden=true;
+        else {
+            const int bank=t.entityelement[e].bankindex;
+            const int weapon=t.entityelement[e].eleprof.hasweapon;
+            if(bank<=0||weapon<0||weapon>g.gunmax)bGunshotOverridden=true;
+            else {
+                // Preserve the existing equipped-profile rule until the
+                // attachment and inventory switch migration is complete.
+                t.gunid=weapon;
+                const bool melee=weapon==0||(g.firemodes[weapon][g.firemode].settings.flakindex<=0&&
+                    (t.gun[weapon].statuspanelcode==7||t.gun[weapon].statuspanelcode==8||t.gun[weapon].statuspanelcode==10));
+                if(melee) {
+                    bGunshotOverridden=true;
+                    if(t.gunclick!=1)t.gunmustreleasefirst=0;
+                    if(t.gunclick==1&&t.gunmustreleasefirst==0&&t.player[1].health>0) {
+                        t.gunmustreleasefirst=1;
+                        const int anim=t.entityprofile[bank].startofaianim+t.csi_stoodpunch[1];
+                        if(t.entityanim[bank][anim].start>0&&t.charanimcontrols[index].meleeing==0) {
+                            t.playercontrol.thirdperson.meleestruck=0;
+                            t.charanimcontrols[index].meleeing=1;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
 	// Gun controls
 	if ( t.gunmode < 100 && bGunshotOverridden == false ) 
