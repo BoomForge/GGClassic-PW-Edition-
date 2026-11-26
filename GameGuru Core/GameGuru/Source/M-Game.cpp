@@ -248,6 +248,7 @@ std::vector<std::string> preload_setup;
 void game_masterroot_gameloop_initcode(int iUseVRTest)
 {
 	PWLoadTraceScope pwTraceGameLevelInit("game.transition.next_level_init");
+    PWTextureMemorySample("level_init_begin");
 	//PE: For this to work we need to support decrypting files.
 	#ifdef WIP_PROLOADLEVELTEXTURES
 	//PE: START level proloader here.
@@ -1841,6 +1842,7 @@ void game_masterroot_gameloop_initcode(int iUseVRTest)
 
 	// one final command to improve static physics performance
 	physics_finalize ( );
+    PWTextureMemorySample("level_ready");
 
 	// Wipe out mouse deltas
 	t.tMousemove_f = MouseMoveX() + MouseMoveY() + MouseZ(); t.tMousemove_f  = 0;
@@ -3435,6 +3437,7 @@ void game_stopallsounds ( void )
 void game_freelevel ( void )
 {
 	PWLoadTraceScope pwTraceLevelCleanup("game.transition.cleanup");
+    PWTextureMemorySample("level_cleanup_begin");
 	//  hide any jetpacks, etc
 	hud_free ( );
 
@@ -3537,6 +3540,7 @@ void game_freelevel ( void )
 		if( g.standalonefreememorybetweenlevels == 1 )
 			ClearAnyEntitybankInternalTextures();
 	}
+    PWTextureMemorySample("level_cleanup_end");
 }
 
 void game_init ( void )
@@ -3904,7 +3908,8 @@ extern int NumberOfGroupsShown;
 extern int NumberOfObjectsShown;
 
 void game_main_loop ( void )
-{	
+{
+    PWTextureMemorySample("gameplay",true);	
 	//  Timer (  based movement )
 	if ( g.gproducelogfiles == 2 ) timestampactivity(0,"calling game_timeelapsed");
 	game_timeelapsed ( );
