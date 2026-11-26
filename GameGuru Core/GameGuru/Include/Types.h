@@ -9564,10 +9564,12 @@ struct thirdpersoncontroltype
 	float storecamposz;
 	int shotfired;
 	int meleestruck;
+	unsigned int pwLifecycleEpoch; // runtime only, not FPM data
 
 	// Constructor
 	thirdpersoncontroltype ( )
 	{
+		pwLifecycleEpoch = 0;
 		meleestruck = 0;
 		shotfired = 0;
 		storecamposz = 0.0f;
