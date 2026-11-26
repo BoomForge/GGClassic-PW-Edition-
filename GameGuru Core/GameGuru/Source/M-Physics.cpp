@@ -1380,11 +1380,16 @@ void physics_player_gatherkeycontrols ( void )
 		break;
 	}
 
-	// Third person disables crouch/zoom/RMB
+	// Third person uses its own crouch policy in the native shared controller; legacy mode retains the old restriction.
 	t.playercontrol.camrightmousemode=0;
 	if ( t.playercontrol.thirdperson.enabled == 1 ) 
 	{
-		g.forcecrouch=0 ; t.plrkeyC=0;
+		char legacyThirdPerson[4]={};
+		const bool legacy = GetEnvironmentVariableA("GGCPW_LEGACY_THIRDPERSON",legacyThirdPerson,sizeof(legacyThirdPerson))==1&&legacyThirdPerson[0]=='1';
+		if (legacy || t.game.runasmultiplayer!=0 || g.gvrmode!=0 || g.globals.riftmode!=0 || t.conkit.editmodeactive!=0)
+		{
+			g.forcecrouch=0; t.plrkeyC=0;
+		}
 		t.gunzoommode = 0 ; if ( t.tmouseclick == 2 ) { t.tmouseclick = 0  ; t.playercontrol.camrightmousemode = 1; }
 	}
 
