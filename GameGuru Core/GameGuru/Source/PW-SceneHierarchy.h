@@ -663,7 +663,9 @@ static void PWRenderPlayerClipEditor(int e)
             {"Crouch back","csi_crouchmoveback",t.csi_crouchmovebackANIM[1],0,0,false},
             {"Crouch left","csi_crouchmoveleft",t.csi_crouchmoveleftANIM[1],0,0,false},
             {"Crouch right","csi_crouchmoveright",t.csi_crouchmoverightANIM[1],0,0,false},
-            {"Stand up","csi_crouchgetup",t.csi_crouchgetupANIM[1],0,0,false}
+            {"Stand up","csi_crouchgetup",t.csi_crouchgetupANIM[1],0,0,false},
+            {"Fall loop","csi_pw_fall",g.csi_csimax-2,0,0,false},
+            {"Landing","csi_pw_land",g.csi_csimax-1,0,0,false}
         };
         const int offset = t.entityprofile[bank].startofaianim;
         for (auto& row : rows) {
