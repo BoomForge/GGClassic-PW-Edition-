@@ -60,6 +60,23 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('inline bool OpenEntityScript(HWND owner', lua)
         self.assertIn('if (!CanDiscard()) return false;', lua)
 
+    def test_native_third_person_crouch_uses_controller_feedback(self):
+        source = (ROOT / "GameGuru Core/Dark Basic Public Shared/Dark Basic Pro SDK/DarkSDKMore/DarkLUA/DarkLUA.cpp").read_text(encoding="utf-8")
+        physics = (ROOT / "GameGuru Core/GameGuru/Source/M-Physics.cpp").read_text(encoding="utf-8")
+        lua = (ROOT / "GameGuru Core/GameGuru/Shaders and Scripts/scriptbank/gameplayercontrol.lua").read_text(encoding="utf-8")
+        hierarchy = (ROOT / "GameGuru Core/GameGuru/Source/PW-SceneHierarchy.h").read_text(encoding="utf-8")
+        self.assertIn("PWNativeThirdPersonCrouch and PWNativeThirdPersonCrouch()", lua)
+        self.assertIn("PWNativeThirdPersonCanJump()", lua)
+        self.assertIn("PWNativeThirdPersonCrouchMoving()", lua)
+        self.assertIn("ODEGetCharacterControllerDucking(body)", source)
+        self.assertIn("PWThirdPersonCrouchSupported(e,index)", source)
+        self.assertIn("CrouchAnimation(ducked&&crouchSupported)", source)
+        self.assertIn("g.charanimindex=previousIndex;", source)
+        self.assertIn("hold>=0.f&&airborne", source)
+        self.assertIn("legacyThirdPerson", physics)
+        self.assertIn("csi_crouchgetup", hierarchy)
+        self.assertIn("csi_crouchmovefore", hierarchy)
+
     def test_player_animation_variant_and_isolated_frame_preview(self):
         hierarchy = (ROOT / "GameGuru Core/GameGuru/Source/PW-SceneHierarchy.h").read_text(encoding="utf-8")
         inspector = (ROOT / "GameGuru Core/GameGuru/Include/PW-AssetInspector.h").read_text(encoding="utf-8")
