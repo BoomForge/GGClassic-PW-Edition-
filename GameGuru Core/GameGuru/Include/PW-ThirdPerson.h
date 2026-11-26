@@ -53,6 +53,20 @@ inline int MovementAnimation(bool moving,bool running,bool aiming,float movement
     if(delta>=45.f)return running?8:4;
     return running?5:1;
 }
+// Bullet remains authoritative: 1 requests crouch, 2 requests stand;
+// a blocked expansion reports a crouched controller until clearance exists.
+inline int CrouchRequest(bool requested,bool supported,bool allowed,bool grounded,bool actuallyDucked) {
+    if(requested&&supported&&allowed&&(grounded||actuallyDucked))return 1;
+    return actuallyDucked?2:0;
+}
+inline int CrouchAnimation(bool actuallyDucked) {return actuallyDucked?1:2;}
+inline bool ValidCharacterClip(float first,float last,float extent) {
+    return std::isfinite(first)&&std::isfinite(last)&&std::isfinite(extent)&&
+        first>0.f&&last>first&&last<=extent&&!(first==100.f&&last==101.f);
+}
+inline bool CanStartGroundJump(bool grounded,bool crouchRequested,bool actuallyDucked) {
+    return grounded&&!crouchRequested&&!actuallyDucked;
+}
 inline float JumpHoldFrame(float first,float last,float authored) {
     if(!std::isfinite(first)||!std::isfinite(last)||first<=0.f||last<=first)return -1.f;
     return Clamp(authored>0.f?authored:last-10.f,first,last-1.f);
