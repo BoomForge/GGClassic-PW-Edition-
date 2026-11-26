@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-ThirdPersonGameplay.h"
 #include "PW-LoadTrace.h" // Pixelwolf Edition: opt-in load profiler
 #include "PW-LevelFlow.h" // Pixelwolf Edition: safe area transitions
 #include "PW-PlayerProfile.h"
@@ -1826,6 +1827,8 @@ void game_masterroot_gameloop_initcode(int iUseVRTest)
             PWProfileLua("PWProfileApplyPending");
             if(LuaGetInt("g_PWProfileValid")==1) {
                 lua_loop_finish();
+                if(t.player[t.plrid].health>0)
+                    PWThirdPerson::CaptureBodyCheckpoint(CameraAngleY(0));
                 physics_player_refreshcount();
                 PWProfileStatus(g_pwPendingProfile.recovered?"Profile recovered.":"Profile loaded.");
             } else PWProfileStatus("Profile restore rejected.");
@@ -3556,10 +3559,12 @@ void game_init ( void )
 
 	//  Reset game checkpoint
 	t.playercheckpoint.stored=1;
-	t.playercheckpoint.x=CameraPositionX(0);
+	if(!PWThirdPerson::CaptureBodyCheckpoint(CameraAngleY(0))){
+    t.playercheckpoint.x=CameraPositionX(0);
 	t.playercheckpoint.y=CameraPositionY(0);
 	t.playercheckpoint.z=CameraPositionZ(0);
 	t.playercheckpoint.a=CameraAngleY(0);
+    }
 	//t.playercheckpoint.soundloopcheckpointcountdown=20;
 
 	//  Reset hardware flags with each new level map
