@@ -78,6 +78,8 @@ inline bool EquipAllowed(int requested,int maxWeapon,bool owned,bool hudReady) {
     return requested==0||(requested>0&&requested<=maxWeapon&&owned&&hudReady);
 }
 struct EquipStage {int entity=0,weapon=0,oldObject=0,oldLimb=0,newObject=0,newLimb=0;bool unchanged=false;};
+bool NativeLifecycleEnabled();
+bool CaptureBodyCheckpoint(float yaw);
 bool PrepareEquip(int weapon,EquipStage& stage);
 void FinishEquip(const EquipStage& stage,bool commit);
 }
