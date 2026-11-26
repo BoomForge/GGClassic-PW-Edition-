@@ -60,6 +60,24 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('inline bool OpenEntityScript(HWND owner', lua)
         self.assertIn('if (!CanDiscard()) return false;', lua)
 
+    def test_native_player_air_slots_and_camera_stance(self):
+        native = (ROOT / "GameGuru Core/Dark Basic Public Shared/Dark Basic Pro SDK/DarkSDKMore/DarkLUA/DarkLUA.cpp").read_text(encoding="utf-8")
+        dai = (ROOT / "GameGuru Core/GameGuru/Source/M-DAI.cpp").read_text(encoding="utf-8")
+        hierarchy = (ROOT / "GameGuru Core/GameGuru/Source/PW-SceneHierarchy.h").read_text(encoding="utf-8")
+        self.assertIn("PWNativeAirAnimation(e,index,avatar,ducked);", native)
+        self.assertIn("ObjectAngleX(body)==1.f", native)
+        self.assertIn("event.landed&&PWValidAirClip(e,land)", native)
+        self.assertIn("event.falling&&!grounded&&PWValidAirClip(e,fall)", native)
+        self.assertIn("now-landStart>650", native)
+        self.assertIn("stanceOffset=reset?desiredStance:ApproachScalar", native)
+        self.assertIn('t.tryfield_s="csi_pw_fall"', dai)
+        self.assertIn('t.tryfield_s="csi_pw_land"', dai)
+        self.assertIn("!PWThirdPerson::AirCSI(t.tcsiindex,g.csi_csimax)", dai)
+        self.assertIn("Append, never insert", dai)
+        self.assertIn('"Fall loop","csi_pw_fall"', hierarchy)
+        self.assertIn('"Landing","csi_pw_land"', hierarchy)
+        self.assertIn('ImGui::BeginChild("##PWPlayerClipRows"', hierarchy)
+
     def test_native_third_person_crouch_uses_controller_feedback(self):
         source = (ROOT / "GameGuru Core/Dark Basic Public Shared/Dark Basic Pro SDK/DarkSDKMore/DarkLUA/DarkLUA.cpp").read_text(encoding="utf-8")
         physics = (ROOT / "GameGuru Core/GameGuru/Source/M-Physics.cpp").read_text(encoding="utf-8")
