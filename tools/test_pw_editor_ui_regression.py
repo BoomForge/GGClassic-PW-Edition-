@@ -60,6 +60,20 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('inline bool OpenEntityScript(HWND owner', lua)
         self.assertIn('if (!CanDiscard()) return false;', lua)
 
+    def test_native_profile_restore_preflight_and_safe_holster(self):
+        native = (ROOT / "GameGuru Core/Dark Basic Public Shared/Dark Basic Pro SDK/DarkSDKMore/DarkLUA/DarkLUA.cpp").read_text(encoding="utf-8")
+        lua = (ROOT / "GameGuru Core/GameGuru/Shaders and Scripts/scriptbank/global.lua").read_text(encoding="utf-8")
+        game = (ROOT / "GameGuru Core/GameGuru/Source/M-Game.cpp").read_text(encoding="utf-8")
+        self.assertIn("ValidInventoryIds(slots,maxWeapon)", native)
+        self.assertIn("RestoredWeapon(requested,slots,maxWeapon,ready)", native)
+        self.assertIn("t.triggerweapononeifexists=0;g.autoloadgun=selected;gun_change();", native)
+        self.assertIn("if(t.gunid!=selected||!attachmentReady)", native)
+        self.assertIn("local planned=pwNativeRestorePlan(saved)", lua)
+        self.assertIn("planned<0 or saved[1]<=0", lua)
+        self.assertIn("if planned==nil then ChangePlayerWeaponID(weaponID) end", lua)
+        self.assertIn("PWNativeRestoreWeaponApply(planned)", lua)
+        self.assertIn("g_PWProfileWeaponFallback", game)
+
     def test_native_lifecycle_preserves_body_checkpoint_and_owned_weapon(self):
         physics = (ROOT / "GameGuru Core/GameGuru/Source/M-Physics.cpp").read_text(encoding="utf-8")
         game = (ROOT / "GameGuru Core/GameGuru/Source/M-Game.cpp").read_text(encoding="utf-8")
