@@ -65,8 +65,9 @@ char processing_filename[MAX_PATH];
 // The preload batch owns exactly one COM reference per non-null entry.
 // Pending input belongs to the main thread until launch, then to the worker;
 // completed output is guarded even when the renderer consumes a texture early.
-static bool PWPreloadPath(const char* filename,char (&resolved)[MAX_PATH])
+template<size_t N> static bool PWPreloadPath(const char* filename,char (&resolved)[N])
 {
+    static_assert(N>=MAX_PATH,"Preload path buffer too small");
     if(!filename||!*filename)return false;
     const DWORD n=GetFullPathNameA(filename,MAX_PATH,resolved,nullptr);
     if(!n||n>=MAX_PATH)return false;
