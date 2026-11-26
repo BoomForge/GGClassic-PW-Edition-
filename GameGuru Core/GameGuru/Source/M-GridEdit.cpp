@@ -23543,6 +23543,14 @@ float ImGuiGetMouseY(void)
 
 #ifdef ENABLEIMGUI
 #include "PW-AssetInspector.h"
+#ifdef ENABLEIMGUI
+static void PWOpenPlayerAnimationPreview(const std::string& profile)
+{
+    PWAssetInspector::Open();
+    PWAssetInspector::Select(profile);
+}
+#endif
+
 
 // Recoverable custom asset removal. Only the FPE registration is moved;
 // DBO/X, scripts, thumbnails and textures may be shared and are never deleted.
