@@ -2213,8 +2213,10 @@ void physics_player_takedamage ( void )
 			{
 				if (  t.playercontrol.thirdperson.enabled == 1 ) 
 				{
-					//  third person character produces blood
-					if (  t.te != -1 ) 
+					// Skip cosmetic blood for missing references; still finish damage.
+                    if (t.te>0&&t.te<=g.entityelementlist&&
+                        PWValidLifecycleAvatar(t.playercontrol.thirdperson.charactere)&&
+                        t.entityelement[t.te].obj>0&&ObjectExist(t.entityelement[t.te].obj)) 
 					{
 						t.ttobj1=t.entityelement[t.playercontrol.thirdperson.charactere].obj;
 						t.decalx1=ObjectPositionX(t.ttobj1);
