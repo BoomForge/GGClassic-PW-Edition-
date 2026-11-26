@@ -4,6 +4,17 @@
 #include "PW-TextureBudget.h"
 #include "PW-TextureStage.h"
 #include "PW-TextureMip.h"
+#include "PW-TextureResidency.h"
+static bool TestResidency(){
+    using namespace PWResidency;
+    if(Pressure(false,true,89,100)||!Pressure(false,true,90,100)||!Pressure(true,true,85,100)||Pressure(true,true,79,100)||Pressure(true,false,100,100))return false;
+    if(Desired(0,3,500,true,true)||Desired(2,3,500,true,true)||Desired(0,3,10000,false,true)||Desired(0,1,10000,true,false)!=1)return false;
+    if(Desired(0,3,850,true,false)!=0||Desired(1,3,850,true,false)!=1||Desired(0,3,1000,true,false)!=1||Desired(0,3,700,true,true)!=1)return false;
+    State s;
+    if(Step(s,3,100)||Step(s,3,1099)||!Step(s,3,1100)||s.current!=1||Step(s,3,1500)||!Step(s,3,2100)||s.current!=2)return false;
+    if(Step(s,0,2200)||Step(s,0,2449)||!Step(s,0,2450)||s.current)return false;
+    return true;
+}
 #include <wrl/client.h>
 #pragma comment(lib,"d3d11.lib")
 static bool TestMip(){
@@ -37,6 +48,10 @@ static bool TestMip(){
     desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=0;desc.MiscFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
     ComPtr<ID3D11Texture2D> readback;
     if(FAILED(device->CreateTexture2D(&desc,nullptr,readback.GetAddressOf())))return false;
+    ctx->SetResourceMinLOD(tex.Get(),1.0f);
+    if(ctx->GetResourceMinLOD(tex.Get())!=1.0f)return false;
+    ctx->SetResourceMinLOD(tex.Get(),0.0f);
+    if(ctx->GetResourceMinLOD(tex.Get())!=0.0f)return false;
     ctx->CopyResource(readback.Get(),tex.Get());
     D3D11_MAPPED_SUBRESOURCE map={};
     if(FAILED(ctx->Map(readback.Get(),0,D3D11_MAP_READ,0,&map)))return false;
@@ -99,7 +114,7 @@ static bool TestBudget(){
 }
 int main()
 {
-    if(!TestBudget()||!TestStage()||!TestMip())return 1;
+    if(!TestBudget()||!TestStage()||!TestMip()||!TestResidency())return 1;
     PWLoadTraceScope testLoad("test.synthetic_load");
     Sleep(3);
     return 0;

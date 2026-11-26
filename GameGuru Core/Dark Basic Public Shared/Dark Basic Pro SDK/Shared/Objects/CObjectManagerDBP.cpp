@@ -9,6 +9,7 @@
 #include "Occlusion\cOcclusion.h"
 #include "CObjectsC.h"
 #include "CGfxC.h"
+#include "CImageC.h"
 #include <algorithm>
 
 #define SupportTechniqueOutLine (1 << 31)
@@ -4167,6 +4168,11 @@ bool CObjectManager::DrawMesh ( sMesh* pMesh, bool bIgnoreOwnMeshVisibility, sOb
 
 			// apply textures for shader
 			#ifdef DX11
+            const bool pwObserve=PWTextureResidencyObserving()&&g_pGlob->dwRenderCameraID<31&&!bSkipDrawNow;
+            bool pwSafeMain=false;float pwDistance=0.0f;
+            if(pwObserve&&g_pGlob->dwRenderCameraID==0&&pObject&&!pObject->bLockedObject&&!pObject->position.iGluedToObj){
+                if(GetCameraInternalData(0)){pwDistance=CalculateObjectDistanceFromCamera(pObject);pwSafeMain=true;}
+            }
 			for ( int i = 0; i < pMesh->dwTextureCount; i++ )
 			{
 				// LB: Slot 5 now used again for MASK textures (part of the ALT ALBEDO MASKED FADER functionality)
@@ -4178,6 +4184,7 @@ bool CObjectManager::DrawMesh ( sMesh* pMesh, bool bIgnoreOwnMeshVisibility, sOb
 					lpTexture = pMesh->pTextures[i].pTexturesRefView;
 				else
 					lpTexture = GetImagePointerView ( pMesh->pTextures[i].iImageID );
+                if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,pwSafeMain&&i==0);
 				m_pImmediateContext->PSSetShaderResources ( i, 1, &lpTexture );
 
 				//PE: Only single texture on shadow maps.
@@ -4229,33 +4236,39 @@ bool CObjectManager::DrawMesh ( sMesh* pMesh, bool bIgnoreOwnMeshVisibility, sOb
 							{
 								// set mesh-part texture (090217 - added support for NSG)
 								ID3D11ShaderResourceView* lpTexture = pMultiMaterial [ dwMaterialIndex ].pTexturesRef;//GetImagePointerView ( pMesh->pTextures[i].iImageID );
-								m_pImmediateContext->PSSetShaderResources ( 0, 1, &lpTexture );
+								if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,pwSafeMain);
+                                m_pImmediateContext->PSSetShaderResources ( 0, 1, &lpTexture );
 								if ( pMultiMaterial [ dwMaterialIndex ].pTexturesRefN ) 
 								{
 									lpTexture = pMultiMaterial [ dwMaterialIndex ].pTexturesRefN;
-									m_pImmediateContext->PSSetShaderResources ( 2, 1, &lpTexture );
+									if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,false);
+                                m_pImmediateContext->PSSetShaderResources ( 2, 1, &lpTexture );
 								}
 								if ( pMultiMaterial [ dwMaterialIndex ].pTexturesRefS )
 								{
 									lpTexture = pMultiMaterial [ dwMaterialIndex ].pTexturesRefS;
-									m_pImmediateContext->PSSetShaderResources ( 3, 1, &lpTexture );
+									if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,false);
+                                m_pImmediateContext->PSSetShaderResources ( 3, 1, &lpTexture );
 								}
 								if ( pMultiMaterial [ dwMaterialIndex ].pTexturesRefG )
 								{
 									lpTexture = pMultiMaterial [ dwMaterialIndex ].pTexturesRefG;
-									m_pImmediateContext->PSSetShaderResources ( 6, 1, &lpTexture );
+									if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,false);
+                                m_pImmediateContext->PSSetShaderResources ( 6, 1, &lpTexture );
 								}
 								if ( pMultiMaterial [ dwMaterialIndex ].pTexturesRefM )
 								{
 									lpTexture = pMultiMaterial [ dwMaterialIndex ].pTexturesRefM;
-									m_pImmediateContext->PSSetShaderResources ( 5, 1, &lpTexture );
+									if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,false);
+                                m_pImmediateContext->PSSetShaderResources ( 5, 1, &lpTexture );
 								}
 							}
 							else
 							{
 								// 150217 - now supports full range of normal mapping in shader
 								ID3D11ShaderResourceView* lpTexture = pMultiMaterial [ dwMaterialIndex ].pTexturesRef;
-								m_pImmediateContext->PSSetShaderResources ( 0, 1, &lpTexture );
+								if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,pwSafeMain);
+                                m_pImmediateContext->PSSetShaderResources ( 0, 1, &lpTexture );
 								GGHANDLE diffuseHandle = pMesh->pVertexShaderEffect->m_pEffect->GetVariableByName( "DiffuseMap" );
 								if ( diffuseHandle ) 
 								{
