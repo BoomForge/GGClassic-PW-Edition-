@@ -230,6 +230,23 @@ int main()
     assert(!ValidCharacterClip(1,21,20));
     const auto crouch=DecideMovement(0,1,0,0,0,true,true,false,true,true);
     assert(crouch.moving&&!crouch.running&&crouch.speed==0.5f);
+    assert(FallCSI(700)==698&&LandCSI(700)==699&&AirCSI(699,700));
+    assert(!AirCSI(700,700));
+    AirMotion air;
+    assert(!air.Step(false,100,0.1f,true).falling);
+    assert(!air.Step(false,60,0.1f).falling); // spawn in air
+    assert(!air.Step(true,50,0.1f).landed);
+    assert(!air.Step(false,48,0.05f).falling);
+    assert(!air.Step(true,47,0.05f).landed); // small step
+    assert(!air.Step(false,60,0.1f).falling);
+    assert(!air.Step(false,80,0.1f).falling); // ascent
+    assert(air.Step(false,65,0.1f).falling);
+    assert(air.Step(true,47,0.1f).landed);
+    assert(!air.Step(true,47,0.1f).landed); // one event per contact
+    assert(!air.Step(true,1000,0.1f,true).landed); // teleport
+    const float stance=ApproachScalar(0,-12,0.016f,12);
+    assert(stance<0&&stance>-12);
+    assert(ApproachScalar(stance,-12,0.016f,12)<stance);
     const Vec forward=ForwardVector(90,0);
     assert(std::fabs(forward.x-1.f)<0.01f&&std::fabs(forward.z)<0.01f);
     const float nearFront=InteractionScore({0,0,0},{0,0,40},0,100);
