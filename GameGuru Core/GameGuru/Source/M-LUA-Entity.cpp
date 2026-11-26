@@ -713,10 +713,12 @@ void entity_lua_checkpoint ( void )
 	waypoint_hide ( );
 	//  record player position
 	t.playercheckpoint.stored=1;
-	t.playercheckpoint.x=CameraPositionX(0);
+	if(!PWThirdPerson::CaptureBodyCheckpoint(t.entityelement[t.e].ry)){
+    t.playercheckpoint.x=CameraPositionX(0);
 	t.playercheckpoint.y=CameraPositionY(0);
 	t.playercheckpoint.z=CameraPositionZ(0);
 	t.playercheckpoint.a=t.entityelement[t.e].ry;
+    }
 	//  record all soundloops at the time
 	#ifdef VRTECH
 	//t.playercheckpoint.soundloopcheckpointcountdown=5;
