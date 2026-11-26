@@ -1830,7 +1830,9 @@ void game_masterroot_gameloop_initcode(int iUseVRTest)
                 if(t.player[t.plrid].health>0)
                     PWThirdPerson::CaptureBodyCheckpoint(CameraAngleY(0));
                 physics_player_refreshcount();
-                PWProfileStatus(g_pwPendingProfile.recovered?"Profile recovered.":"Profile loaded.");
+                if(LuaGetInt("g_PWProfileWeaponFallback")==1)
+                    PWProfileStatus("Profile loaded; unavailable equipped weapon holstered.");
+                else PWProfileStatus(g_pwPendingProfile.recovered?"Profile recovered.":"Profile loaded.");
             } else PWProfileStatus("Profile restore rejected.");
         } else PWProfileStatus("Profile destination mismatch; restore cancelled.");
         g_pwProfilePending=false;g_pwPendingProfile=PWProfile::Snapshot();
