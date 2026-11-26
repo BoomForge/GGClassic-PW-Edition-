@@ -77,6 +77,17 @@ bool BuildPlayerAim(float range,Aim& aim);
 inline bool EquipAllowed(int requested,int maxWeapon,bool owned,bool hudReady) {
     return requested==0||(requested>0&&requested<=maxWeapon&&owned&&hudReady);
 }
+// Validate the whole inventory before applying a saved state. A missing
+// held weapon or HUD is not a reason to grant another weapon.
+inline bool ValidInventoryIds(const int (&slots)[10],int maxWeapon) {
+    for(int id:slots)if(id<0||id>maxWeapon)return false;
+    return true;
+}
+inline int RestoredWeapon(int requested,const int (&slots)[10],int maxWeapon,bool hudReady) {
+    if(requested<=0||requested>maxWeapon||!hudReady)return 0;
+    for(int id:slots)if(id==requested)return requested;
+    return 0;
+}
 struct EquipStage {int entity=0,weapon=0,oldObject=0,oldLimb=0,newObject=0,newLimb=0;bool unchanged=false;};
 bool NativeLifecycleEnabled();
 bool CaptureBodyCheckpoint(float yaw);
