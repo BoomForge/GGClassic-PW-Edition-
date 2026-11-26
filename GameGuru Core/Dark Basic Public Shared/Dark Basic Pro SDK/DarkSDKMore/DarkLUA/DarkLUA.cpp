@@ -7017,7 +7017,11 @@ static int PWNativeRestoreWeaponApply(lua_State* L) {
     const int selected=RestoredWeapon(requested,slots,maxWeapon,ready);
     // Do not let the default slot-one selection overwrite a restored holster.
     t.triggerweapononeifexists=0;g.autoloadgun=selected;gun_change();
-    if(t.gunid!=selected){
+    const int e=t.playercontrol.thirdperson.charactere;
+    const bool attachmentReady=selected==0||(e>0&&e<=g.entityelementlist&&
+        t.entityelement[e].eleprof.hasweapon==selected&&
+        t.entityelement[e].attachmentobj>0&&ObjectExist(t.entityelement[e].attachmentobj));
+    if(t.gunid!=selected||!attachmentReady){
         // The world attachment may be unavailable even when the HUD exists.
         g.autoloadgun=0;gun_change();
         timestampactivity(0,"PW restore: equipped weapon unavailable; holstered");
