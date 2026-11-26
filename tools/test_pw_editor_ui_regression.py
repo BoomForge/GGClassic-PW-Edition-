@@ -60,6 +60,27 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('inline bool OpenEntityScript(HWND owner', lua)
         self.assertIn('if (!CanDiscard()) return false;', lua)
 
+    def test_explicit_player_setup_preserves_classic_map_contract(self):
+        hierarchy = (ROOT / "GameGuru Core/GameGuru/Source/PW-SceneHierarchy.h").read_text(encoding="utf-8")
+        maps = (ROOT / "GameGuru Core/GameGuru/Source/M-MapFile.cpp").read_text(encoding="utf-8")
+        self.assertIn("PWRenderPlayerSetup();", hierarchy)
+        self.assertIn("PWAssignScenePlayer(e, m)", hierarchy)
+        self.assertIn("!PWPlayerSetupCandidate(character)", hierarchy)
+        self.assertIn("!PWPlayerSetupEntity(marker, true)", hierarchy)
+        self.assertIn("_stricmp(script, stock) == 0", hierarchy)
+        self.assertIn("ent.staticflag != 0", hierarchy)
+        self.assertIn("ent.iHasParentIndex != 0", hierarchy)
+        self.assertIn("t.playercontrol.thirdperson.charactere = character;", hierarchy)
+        self.assertIn("t.playercontrol.thirdperson.startmarkere = marker;", hierarchy)
+        self.assertIn("t.playercontrol.thirdperson.enabled = 1;", hierarchy)
+        self.assertIn("avatar.eleprof.aimain_s = t.entityprofile[avatar.bankindex].aimain_s;", hierarchy)
+        self.assertIn("PWCanReturnToFirstPerson()", hierarchy)
+        self.assertIn("t.playercontrol.thirdperson.enabled = 0;", hierarchy)
+        self.assertIn("g.projectmodified = 1;", hierarchy)
+        self.assertIn("WriteLong (  1,t.playercontrol.thirdperson.charactere );", maps)
+        self.assertIn("WriteLong (  1,t.playercontrol.thirdperson.startmarkere );", maps)
+        self.assertIn("WriteLong (  1,t.playercontrol.thirdperson.enabled );", maps)
+
     def test_drag_path_bypasses_legacy_external_sync(self):
         fn = GRID.split('void AddPayLoad(ImGuiPayload* payload, bool addtocursor)')[1].split('bool TutorialNextAction')[0]
         self.assertIn('GetTickCount() - pwAssetStart', fn)
