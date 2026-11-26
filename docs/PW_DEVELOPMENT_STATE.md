@@ -11,6 +11,14 @@
 
 > **OWNER-CORRECTED DELIVERY FACT (22 Nov 2026): The current installed PW Edition ALREADY INCLUDES AN IN-ENGINE UPDATER.** Never describe this updater as a future feature, or default to downloading source ZIPs and running `START_PW_TEST_BUILD.cmd` every update. The editor's update command launches the installed `Pixelwolf-GGC-Updater.exe` source-building helper. Distinguish this **existing, owner-confirmed capability** from whether the **latest revision** has passed actual installation and gameplay acceptance; CI compilation is not a local runtime test.
 
+## M3 — advisory texture memory budgeting (26 November 2026)
+
+M2 head 81d97ffe passed ten workflows but [full x64 run #45789815735](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45789815735) failed C2338 at PWPreloadPath. Fixed by using the actual destination array capacity for GetFullPathNameA, rejecting truncated paths. Full build requires revalidation.
+
+M3 adds PW-TextureBudget.h, a deterministic side-effect-free policy. Opt in with GGCPW_TEXTURE_BUDGET=1 (or the existing Capture Texture Memory CSV toggle); GGCPW_TEXTURE_BUDGET_MB accepts decimal MiB, 0/absent for automatic, invalid input falls back to auto and is logged. Automatic logical target is 70% of current DXGI local budget or dedicated adapter capacity if telemetry is unavailable. Manual targets are capped by known automatic headroom; no capacity and no override means unknown target. DXGI process pressure separately flags usage above 90% of its budget. Percentages are initial heuristics, not measured optimal defaults. Existing M1 CSV schema unchanged; separate %TEMP%\\GGCPW-texturebudget-<pid>.csv reports registered GPU estimate excluding staging, target, excess, DXGI pressure, pinned render/special/legacy bytes and unknown entries.
+
+All current registry resources remain pinned, including ordinary legacy textures whose raw bindings may be borrowed. Future planner orders explicitly unpinned, exclusively owned, reloadable, generation-tagged candidates by priority, oldest use then ID; rejects duplicate IDs and unknown generations. No live candidates admitted and no actual evictions. Isolated C++ tests added to existing load profiler smoke executable. CI and licensed runtime benchmarks pending. M4 requires safe binding/ownership, generation-safe decode/upload and fallback; M5 actual residency. No merge/release, measured VRAM saving or hard memory cap claimed.
+
 ## M2 — targeted resource and cache repairs (26 November 2026)
 
 Source through e0b37c1f. M1 head 1a3a5316 passed all 11 workflows including [full Windows x64 #45786608087](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45786608087); third-person lifecycle M2 head 8d85af96 also passed all 11, including [full Windows x64 #45785840668](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45785840668).

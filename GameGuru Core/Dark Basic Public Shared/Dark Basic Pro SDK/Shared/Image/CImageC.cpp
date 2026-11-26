@@ -29,6 +29,7 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include "PW-TextureBudget.h"
 
 extern "C" HANDLE GG_CreateFile( LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile );
 extern "C" void GG_GetRealPath( char* fullPath, int create );
@@ -67,10 +68,11 @@ char processing_filename[MAX_PATH];
 // completed output is guarded even when the renderer consumes a texture early.
 template<size_t N> static bool PWPreloadPath(const char* filename,char (&resolved)[N])
 {
-    static_assert(N>=MAX_PATH,"Preload path buffer too small");
+    // Use actual destination capacity, not the legacy MAX_PATH macro.
     if(!filename||!*filename)return false;
-    const DWORD n=GetFullPathNameA(filename,MAX_PATH,resolved,nullptr);
-    if(!n||n>=MAX_PATH)return false;
+    const DWORD capacity=static_cast<DWORD>(N);
+    const DWORD n=GetFullPathNameA(filename,capacity,resolved,nullptr);
+    if(!n||n>=capacity)return false;
     for(char* p=resolved;*p;++p)if(*p=='/')*p='\\';
     return true;
 }
@@ -830,12 +832,16 @@ void PWTextureMemorySample(const char* stage,bool periodic)
 {
 #ifdef DX11
     char enabled[8]={};
-    if(GetEnvironmentVariableA("GGCPW_PROFILE_TEXTURES",enabled,sizeof(enabled))!=1||enabled[0]!='1')return;
+    const bool profile=GetEnvironmentVariableA("GGCPW_PROFILE_TEXTURES",enabled,sizeof(enabled))==1&&enabled[0]=='1';
+    char budgetSwitch[8]={};
+    const bool budgetOnly=GetEnvironmentVariableA("GGCPW_TEXTURE_BUDGET",budgetSwitch,sizeof(budgetSwitch))==1&&budgetSwitch[0]=='1';
+    if(!profile&&!budgetOnly)return;
     const ULONGLONG now=GetTickCount64();
     static ULONGLONG lastPeriodic=0,peakBytes=0;
     if(periodic&&now-lastPeriodic<5000)return;
     lastPeriodic=now;
     unsigned long long total=0,staging=0,entries=0,unknown=0,aliases=0;
+    unsigned long long protectedRender=0,protectedOther=0,legacyPinned=0;
     std::set<ID3D11Resource*> seen;
     for(const auto& item:m_List){
         const tagImgData* image=item.second;
@@ -848,19 +854,20 @@ void PWTextureMemorySample(const char* stage,bool periodic)
         UINT width=0,height=1,depth=1,levels=0,array=1,samples=1;
         DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;
         D3D11_USAGE usage=D3D11_USAGE_DEFAULT;
+        UINT bindFlags=0,miscFlags=0;
         if(dimension==D3D11_RESOURCE_DIMENSION_TEXTURE2D){
             D3D11_TEXTURE2D_DESC d={};
             static_cast<ID3D11Texture2D*>(resource)->GetDesc(&d);
             width=d.Width;height=d.Height;levels=d.MipLevels;array=d.ArraySize;
-            samples=d.SampleDesc.Count;format=d.Format;usage=d.Usage;
+            samples=d.SampleDesc.Count;format=d.Format;usage=d.Usage;bindFlags=d.BindFlags;miscFlags=d.MiscFlags;
         }else if(dimension==D3D11_RESOURCE_DIMENSION_TEXTURE3D){
             D3D11_TEXTURE3D_DESC d={};
             static_cast<ID3D11Texture3D*>(resource)->GetDesc(&d);
-            width=d.Width;height=d.Height;depth=d.Depth;levels=d.MipLevels;format=d.Format;usage=d.Usage;
+            width=d.Width;height=d.Height;depth=d.Depth;levels=d.MipLevels;format=d.Format;usage=d.Usage;bindFlags=d.BindFlags;miscFlags=d.MiscFlags;
         }else if(dimension==D3D11_RESOURCE_DIMENSION_TEXTURE1D){
             D3D11_TEXTURE1D_DESC d={};
             static_cast<ID3D11Texture1D*>(resource)->GetDesc(&d);
-            width=d.Width;levels=d.MipLevels;array=d.ArraySize;format=d.Format;usage=d.Usage;
+            width=d.Width;levels=d.MipLevels;array=d.ArraySize;format=d.Format;usage=d.Usage;bindFlags=d.BindFlags;miscFlags=d.MiscFlags;
         }
         if(!width||!levels||!array||!samples||!DirectX::BitsPerPixel(format)){++unknown;continue;}
         unsigned long long bytes=0;
@@ -872,6 +879,9 @@ void PWTextureMemorySample(const char* stage,bool periodic)
         }
         total+=bytes;
         if(usage==D3D11_USAGE_STAGING)staging+=bytes;
+        else if(bindFlags&(D3D11_BIND_RENDER_TARGET|D3D11_BIND_DEPTH_STENCIL|D3D11_BIND_UNORDERED_ACCESS))protectedRender+=bytes;
+        else if((usage!=D3D11_USAGE_DEFAULT&&usage!=D3D11_USAGE_IMMUTABLE)||miscFlags||array>1||samples>1||dimension!=D3D11_RESOURCE_DIMENSION_TEXTURE2D)protectedOther+=bytes;
+        else legacyPinned+=bytes; // legacy raw bindings may be borrowed; all stay pinned
     }
     if(total>peakBytes)peakBytes=total;
     PROCESS_MEMORY_COUNTERS_EX process={};process.cb=sizeof(process);
@@ -881,18 +891,52 @@ void PWTextureMemorySample(const char* stage,bool periodic)
     // not the first enumerated GPU. Unavailable telemetry is flagged.
     DXGI_QUERY_VIDEO_MEMORY_INFO local={},nonlocal={};
     bool localOK=false,nonlocalOK=false;
+    unsigned long long dedicatedBytes=0;
     IDXGIDevice* device=nullptr;IDXGIAdapter* adapter=nullptr;IDXGIAdapter3* adapter3=nullptr;
     if(m_pD3D&&SUCCEEDED(m_pD3D->QueryInterface(__uuidof(IDXGIDevice),reinterpret_cast<void**>(&device)))){
-        if(SUCCEEDED(device->GetAdapter(&adapter))&&adapter&&
-           SUCCEEDED(adapter->QueryInterface(__uuidof(IDXGIAdapter3),reinterpret_cast<void**>(&adapter3)))){
-            localOK=SUCCEEDED(adapter3->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_LOCAL,&local));
-            nonlocalOK=SUCCEEDED(adapter3->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL,&nonlocal));
+        if(SUCCEEDED(device->GetAdapter(&adapter))&&adapter){
+            DXGI_ADAPTER_DESC desc={};
+            if(SUCCEEDED(adapter->GetDesc(&desc)))dedicatedBytes=desc.DedicatedVideoMemory;
+            if(SUCCEEDED(adapter->QueryInterface(__uuidof(IDXGIAdapter3),reinterpret_cast<void**>(&adapter3)))){
+                localOK=SUCCEEDED(adapter3->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_LOCAL,&local));
+                nonlocalOK=SUCCEEDED(adapter3->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL,&nonlocal));
+            }
         }
     }
     if(adapter3)adapter3->Release();if(adapter)adapter->Release();if(device)device->Release();
     char temp[MAX_PATH]={},path[MAX_PATH+80]={};
     const DWORD n=GetTempPathA(MAX_PATH,temp);
     if(!n||n>=MAX_PATH)return;
+    // Preserve M1 CSV schema. Report advisory budget separately.
+    PWTextureBudget::Input input;
+    input.registeredGpu=total-staging;
+    input.localValid=localOK;input.localUsage=local.CurrentUsage;input.localBudget=local.Budget;
+    input.dedicated=dedicatedBytes;
+    char budgetMB[32]={};
+    const DWORD budgetLength=GetEnvironmentVariableA("GGCPW_TEXTURE_BUDGET_MB",budgetMB,sizeof(budgetMB));
+    const bool configOK=budgetLength<sizeof(budgetMB)&&PWTextureBudget::ParseMiB(budgetMB,input.configured);
+    if(!configOK)input.configured=0;
+    const auto budget=PWTextureBudget::Evaluate(input);
+    if(sprintf_s(path,sizeof(path),"%sGGCPW-texturebudget-%lu.csv",temp,(unsigned long)GetCurrentProcessId())>0){
+        HANDLE budgetFile=CreateFileA(path,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+        if(budgetFile!=INVALID_HANDLE_VALUE){
+            LARGE_INTEGER budgetSize={};DWORD budgetWritten=0;
+            if(GetFileSizeEx(budgetFile,&budgetSize)&&budgetSize.QuadPart==0){
+                const char columns[]="tick_ms,pid,stage,config_valid,configured_bytes,target_known,target_bytes,registered_gpu_bytes,pinned_render_bytes,pinned_special_bytes,pinned_legacy_bytes,unknown_entries,logical_excess_bytes,dxgi_local_valid,dxgi_local_usage_bytes,dxgi_local_budget_bytes,dedicated_capacity_bytes,adapter_pressure,adapter_excess_bytes,eligible_bytes\r\n";
+                WriteFile(budgetFile,columns,sizeof(columns)-1,&budgetWritten,nullptr);
+            }
+            char budgetRow[1024]={};
+            const int budgetCount=sprintf_s(budgetRow,sizeof(budgetRow),"%llu,%lu,%s,%d,%llu,%d,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%d,%llu,%llu,%llu,%d,%llu,0\r\n",
+                (unsigned long long)now,(unsigned long)GetCurrentProcessId(),stage,configOK?1:0,
+                (unsigned long long)input.configured,budget.targetKnown?1:0,(unsigned long long)budget.target,
+                (unsigned long long)input.registeredGpu,protectedRender,protectedOther,legacyPinned,unknown,
+                (unsigned long long)budget.logicalExcess,localOK?1:0,(unsigned long long)local.CurrentUsage,
+                (unsigned long long)local.Budget,dedicatedBytes,budget.adapterPressure?1:0,(unsigned long long)budget.adapterExcess);
+            if(budgetCount>0)WriteFile(budgetFile,budgetRow,(DWORD)budgetCount,&budgetWritten,nullptr);
+            CloseHandle(budgetFile);
+        }
+    }
+    if(!profile)return;
     if(sprintf_s(path,sizeof(path),"%sGGCPW-texturetrace-%lu.csv",temp,(unsigned long)GetCurrentProcessId())<=0)return;
     HANDLE file=CreateFileA(path,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
     if(file==INVALID_HANDLE_VALUE)return;

@@ -173,7 +173,7 @@ All four requests require source implementation, standalone tests and actual Win
 
 ## P1 — Texture streaming and bounded memory management (25 November 2026 owner request)
 
-**Status (26 Nov):** M1 audit/diagnostics passed all 11 workflows; M2 targeted preload ownership and stale-cache repairs committed, current CI/runtime acceptance and measured baseline pending. See [PW_TEXTURE_STREAMING.md](PW_TEXTURE_STREAMING.md). Native third-person lifecycle M2 passed all 11 workflows; gameplay acceptance remains outstanding. Actual budgeted residency, streaming and safe eviction not implemented yet.
+**Status (26 Nov):** M1 audit/diagnostics passed all 11 workflows; M2 full compile failed on preload path assertion and has a source correction; M3 advisory memory policy and protected residency planner implemented, current CI/runtime acceptance and measured baseline pending. See [PW_TEXTURE_STREAMING.md](PW_TEXTURE_STREAMING.md). Native third-person lifecycle M2 passed all 11 workflows; gameplay acceptance remains outstanding. Actual budgeted residency, streaming and safe eviction not implemented yet.
 
 - [ ] Audit texture creation, image banks, caches, material references, resource lifetime, CPU copies, VRAM residency and level unload; establish measured peak/steady-state RAM, VRAM, load times and frame-time baselines.
 - [ ] Implement shared texture residency with deduplication, reference-safe eviction and configurable memory budgets; prioritize visible/nearby and critical textures; retain low-resolution mip/fallback textures as needed.
