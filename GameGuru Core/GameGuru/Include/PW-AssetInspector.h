@@ -35,6 +35,7 @@ struct State {
     float zoom = 1.f;
     bool isImage = false;
     bool isModel = false;
+    int animationPreviewFrame = 0;
 };
 inline State& Current() { static State value; return value; }
 inline bool IsFile(const std::string& p) {
@@ -194,7 +195,7 @@ inline void Select(const std::string& file) {
     const DWORD loadStarted=GetTickCount();
     s.loadMilliseconds=0;
     s.selected=file; s.status.clear(); s.modelSource.clear(); s.albedoSource.clear();
-    s.yaw=s.pitch=0.f; s.zoom=1.f;
+    s.yaw=s.pitch=0.f; s.zoom=1.f; s.animationPreviewFrame=0;
     if (!IsFile(file)) { s.status="File is unavailable."; return; }
     if (ImageFile(file)) {
         s.imageId=FreeImageId();
@@ -205,7 +206,9 @@ inline void Select(const std::string& file) {
         if (!s.isImage) s.status="The selected image could not be decoded.";
         return;
     }
-    if (!ModelFile(file)) {
+    // FPE is accepted only through explicit programmatic player-preview selection;
+    // the public file tree still filters out FPE metadata.
+    if (!ModelFile(file) && !Ends(file,".fpe")) {
         s.status="Select an image or a 3D model to see its visual preview.";
         return;
     }
@@ -770,6 +773,21 @@ inline void Draw() {
             if (ImGui::Button("Refresh 3D Preview")) {
                 s.renderRequested=true;
                 s.status.clear();
+            }
+            // Scrub the independent preview object; never touch the live player
+            // or its shared entity bank model. Render only on frame changes.
+            const sObject* animationData = GetObjectData(s.modelId);
+            if (animationData && animationData->pAnimationSet &&
+                animationData->pAnimationSet->pAnimation &&
+                animationData->pAnimationSet->ulLength > 1 &&
+                animationData->pAnimationSet->ulLength <= 1000000) {
+                const int last = static_cast<int>(animationData->pAnimationSet->ulLength);
+                ImGui::TextDisabled("Raw model animation frame preview");
+                if (ImGui::SliderInt("Frame##PWAnimationPreview", &s.animationPreviewFrame, 0, last)) {
+                    StopObject(s.modelId);
+                    SetObjectFrame(s.modelId, static_cast<float>(s.animationPreviewFrame));
+                    s.renderRequested=true;
+                }
             }
             if (ImGui::Button("Insert into Scene"))
                 InsertIntoScene();
