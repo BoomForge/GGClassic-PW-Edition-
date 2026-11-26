@@ -6984,6 +6984,47 @@ int Include(lua_State *L)
 	return 0;
 }
 
+// Native single-player restore preflight. Return nil for the unchanged
+// legacy path, -1 for invalid inventory, or a safe selected weapon ID.
+static int PWNativeRestoreWeaponPlan(lua_State* L) {
+    using namespace PWThirdPerson;
+    if(!NativeLifecycleEnabled()){lua_pushnil(L);return 1;}
+    if(lua_gettop(L)!=11){lua_pushinteger(L,-1);return 1;}
+    int slots[10]={};
+    const int maxWeapon=g.gunmax<ArrayCount(t.gun)?g.gunmax:ArrayCount(t.gun);
+    for(int i=0;i<11;++i){
+        const double v=lua_tonumber(L,i+1);
+        if(!lua_isnumber(L,i+1)||!std::isfinite(v)||v<0||v>2147483647.0||std::floor(v)!=v){
+            lua_pushinteger(L,-1);return 1;
+        }
+        if(i>0)slots[i-1]=static_cast<int>(v);
+    }
+    if(!ValidInventoryIds(slots,maxWeapon)){lua_pushinteger(L,-1);return 1;}
+    for(int id:slots)if(id>0&&Len(t.gun[id].name_s.Get())==0){lua_pushinteger(L,-1);return 1;}
+    const int requested=static_cast<int>(lua_tonumber(L,1));
+    const bool ready=requested>0&&requested<=maxWeapon&&t.gun[requested].obj>0&&ObjectExist(t.gun[requested].obj);
+    lua_pushinteger(L,RestoredWeapon(requested,slots,maxWeapon,ready));return 1;
+}
+static int PWNativeRestoreWeaponApply(lua_State* L) {
+    using namespace PWThirdPerson;
+    if(!NativeLifecycleEnabled()||lua_gettop(L)!=1){lua_pushboolean(L,0);return 1;}
+    const double v=lua_tonumber(L,1);
+    if(!lua_isnumber(L,1)||!std::isfinite(v)||v<0||v>2147483647.0||std::floor(v)!=v){lua_pushboolean(L,0);return 1;}
+    const int requested=static_cast<int>(v);
+    int slots[10]={};for(int i=0;i<10;++i)slots[i]=t.weaponslot[i+1].got;
+    const int maxWeapon=g.gunmax<ArrayCount(t.gun)?g.gunmax:ArrayCount(t.gun);
+    const bool ready=requested>0&&requested<=maxWeapon&&t.gun[requested].obj>0&&ObjectExist(t.gun[requested].obj);
+    const int selected=RestoredWeapon(requested,slots,maxWeapon,ready);
+    // Do not let the default slot-one selection overwrite a restored holster.
+    t.triggerweapononeifexists=0;g.autoloadgun=selected;gun_change();
+    if(t.gunid!=selected){
+        // The world attachment may be unavailable even when the HUD exists.
+        g.autoloadgun=0;gun_change();
+        timestampactivity(0,"PW restore: equipped weapon unavailable; holstered");
+    }
+    t.gunmustreleasefirst=1;
+    lua_pushboolean(L,t.gunid==requested);return 1;
+}
 // Profile save payloads bypass the 256-byte SendMessageS channel.
 static int PWProfileWriteRaw(lua_State* L) {
     size_t len=0;
@@ -6993,6 +7034,7 @@ static int PWProfileWriteRaw(lua_State* L) {
     bool ok=false;
     if(name&&payload&&len<=PWProfile::MaxPayload&&PWProfile::Name(name)&&
         t.game.gameisexe==1&&t.game.runasmultiplayer==0&&t.game.gameloop==1&&t.game.levelendingcycle==0&&
+        (!PWThirdPerson::NativeLifecycleEnabled()||t.player[t.plrid].health>0)&&
         PWProfile::CurrentLevel(g.mysystem.mapbankAbs_s.Get(),g.projectfilename_s.Get(),level)){
         PWProfile::Snapshot snapshot;
         snapshot.level=level.relative;snapshot.payload.assign(payload,len);
@@ -7353,6 +7395,8 @@ void addFunctions()
     lua_register(lua,"PWNativeThirdPersonMove",PWNativeThirdPersonMove);
     lua_register(lua,"PWNativeThirdPersonAnimate",PWNativeThirdPersonAnimate);
     lua_register(lua,"PWNativeThirdPersonUpdate",PWNativeThirdPersonUpdate);
+    lua_register(lua,"PWNativeRestoreWeaponPlan",PWNativeRestoreWeaponPlan);
+    lua_register(lua,"PWNativeRestoreWeaponApply",PWNativeRestoreWeaponApply);
     lua_register(lua,"PWProfileWriteRaw",PWProfileWriteRaw);
     lua_register(lua,"PWProfileListRaw",PWProfileListRaw);
 	lua_register(lua, "SendMessage", LuaSendMessage);
