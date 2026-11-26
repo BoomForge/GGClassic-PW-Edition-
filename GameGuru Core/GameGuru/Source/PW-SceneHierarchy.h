@@ -476,6 +476,219 @@ static void PWReturnToFirstPerson()
     gridedit_changemodifiedflag();
 }
 
+// Asset-specific CSI authoring. A new sibling FPE uses Classic's own parser;
+// the original profile, model, other instances, and current map are untouched.
+struct PWPlayerClipRow { const char* label; const char* key; int slot; int first; int last; bool edit; };
+static int PWPlayerClipLimit(int bank)
+{
+    if (bank <= 0 || bank > g.entidmaster) return 0;
+    const int object = g.entitybankoffset + bank;
+    if (!ObjectExist(object)) return 0;
+    const sObject* data = GetObjectData(object);
+    if (!data || !data->pAnimationSet || !data->pAnimationSet->pAnimation) return 0;
+    const auto length = data->pAnimationSet->ulLength;
+    return length > 1 && length <= 1000000 ? static_cast<int>(length) : 0;
+}
+
+static std::string PWClipTrim(const std::string& s)
+{
+    const size_t begin = s.find_first_not_of(" \t\r\n");
+    if (begin == std::string::npos) return "";
+    return s.substr(begin, s.find_last_not_of(" \t\r\n") - begin + 1);
+}
+static std::string PWClipLower(std::string s)
+{
+    for (char& ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    return s;
+}
+static std::string PWClipKey(const std::string& line)
+{
+    const size_t eq = line.find('=');
+    if (eq == std::string::npos) return "";
+    return PWClipLower(PWClipTrim(line.substr(0, eq)));
+}
+static bool PWClipSafeFile(const std::string& path, bool directory)
+{
+    const DWORD attr = GetFileAttributesA(path.c_str());
+    return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_REPARSE_POINT) &&
+        ((attr & FILE_ATTRIBUTE_DIRECTORY) != 0) == directory;
+}
+static std::string PWPlayerProfilePath(int bank)
+{
+    if (bank <= 0 || bank > g.entidmaster) return "";
+    std::string rel = t.entitybank_s[bank].Get();
+    std::replace(rel.begin(), rel.end(), '/', '\\');
+    if (PWClipLower(rel).compare(0, 11, "entitybank\\") == 0) rel.erase(0, 11);
+    if (PWClipLower(rel).compare(0, 5, "user\\") != 0 || rel.find("..") != std::string::npos ||
+        rel.find(':') != std::string::npos || rel.size() < 9 ||
+        PWClipLower(rel.substr(rel.size()-4)) != ".fpe") return "";
+    std::string path = std::string(g.fpscrootdir_s.Get()) + "\\Files\\entitybank";
+    if (!PWClipSafeFile(path, true)) return "";
+    size_t at = 0;
+    for (;;) {
+        const size_t slash = rel.find('\\', at);
+        const std::string part = rel.substr(at, slash == std::string::npos ? slash : slash-at);
+        if (part.empty() || part == "." || part.back() == '.' || part.back() == ' ') return "";
+        path += "\\" + part;
+        if (slash == std::string::npos) return PWClipSafeFile(path, false) ? path : "";
+        if (!PWClipSafeFile(path, true)) return "";
+        at = slash + 1;
+    }
+}
+static bool PWPlayerClipValid(const PWPlayerClipRow& row, int limit)
+{
+    // Classic uses zero as the unassigned sentinel, and 100..101 as a
+    // special idle fallback; avoid authoring either as a real CSI clip.
+    return row.first > 0 && row.last > row.first && row.last <= limit &&
+        !(row.first == 100 && row.last == 101);
+}
+static bool PWWritePlayerClipVariant(const std::string& source,
+    const std::vector<PWPlayerClipRow>& rows, int limit, std::string& status)
+{
+    std::ifstream in(source, std::ios::binary | std::ios::ate);
+    if (!in || in.tellg() <= 0 || in.tellg() > 1024*1024) {
+        status = "Cannot read the source FPE (or it exceeds 1 MB)."; return false;
+    }
+    in.seekg(0);
+    std::vector<std::string> lines;
+    std::string line;
+    bool haveAnimMax = false, haveModel = false, any = false;
+    for (const auto& row : rows) {
+        if (!row.edit) continue;
+        any = true;
+        if (!PWPlayerClipValid(row, limit)) { status = "Invalid enabled frame range."; return false; }
+    }
+    if (!any) { status = "Enable at least one mapping."; return false; }
+    while (std::getline(in, line)) {
+        if (line.find('\0') != std::string::npos) { status = "Unsupported FPE encoding."; return false; }
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        const std::string key = PWClipKey(line);
+        if (key == "animmax") haveAnimMax = true;
+        if (key == "model" && !PWClipTrim(line.substr(line.find('=')+1)).empty()) haveModel = true;
+        lines.push_back(line);
+    }
+    if (in.bad() || !haveAnimMax || !haveModel) {
+        status = "Source must contain explicit model and animmax entries."; return false;
+    }
+    const std::string base = source.substr(0, source.size()-4);
+    for (int index=1; index<=99; ++index) {
+        const std::string suffix = "_pw_player" + (index == 1 ? std::string("") : "_" + std::to_string(index));
+        const std::string target = base + suffix + ".fpe";
+        // Keep source-relative model/textures/scripts in the same directory.
+        // The asset description also distinguishes the new profile in lists.
+        const std::string desc = target.substr(target.find_last_of("\\")+1);
+        std::ostringstream out;
+        bool inserted = false, descWritten = false;
+        for (const auto& original : lines) {
+            const std::string key = PWClipKey(original);
+            bool replaced = false;
+            for (const auto& row : rows) if (row.edit && key == row.key) { replaced = true; break; }
+            if (replaced) continue;
+            if (key == "desc") {
+                if (!descWritten) out << "desc = " << desc.substr(0,desc.size()-4) << "\r\n";
+                descWritten = true; continue;
+            }
+            out << original << "\r\n";
+            // CSI parsing begins only after animmax. Classic uses the first
+            // occurrence, so remove old enabled keys and insert here.
+            if (!inserted && key == "animmax") {
+                for (const auto& row : rows) if (row.edit)
+                    out << row.key << " = " << row.first << "," << row.last << "\r\n";
+                inserted = true;
+            }
+        }
+        if (!descWritten) out << "desc = " << desc.substr(0,desc.size()-4) << "\r\n";
+        const std::string data = out.str();
+        HANDLE file = CreateFileA(target.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+            FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) {
+            if (GetLastError() == ERROR_FILE_EXISTS || GetLastError() == ERROR_ALREADY_EXISTS) continue;
+            status = "Could not create a new custom profile."; return false;
+        }
+        DWORD written = 0;
+        const bool ok = WriteFile(file, data.data(), static_cast<DWORD>(data.size()), &written, nullptr) &&
+            written == data.size() && FlushFileBuffers(file);
+        CloseHandle(file);
+        if (!ok) { DeleteFileA(target.c_str()); status = "Profile write failed."; return false; }
+        status = "Created " + desc + ". Refresh the asset browser (or reopen the editor), place the new variant and assign it as player.";
+        return true;
+    }
+    status = "No free variant filename."; return false;
+}
+
+// Implemented next to the existing independent Asset Inspector.
+static void PWOpenPlayerAnimationPreview(const std::string& profile);
+static void PWRenderPlayerClipEditor(int e)
+{
+    if (!PWPlayerSetupEntity(e, false)) return;
+    const int bank = t.entityelement[e].bankindex;
+    const int limit = PWPlayerClipLimit(bank);
+    const std::string source = PWPlayerProfilePath(bank);
+    if (source.empty() || limit < 2) {
+        ImGui::TextDisabled("Animation authoring requires a custom animated FPE in entitybank/user.");
+        return;
+    }
+    if (t.entityprofile[bank].ischaractercreator != 0 || t.entityprofile[bank].appendanimmax > 0) {
+        ImGui::TextDisabled("Generated rigs and externally appended animation sets need a separate authoring path.");
+        return;
+    }
+    static std::vector<PWPlayerClipRow> rows;
+    static std::string status, openedSource;
+    static int openedBank = 0;
+    if (ImGui::SmallButton("Animation mapping...")) {
+        rows = {
+            {"Unarmed idle A","csi_unarmed1",g.csi_unarmedANIM0,0,0,false},
+            {"Unarmed idle B","csi_unarmed2",g.csi_unarmedANIM1,0,0,false},
+            {"Unarmed walk","csi_unarmedmovefore",g.csi_unarmedmoveforeANIM,0,0,false},
+            {"Unarmed run","csi_unarmedmoverun",g.csi_unarmedmoverunANIM,0,0,false},
+            {"Unarmed death","csi_unarmeddeath",g.csi_unarmeddeathANIM,0,0,false},
+            {"Armed idle / aim","csi_stoodnormal",t.csi_stoodnormalANIM[1],0,0,false},
+            {"Armed walk","csi_stoodmovefore",t.csi_stoodmoveforeANIM[1],0,0,false},
+            {"Armed backpedal","csi_stoodmoveback",t.csi_stoodmovebackANIM[1],0,0,false},
+            {"Armed left","csi_stoodmoveleft",t.csi_stoodmoveleftANIM[1],0,0,false},
+            {"Armed right","csi_stoodmoveright",t.csi_stoodmoverightANIM[1],0,0,false},
+            {"Armed run","csi_stoodmoverun",t.csi_stoodmoverunANIM[1],0,0,false},
+            {"Jump / vault","csi_stoodvault",t.csi_stoodvaultANIM[1],0,0,false},
+            {"Punch","csi_stoodpunch",t.csi_stoodpunchANIM[1],0,0,false},
+            {"Kick","csi_stoodkick",t.csi_stoodkickANIM[1],0,0,false},
+            {"Reload","csi_stoodreload",t.csi_stoodreloadANIM[1],0,0,false}
+        };
+        const int offset = t.entityprofile[bank].startofaianim;
+        for (auto& row : rows) {
+            if (offset < 0 || row.slot < 0 || offset > g.animmax || row.slot > g.animmax-offset) continue;
+            row.first = t.entityanim[bank][offset+row.slot].start;
+            row.last = t.entityanim[bank][offset+row.slot].finish;
+        }
+        openedBank = bank; openedSource = source; status.clear();
+        ImGui::OpenPopup("PWPlayerAnimationMap");
+    }
+    if (ImGui::BeginPopupModal("PWPlayerAnimationMap", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        if (openedBank != bank || openedSource != source) {
+            ImGui::TextUnformatted("Player asset changed. Close and reopen mapping.");
+        } else {
+            ImGui::Text("Native animation extent: %d", limit);
+            ImGui::TextWrapped("Enable only the ranges to replace. Base weapon style only; the original FPE is never edited.");
+            for (size_t i=0;i<rows.size();++i) {
+                auto& row=rows[i]; ImGui::PushID(static_cast<int>(i));
+                ImGui::Checkbox("##replace",&row.edit); ImGui::SameLine();
+                ImGui::TextUnformatted(row.label); ImGui::SameLine(175);
+                ImGui::PushItemWidth(85); ImGui::InputInt("##first",&row.first,0); ImGui::SameLine();
+                ImGui::InputInt("##last",&row.last,0); ImGui::PopItemWidth();
+                if (row.edit && !PWPlayerClipValid(row,limit)) {
+                    ImGui::SameLine(); ImGui::TextUnformatted("Invalid");
+                }
+                ImGui::PopID();
+            }
+            if (ImGui::Button("Save new character profile"))
+                PWWritePlayerClipVariant(source, rows, limit, status);
+            if (!status.empty()) ImGui::TextWrapped("%s",status.c_str());
+        }
+        if (ImGui::Button("Close")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    if (ImGui::SmallButton("Preview animation frames...")) PWOpenPlayerAnimationPreview(source);
+}
+
 static void PWRenderPlayerSetup()
 {
     if (!ImGui::CollapsingHeader("Player Setup")) return;
@@ -489,7 +702,8 @@ static void PWRenderPlayerSetup()
         {
             ImGui::TextWrapped("Character: %s (#%d)", t.entityelement[e].eleprof.name_s.Get(), e);
             ImGui::TextWrapped("Start: %s (#%d)", t.entityelement[marker].eleprof.name_s.Get(), marker);
-            ImGui::TextWrapped("Uses the character's existing Classic animation set. Camera settings are in the start marker properties.");
+            ImGui::TextWrapped("Camera settings are in the start marker properties.");
+            PWRenderPlayerClipEditor(e);
         }
         else ImGui::TextWrapped("Player reference is missing or not eligible for this setup tool. Inspect the existing map before changing it.");
         if (PWCanReturnToFirstPerson() && ImGui::SmallButton("Return to first person..."))
