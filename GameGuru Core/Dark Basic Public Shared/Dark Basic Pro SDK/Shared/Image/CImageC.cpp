@@ -27,6 +27,8 @@
 #include "CObjectsC.h"
 #include "DarkLUA.h"
 #include <thread>
+#include <atomic>
+#include <mutex>
 
 extern "C" HANDLE GG_CreateFile( LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile );
 extern "C" void GG_GetRealPath( char* fullPath, int create );
@@ -45,8 +47,9 @@ extern LPGGDEVICE				m_pD3D;
 
 // globals for single thread (THREAD-SAFE)
 std::thread* g_pT1 = NULL;
-bool g_bT1 = false;
-bool g_bRequestCleanInteruptionT1 = false;
+std::atomic<bool> g_bT1(false);
+std::atomic<bool> g_bRequestCleanInteruptionT1(false);
+static std::mutex pwPreloadOutputMutex;
 std::vector<sPreLoadedTexture> g_image_list;
 std::vector<sPreLoadedTexture> g_image_outputv;
 int iResizeLoadImageX = 0, iResizeLoadImageY = 0;
@@ -59,138 +62,143 @@ void image_setlegacyimageloading(bool bEnable) { g_bAllowLegacyImageLoadingForUI
 char processing_filename[MAX_PATH];
 
 
-// function to execute thread code
-void image_thread_function(const std::vector<sPreLoadedTexture> &v)
+// The preload batch owns exactly one COM reference per non-null entry.
+// Pending input belongs to the main thread until launch, then to the worker;
+// completed output is guarded even when the renderer consumes a texture early.
+static bool PWPreloadPath(const char* filename,char (&resolved)[MAX_PATH])
 {
-	// in this thread, load each DX11 texture in turn
-	g_bT1 = true;
-	g_image_outputv.clear();
-	for ( int n = 0; n < v.size(); n++ )
-	{
-		// Request ownership of the critical section.
-		EnterCriticalSection(&CriticalSection); 
-		sPreLoadedTexture item = v[n];
-		if ( item.pTexture == NULL ) item.pTexture = PreloadThreadSafeImage ( item.pFilename , item.iMipMaps );
-		g_image_outputv.push_back(item);
-		if (g_bRequestCleanInteruptionT1 == true)
-		{
-			// can interupt this load thread if required
-			LeaveCriticalSection(&CriticalSection);
-			break;
-		}
-		// Release ownership of the critical section.
-		LeaveCriticalSection(&CriticalSection);
-	}
-	g_bT1 = false;
+    if(!filename||!*filename)return false;
+    const DWORD n=GetFullPathNameA(filename,MAX_PATH,resolved,nullptr);
+    if(!n||n>=MAX_PATH)return false;
+    for(char* p=resolved;*p;++p)if(*p=='/')*p='\\';
+    return true;
 }
-
-void image_preload_files_start ( void )
+static void PWReleasePreload(sPreLoadedTexture& item)
 {
-	// Initialize the critical section one time only.
-	if (g_bCriticalSectionCreated == false)
-	{
-		if (!InitializeCriticalSectionAndSpinCount(&CriticalSection, 0x00000400) ) 
-			return;
-
-		// we can use this to ensure only one thing done at once
-		g_bCriticalSectionCreated = true;
-	}
-
-	// ensure previous thread has ended
-	image_preload_files_strictwaittoend();
-
-	// get number of CPUs we can run threads on, in case we need it
-	unsigned int iCPUCores = std::thread::hardware_concurrency();
-	char CPUnium[32];
-	sprintf ( CPUnium, "%d", iCPUCores );
-
-	// load texture file into member well ahead of needing it (see below for getting the preloaded textures)
-	g_image_list.clear();
+    if(item.pTexture){item.pTexture->Release();item.pTexture=nullptr;}
 }
-
-void image_preload_files_add ( LPSTR pFilename , int iMipMaps)
+static bool PWPreloadMatch(const sPreLoadedTexture& a,const sPreLoadedTexture& b)
 {
-	//Moved here so we can check if its already in the list.
-	char *cUseFilename;
-	char cResolvePath[MAX_PATH];
-	//Resolve path , if some function later in code change current dir.
-	if (GetFullPathNameA(pFilename, MAX_PATH, &cResolvePath[0], NULL) > 0) {
-		cUseFilename = &cResolvePath[0];
-	}
-	else {
-		cUseFilename = pFilename;
-	}
-
-	// check to make sure we don't add something we already have in the list
-	for ( int n = 0; n < g_image_list.size(); n++ )
-		if ( stricmp ( g_image_list[n].pFilename, cUseFilename) == NULL )
-			return;
-
-	// add item to list of work
-	sPreLoadedTexture item;
-	item.pTexture = NULL;
-	item.iMipMaps = iMipMaps;
-	strcpy(item.pFilename, cUseFilename);
-	g_image_list.push_back(item);
+    return a.iMipMaps==b.iMipMaps&&_stricmp(a.pFilename,b.pFilename)==0;
 }
-
-void image_preload_files_finish ( void )
+void image_thread_function()
 {
-	// before send list to thread, load up list with previous preloaded file 'data' still in memory
-	for ( int n = 0; n < g_image_list.size(); n++ )
-	{
-		if ( n < g_image_outputv.size() )
-		{
-			if ( stricmp ( g_image_list[n].pFilename, g_image_outputv[n].pFilename ) == NULL )
-			{
-				// this ensures we avoid reloading something we 'might need' that we have already preloaded previously
-				g_image_list[n].pTexture = g_image_outputv[n].pTexture;
-			}
-		}
-	}
-
-	// start preloading
-	g_bRequestCleanInteruptionT1 = false; //Start fresh.
-	g_pT1 = new std::thread(image_thread_function, std::ref(g_image_list));
+    for(auto& pending:g_image_list){
+        if(g_bRequestCleanInteruptionT1.load())break;
+        sPreLoadedTexture item=pending;
+        pending.pTexture=nullptr; // move ownership, never duplicate a reference
+        if(!item.pTexture){
+            EnterCriticalSection(&CriticalSection);
+            item.pTexture=PreloadThreadSafeImage(item.pFilename,item.iMipMaps);
+            LeaveCriticalSection(&CriticalSection);
+        }
+        {
+            std::lock_guard<std::mutex> lock(pwPreloadOutputMutex);
+            g_image_outputv.push_back(item);
+        }
+    }
+    // Cancelled or unmatched transferred input must not leak.
+    for(auto& pending:g_image_list)PWReleasePreload(pending);
+    g_bT1.store(false);
 }
-
-void image_preload_files_strictwaittoend ( void )
+void image_preload_files_start(void)
 {
-	// wait for all work to finish
-	if ( g_pT1 )
-	{
-		g_pT1->join();
-		delete g_pT1;
-		g_pT1 = NULL;
-		g_bRequestCleanInteruptionT1 = false;
-	}
+    image_preload_files_strictwaittoend();
+    if(!g_bCriticalSectionCreated){
+        if(!InitializeCriticalSectionAndSpinCount(&CriticalSection,0x00000400))return;
+        g_bCriticalSectionCreated=true;
+    }
+    for(auto& pending:g_image_list)PWReleasePreload(pending);
+    g_image_list.clear();
 }
-
-void image_preload_files_wait ( void )
+void image_preload_files_add(LPSTR pFilename,int iMipMaps)
 {
-	g_bRequestCleanInteruptionT1 = true;
-	image_preload_files_strictwaittoend();
+    if(!g_bCriticalSectionCreated||g_pT1)return;
+    sPreLoadedTexture item={};
+    if(!PWPreloadPath(pFilename,item.pFilename))return;
+    item.iMipMaps=iMipMaps;
+    for(const auto& pending:g_image_list)if(PWPreloadMatch(pending,item))return;
+    g_image_list.push_back(item);
 }
-
-bool image_preload_files_in_progress ( void )
+void image_preload_files_finish(void)
 {
-	// wait for all work to finish
-	return g_bT1;
+    image_preload_files_strictwaittoend();
+    if(!g_bCriticalSectionCreated)return;
+    {
+        std::lock_guard<std::mutex> lock(pwPreloadOutputMutex);
+        // Reuse by full path AND requested mip policy, regardless of ordering.
+        // Unmatched completed allocations are released, not silently cleared.
+        for(auto& pending:g_image_list){
+            if(pending.pTexture)continue;
+            for(auto& complete:g_image_outputv){
+                if(complete.pTexture&&PWPreloadMatch(pending,complete)){
+                    pending.pTexture=complete.pTexture;complete.pTexture=nullptr;break;
+                }
+            }
+        }
+        for(auto& complete:g_image_outputv)PWReleasePreload(complete);
+        g_image_outputv.clear();
+    }
+    g_bRequestCleanInteruptionT1.store(false);
+    g_bT1.store(true);
+    try{g_pT1=new std::thread(image_thread_function);}
+    catch(...){
+        g_bT1.store(false);
+        for(auto& pending:g_image_list)PWReleasePreload(pending);
+    }
 }
-
-void image_preload_files_reset ( void )
+void image_preload_files_strictwaittoend(void)
 {
-	// clear finished list for next batch of work
-	for ( int n = 0; n < g_image_outputv.size(); n++ )
-	{
-		if ( g_image_outputv[n].pTexture ) 
-		{
-			g_image_outputv[n].pTexture->Release();
-			g_image_outputv[n].pTexture = NULL;
-		}
-	}
-	g_image_outputv.clear();
+    if(g_pT1){g_pT1->join();delete g_pT1;g_pT1=nullptr;}
+    g_bRequestCleanInteruptionT1.store(false);
+    g_bT1.store(false);
 }
+void image_preload_files_wait(void)
+{
+    g_bRequestCleanInteruptionT1.store(true);
+    image_preload_files_strictwaittoend();
+}
+bool image_preload_files_in_progress(void){return g_bT1.load();}
+void image_preload_files_reset(void)
+{
+    image_preload_files_wait();
+    for(auto& pending:g_image_list)PWReleasePreload(pending);
+    g_image_list.clear();
+    std::lock_guard<std::mutex> lock(pwPreloadOutputMutex);
+    for(auto& complete:g_image_outputv)PWReleasePreload(complete);
+    g_image_outputv.clear();
+}
+#ifdef DX11
+static ID3D11Resource* PWTakePreloadedTexture(const char* filename,int mipPolicy,int divide,
+    const GGIMAGE_INFO& info)
+{
+    // Only reuse a complete compatible 2D allocation. Reduced-size,
+    // cube/volume, converted and unsupported resources use the old loader.
+    if(divide>1)return nullptr;
+    char full[MAX_PATH]={};
+    if(!PWPreloadPath(filename,full))return nullptr;
+    std::lock_guard<std::mutex> lock(pwPreloadOutputMutex);
+    for(auto& complete:g_image_outputv){
+        if(!complete.pTexture||complete.iMipMaps!=mipPolicy||
+            _stricmp(complete.pFilename,full)!=0)continue;
+        D3D11_RESOURCE_DIMENSION dim=D3D11_RESOURCE_DIMENSION_UNKNOWN;
+        complete.pTexture->GetType(&dim);
+        if(dim!=D3D11_RESOURCE_DIMENSION_TEXTURE2D)continue;
+        D3D11_TEXTURE2D_DESC d={};
+        static_cast<ID3D11Texture2D*>(complete.pTexture)->GetDesc(&d);
+        if(d.Width!=info.Width||d.Height!=info.Height||d.ArraySize!=1||
+            d.SampleDesc.Count!=1||d.Format!=info.Format||
+            (mipPolicy>0&&d.MipLevels!=static_cast<UINT>(mipPolicy)))continue;
+        // For ordinary non-DDS images the normal loader converts to BGRA.
+        const size_t length=strlen(full);
+        if((length<4||_stricmp(full+length-4,".dds")!=0)&&d.Format!=DXGI_FORMAT_B8G8R8A8_UNORM)continue;
+        ID3D11Resource* resource=complete.pTexture;
+        complete.pTexture=nullptr;
+        return resource;
+    }
+    return nullptr; // never stall on an unfinished preload
+}
+#endif
 
 namespace
 {
@@ -908,6 +916,8 @@ void PWTextureMemorySample(const char* stage,bool periodic)
 
 DARKSDK void ImageDestructorD3D ( void )
 {
+    // No preloader may retain allocations or use the device during teardown.
+    image_preload_files_reset();
     m_CurrentId = 0;
     m_imgptr = NULL;
 
@@ -1467,30 +1477,9 @@ DARKSDK LPGGTEXTURE GetTextureCore ( char* szFilename, GGIMAGE_INFO* info, int i
 
 		// just as about to load texture file, check if we already have done in preload thread
 
-		ID3D11Resource* pPreCreatedTexture = NULL;
-		for ( int n = 0; n < g_image_outputv.size(); n++ )
-		{
-			int iSearchStrLen = strlen(szFilename);
-			if (!(iSearchStrLen > strlen(g_image_outputv[n].pFilename))) { //PE: Got exception iSearchStrLen > strlen(g_image_outputv[n].pFilename)
-				if (strnicmp(g_image_outputv[n].pFilename + strlen(g_image_outputv[n].pFilename) - iSearchStrLen, szFilename, iSearchStrLen) == NULL)
-				{
-					if (g_image_outputv[n].pTexture == NULL) {
-						char mdebug[512];
-						sprintf(mdebug, "image_preload_files_wait(): %s ", szFilename);
-						#ifndef NOSTEAMORVIDEO
-						timestampactivity(0, mdebug);
-						#endif
-						image_preload_files_wait();
-					}
-					if (g_image_outputv[n].pTexture)
-					{
-						pPreCreatedTexture = g_image_outputv[n].pTexture;
-						g_image_outputv[n].pTexture = NULL;
-						break;
-					}
-				}
-			}
-		}
+		ID3D11Resource* pPreCreatedTexture = nullptr;
+        if(!(g_iImageBlockMode==1&&pFileInMemoryData))
+            pPreCreatedTexture=PWTakePreloadedTexture(szFilename,m_iMipMapNum,iDivideTextureSize,*info);
 
 		// not unknown, use file format
 		GGFORMAT newImageFormat = (*info).Format;
@@ -1728,6 +1717,9 @@ DARKSDK LPGGTEXTURE GetTextureCore ( char* szFilename, GGIMAGE_INFO* info, int i
 			}
 		}
 
+		// A detached preload which was not consumed by the chosen decode path
+        // still owns its original COM reference.
+        if(pPreCreatedTexture){pPreCreatedTexture->Release();pPreCreatedTexture=nullptr;}
 		// 010205 - default mem can run out
 		if (lpTexture == NULL) {
 			return NULL;
@@ -1929,6 +1921,7 @@ DARKSDK ID3D11Resource* PreloadThreadSafeImage(LPSTR szFilename, int iMipMaps)
 
 	// Load in image info from file (thread safe)
 	HRESULT hRes = D3DX11GetImageInfoFromFile(szRealFilename, NULL, &info, NULL);
+    if(FAILED(hRes))return nullptr;
 
 	// can we call a DX11 create texture function from a thread (DX11 supposed to be threadsafe and thread pump undocumented!!)
 	ID3D11Resource* pPreCreatedTexture = NULL;
@@ -1942,10 +1935,9 @@ DARKSDK ID3D11Resource* PreloadThreadSafeImage(LPSTR szFilename, int iMipMaps)
 	hRes = D3DX11CreateTextureFromFile(m_pD3D, szRealFilename, &loadinfo, NULL, &pPreCreatedTexture, NULL);
 
 	// return
-	if (hRes == 0)
-		return pPreCreatedTexture;
-	else
-		return NULL;
+	if(SUCCEEDED(hRes))return pPreCreatedTexture;
+    if(pPreCreatedTexture)pPreCreatedTexture->Release();
+    return nullptr;
 }
 
 DARKSDK void SetImageAutoMipMap ( int iGenerateMipMaps )
@@ -2183,7 +2175,7 @@ DARKSDK int LoadImageCoreInternal ( char* szFilename, int iDivideTextureSize )
 		//PE: Check if we have it in the internal list.
 		#ifndef NOSTEAMORVIDEO
 		int tmpid = findinternaltexture(szFilename);
-		if (tmpid > 0) {
+		if (tmpid > 0 && ImageExist(tmpid)) {
 			//char mdebug[2048];
 			//sprintf(mdebug, "findinternaltexture: %s, return: %d ", szFilename, tmpid );
 			//timestampactivity(0, mdebug);
