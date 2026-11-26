@@ -552,10 +552,11 @@ static bool PWWritePlayerClipVariant(const std::string& source,
     in.seekg(0);
     std::vector<std::string> lines;
     std::string line;
-    bool haveAnimMax = false, haveModel = false, any = false;
+    bool haveAnimMax = false, haveModel = false, any = false, mappedVault = false;
     for (const auto& row : rows) {
         if (!row.edit) continue;
         any = true;
+        if (std::string(row.key) == "csi_stoodvault") mappedVault = true;
         if (!PWPlayerClipValid(row, limit)) { status = "Invalid enabled frame range."; return false; }
     }
     if (!any) { status = "Enable at least one mapping."; return false; }
@@ -583,7 +584,7 @@ static bool PWWritePlayerClipVariant(const std::string& source,
             const std::string key = PWClipKey(original);
             bool replaced = false;
             for (const auto& row : rows) if (row.edit && key == row.key) { replaced = true; break; }
-            if (replaced) continue;
+            if (replaced || (mappedVault && (key == "jumpvaulttrim" || key == "jumphold"))) continue;
             if (key == "desc") {
                 if (!descWritten) out << "desc = " << desc.substr(0,desc.size()-4) << "\r\n";
                 descWritten = true; continue;
@@ -592,6 +593,9 @@ static bool PWWritePlayerClipVariant(const std::string& source,
             // CSI parsing begins only after animmax. Classic uses the first
             // occurrence, so remove old enabled keys and insert here.
             if (!inserted && key == "animmax") {
+                // Exact authored jump range: disable Classic\'s automatic 10-frame trim;
+                // clear stale jump hold so native code derives one within the new clip.
+                if (mappedVault) out << "jumpvaulttrim = 0\r\njumphold = 0\r\n";
                 for (const auto& row : rows) if (row.edit)
                     out << row.key << " = " << row.first << "," << row.last << "\r\n";
                 inserted = true;
