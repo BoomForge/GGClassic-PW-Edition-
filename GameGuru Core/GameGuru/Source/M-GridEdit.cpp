@@ -2577,6 +2577,14 @@ void mapeditorexecutable_loop(void)
 					SetEnvironmentVariableA("GGCPW_PROFILE_LOAD", tracingNow ? "0" : "1");
 				if (ImGui::IsItemHovered())
 					ImGui::SetTooltip("Log each future project/Test Level phase to %%TEMP%%\\GGCPW-loadtrace-<pid>.csv");
+				char textureTrace[8]={};
+                const bool textureTraceNow=GetEnvironmentVariableA("GGCPW_PROFILE_TEXTURES",textureTrace,sizeof(textureTrace))==1&&textureTrace[0]=='1';
+                if(ImGui::MenuItem("Capture Texture Memory (CSV)",NULL,textureTraceNow)){
+                    SetEnvironmentVariableA("GGCPW_PROFILE_TEXTURES",textureTraceNow?"0":"1");
+                    if(!textureTraceNow)PWTextureMemorySample("editor_capture_begin");
+                }
+                if(ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Capture image registry and GPU/CPU memory at level boundaries and every five seconds of play.");
 				if (ImGui::MenuItem("Real-time Editor Shadows (all zoom levels)", NULL, g_pwEditorRealtimeShadows))
 				{
 					g_pwEditorRealtimeShadows = !g_pwEditorRealtimeShadows;
