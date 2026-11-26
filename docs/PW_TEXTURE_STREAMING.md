@@ -2,7 +2,7 @@
 
 ## M1 — resource ownership audit and live diagnostics (26 November 2026)
 
-Source implementation through 53f794f7. No texture residency behaviour has been changed. The measured Windows baseline and current full Windows compilation are still outstanding.
+Source implementation through 53f794f7. M1 full Windows compilation and all 11 workflows passed at 1a3a5316. Actual measured Windows baseline remains outstanding.
 
 ### Actual architecture
 - Shared/Image/CImageC.cpp owns a process-wide m_List (image ID to tagImgData). Mesh and UI callers can retrieve the raw resource and shader-resource-view pointers; removing an image ID alone cannot be assumed safe for every material or render binding.
@@ -23,6 +23,19 @@ In PW Edition menu choose **Capture Texture Memory (CSV)**, then load a test map
 
 ### Benchmark and acceptance
 Use same Windows GPU, resolution, quality and identical assets. Capture empty map, small populated map, texture-heavy map, three consecutive Test Level runs, two standalone level transitions, five minutes of steady movement. Compare level_ready, cleanup_end, steady samples, sampled peak, actual DXGI usage/budget and process private bytes. Retained editor assets are not automatically leaks; compare deltas across repeated identical runs. Record unavailable DXGI telemetry separately. Test mixed DDS/PNG, sky/cube, terrain, grass, lightmaps, HUD, asset preview, weapons, Character Creator and exported games. Attach traces and frame-time/load timing. No baseline numbers invented.
+
+## M2 — targeted resource and cache repairs (26 November 2026)
+
+Source through e0b37c1f. M1 head 1a3a5316 passed all 11 workflows including [full Windows x64 #45786608087](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45786608087); third-person lifecycle M2 head 8d85af96 also passed all 11, including [full Windows x64 #45785840668](https://github.com/BoomForge/GGClassic-PW-Edition-/actions/runs/45785840668).
+
+### Confirmed source defects and repairs
+- Old preload finish reused only same-index filenames and copied pointers; worker cleared the old output vector without releasing unmatched references. Cancellation could discard transferred references, and load paths that detached a preload but did not consume it could leak it. Now each non-null entry owns one reference, moves null the source, unmatched and cancelled entries release, unused detached resources release, reset joins before clearing, and image teardown resets the worker.
+- Old renderer inspected the mutable completed vector while the worker was pushing into it, and cancellation/active flags were non-atomic. New completed-output mutex, atomic flags, move-transfer ownership, join-before-reset. Renderer checks available completed entries without joining an unfinished batch; existing ordinary loader remains fallback. Worker creation failure releases pending references. Existing GG_GetRealPath/legacy D3DX decoder thread-safety still requires runtime scrutiny; no claim all other registry consumers are thread-safe.
+- Old preload matching compared only filename suffixes or same-index names, ignored mip policy and could reuse a full allocation for reduced-quality requests. New bounded full Windows path normalization, case-insensitive exact match and mip policy; descriptor checks for dimensions, 2D resource, array size, sample count and format. Reduced-size, cube/volume, incompatible or converted textures fall back. Non-DDS reuse limited to matching BGRA. Metadata read failures return before using uninitialised metadata.
+- Old bank lookups could return a reserved but missing image ID as loaded. SDK internal loader now checks ImageExist before returning a bank hit. High-level image/texture loaders restore a missing resource at its original ID and return zero on failure. Existing case/filename, DDS fallback and ID policy otherwise unchanged; no global alias consolidation or live resource rebinding.
+- No changes to global RemoveImage lpTexture ownership because raw view/resource consumers and CreateReplaceImage borrowed/external ownership need explicit audit. No unsafe blanket extra Release, no in-game eviction, no material/grass/terrain changes. Actual RAM/VRAM reduction and frame times require M1 CSV traces and repeat Windows benchmarks.
+
+Regression source guards added for ownership transfer, releases, matching, stale-ID recovery, and shutdown. Full M2 compile and licensed runtime tests pending. Test reordered batches, cancellation while worker loads, missing/corrupt files, same basename in different folders, mip-1 vs all mips, texture quality changes, mixed formats, sky/grass, repeated Test Level and standby/quit. Next M3: configurable advisory memory budgets and deterministic residency planner (pinned resources, generation/ref ownership) without evicting borrowed raw pointers; M2 follow-up audit of actual consumer bindings remains required before M4 real swaps/eviction.
 
 ### Remaining implementation order
 1. Verify M1 full Windows build and collect actual traces; classify registry versus non-registry growth and prove resource ownership at deletion, preload transfer and renderer bindings.
