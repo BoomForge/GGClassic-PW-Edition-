@@ -388,9 +388,163 @@ static void PWDrawSceneFolder(int folderId,
     ImGui::PopID();
 }
 
+// Explicit player setup uses the same FPM fields and compatibility marker as
+// Classic's drag-on-start-marker workflow. Never modify shared FPE profiles.
+static bool PWPlayerSetupEntity(int e, bool marker)
+{
+    if (!PWValidSceneEntity(e)) return false;
+    auto& ent = t.entityelement[e];
+    const int bank = ent.bankindex;
+    if (bank > g.entitybankmax || ent.editorlock || !ObjectExist(ent.obj)) return false;
+    if (marker) return t.entityprofile[bank].ismarker == 1;
+    if (t.entityprofile[bank].ischaracter != 1 ||
+        t.entityprofile[bank].ismarker != 0 || ent.staticflag != 0 ||
+        ent.iHasParentIndex != 0 || t.entityprofile[bank].animmax <= 0) return false;
+    for (int child = 1; child <= g.entityelementlist; ++child)
+        if (PWValidSceneEntity(child) && t.entityelement[child].iHasParentIndex == e)
+            return false;
+    return true;
+}
+
+static bool PWPlayerSetupIdle()
+{
+    return g.vrqcontrolmode == 0 && t.gridentity == 0 && t.gridentityinzoomview == 0;
+}
+
+static bool PWPlayerSetupCandidate(int e)
+{
+    if (!PWPlayerSetupEntity(e, false)) return false;
+    auto& ent = t.entityelement[e];
+    // Do not silently discard an instance-specific NPC script.
+    const char* script = ent.eleprof.aimain_s.Get();
+    const char* stock = t.entityprofile[ent.bankindex].aimain_s.Get();
+    return script && stock && _stricmp(script, stock) == 0;
+}
+
+static bool PWAssignScenePlayer(int character, int marker)
+{
+    if (!PWPlayerSetupIdle() || t.playercontrol.thirdperson.enabled != 0 ||
+        character == marker || !PWPlayerSetupCandidate(character) ||
+        !PWPlayerSetupEntity(marker, true)) return false;
+    auto& avatar = t.entityelement[character];
+    auto& start = t.entityelement[marker];
+    // Persist the native references, not a sidecar. The empty legacy marker
+    // is set internally only for compatibility with Classic's existing path.
+    avatar.eleprof.aimain_s = "tpp\\thirdperson.lua";
+    avatar.eleprof.aimain = 0;
+    avatar.x = start.x; avatar.y = start.y; avatar.z = start.z;
+    avatar.rx = start.rx; avatar.ry = start.ry; avatar.rz = start.rz;
+    PositionObject(avatar.obj, avatar.x, avatar.y, avatar.z);
+    RotateObject(avatar.obj, avatar.rx, avatar.ry, avatar.rz);
+    t.playercontrol.thirdperson.charactere = character;
+    t.playercontrol.thirdperson.startmarkere = marker;
+    t.playercontrol.thirdperson.enabled = 1;
+    g.projectmodified = 1;
+    g.projectmodifiedstatic = 1;
+    gridedit_changemodifiedflag();
+    return true;
+}
+
+static bool PWCanReturnToFirstPerson()
+{
+    if (!PWPlayerSetupIdle() || t.playercontrol.thirdperson.enabled != 1) return false;
+    const int character = t.playercontrol.thirdperson.charactere;
+    const int marker = t.playercontrol.thirdperson.startmarkere;
+    if (!PWPlayerSetupEntity(character, false) || !PWPlayerSetupEntity(marker, true)) return false;
+    const char* script = t.entityelement[character].eleprof.aimain_s.Get();
+    // A custom protagonist script must not be replaced behind the author's back.
+    return script && _stricmp(script, "tpp\\thirdperson.lua") == 0;
+}
+
+static void PWReturnToFirstPerson()
+{
+    if (!PWCanReturnToFirstPerson()) return;
+    auto& avatar = t.entityelement[t.playercontrol.thirdperson.charactere];
+    const int markerObj = t.entityelement[t.playercontrol.thirdperson.startmarkere].obj;
+    avatar.eleprof.aimain_s = t.entityprofile[avatar.bankindex].aimain_s;
+    avatar.eleprof.aimain = 0;
+    PositionObject(avatar.obj, avatar.x, avatar.y, avatar.z);
+    RotateObject(avatar.obj, avatar.rx, avatar.ry, avatar.rz);
+    DisableObjectZDepth(markerObj);
+    DisableObjectZWrite(markerObj);
+    DisableObjectZRead(markerObj);
+    t.playercontrol.thirdperson.enabled = 0;
+    t.playercontrol.thirdperson.charactere = 0;
+    t.playercontrol.thirdperson.startmarkere = 0;
+    g.projectmodified = 1;
+    g.projectmodifiedstatic = 1;
+    gridedit_changemodifiedflag();
+}
+
+static void PWRenderPlayerSetup()
+{
+    if (!ImGui::CollapsingHeader("Player Setup")) return;
+    const bool thirdPerson = t.playercontrol.thirdperson.enabled == 1;
+    ImGui::Text("Mode: %s", thirdPerson ? "Third person" : "First person");
+    if (thirdPerson)
+    {
+        const int e = t.playercontrol.thirdperson.charactere;
+        const int marker = t.playercontrol.thirdperson.startmarkere;
+        if (PWPlayerSetupEntity(e, false) && PWPlayerSetupEntity(marker, true))
+        {
+            ImGui::TextWrapped("Character: %s (#%d)", t.entityelement[e].eleprof.name_s.Get(), e);
+            ImGui::TextWrapped("Start: %s (#%d)", t.entityelement[marker].eleprof.name_s.Get(), marker);
+            ImGui::TextWrapped("Uses the character's existing Classic animation set. Camera settings are in the start marker properties.");
+        }
+        else ImGui::TextWrapped("Player reference is missing or not eligible for this setup tool. Inspect the existing map before changing it.");
+        if (PWCanReturnToFirstPerson() && ImGui::SmallButton("Return to first person..."))
+            ImGui::OpenPopup("PWFirstPersonConfirm");
+        if (ImGui::BeginPopupModal("PWFirstPersonConfirm", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            ImGui::TextWrapped("Keep the character and restore its asset's default AI script? Move the former player away from the start marker before testing.");
+            if (ImGui::Button("Restore first person")) { PWReturnToFirstPerson(); ImGui::CloseCurrentPopup(); }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+    }
+    else if (PWPlayerSetupIdle())
+    {
+        ImGui::TextWrapped("Place a player start marker and an animated dynamic character, then choose both below. No manual player script is needed.");
+        if (ImGui::SmallButton("Set up third person...")) ImGui::OpenPopup("PWPlayerSetupChoose");
+        if (ImGui::BeginPopup("PWPlayerSetupChoose"))
+        {
+            bool found = false;
+            for (int e = 1; e <= g.entityelementlist; ++e)
+            {
+                if (!PWPlayerSetupCandidate(e)) continue;
+                found = true;
+                ImGui::PushID(e);
+                const std::string label = std::string(t.entityelement[e].eleprof.name_s.Get()) + " (#" + std::to_string(e) + ")";
+                if (ImGui::BeginMenu(label.c_str()))
+                {
+                    bool markerFound = false;
+                    for (int m = 1; m <= g.entityelementlist; ++m)
+                    {
+                        if (!PWPlayerSetupEntity(m, true)) continue;
+                        markerFound = true;
+                        ImGui::PushID(m);
+                        const std::string markerLabel = std::string("Use start: ") + t.entityelement[m].eleprof.name_s.Get() + " (#" + std::to_string(m) + ")";
+                        if (ImGui::MenuItem(markerLabel.c_str())) PWAssignScenePlayer(e, m);
+                        ImGui::PopID();
+                    }
+                    if (!markerFound) ImGui::TextDisabled("Place a player start marker first.");
+                    ImGui::EndMenu();
+                }
+                ImGui::PopID();
+            }
+            if (!found) ImGui::TextDisabled("No eligible animated characters with default AI.");
+            ImGui::EndPopup();
+        }
+        ImGui::TextDisabled("Save the map after changing player mode.");
+    }
+    else ImGui::TextWrapped("Finish entity placement or properties editing first. VR setup retains the original workflow.");
+}
+
 static void PWRenderSceneHierarchy()
 {
     PWEnsureSceneProject();
+    PWRenderPlayerSetup();
     ImGui::PushItemWidth(-1.0f);
     ImGui::InputText("##PWSceneSearch", g_pwSceneHierarchySearch,
                      sizeof(g_pwSceneHierarchySearch));
