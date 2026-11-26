@@ -14,6 +14,12 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
+#include <cstdint>
+#include <psapi.h>
+#ifdef DX11
+#include <dxgi1_4.h>
+#endif
 #include ".\..\Core\SteamCheckForWorkshop.h"
 
 #include "CSpritesC.h"
@@ -322,11 +328,11 @@ DARKSDK void DumpImageList(void)
 		SAFE_RELEASE ( pTextureInterface );
 
 		//BC1: 5:6 : 5 color(5 bits red, 6 bits green, 5 bits blue).This is true even if the data also contains 1 - bit alpha.
-		//Assuming a 4×4 texture using the largest data format possible, the BC1 format reduces the memory required from 48 bytes(16 colors × 3 components / color × 1 byte / component) to 8 bytes of memory.
+		//Assuming a 4Ã—4 texture using the largest data format possible, the BC1 format reduces the memory required from 48 bytes(16 colors Ã— 3 components / color Ã— 1 byte / component) to 8 bytes of memory.
 		//So to calculate all 4 bits per pixels should be devided by 8.
-		//BC1: 48 bytes (16 colors × 3 components/color × 1 byte/component) to 8 bytes of memory.
-		//BC2: 64 bytes (16 colors × 4 components/color × 1 byte/component) to 16 bytes of memory.
-		//BC3: 64 bytes (16 colors × 4 components/color × 1 byte/component) to 16 bytes of memory.
+		//BC1: 48 bytes (16 colors Ã— 3 components/color Ã— 1 byte/component) to 8 bytes of memory.
+		//BC2: 64 bytes (16 colors Ã— 4 components/color Ã— 1 byte/component) to 16 bytes of memory.
+		//BC3: 64 bytes (16 colors Ã— 4 components/color Ã— 1 byte/component) to 16 bytes of memory.
 		//BC1 / 8.0 = * 0,125 (-alpha 4bit) (4 bits per pixel )
 		//BC2 / 4.0 = * 0.25 (8 bits per pixel )
 		//BC3 / 4.0 = * 0.25 (8 bits per pixel )
@@ -807,6 +813,98 @@ int getBitsPerPixel(int fmt)
 }
 
 
+
+// Opt-in read-only memory baseline from the actual image registry.
+// Sample only on the game thread at lifecycle boundaries or a slow cadence.
+// Never use GetImagePointer[View] here: those alter access counters/cache.
+void PWTextureMemorySample(const char* stage,bool periodic)
+{
+#ifdef DX11
+    char enabled[8]={};
+    if(GetEnvironmentVariableA("GGCPW_PROFILE_TEXTURES",enabled,sizeof(enabled))!=1||enabled[0]!='1')return;
+    const ULONGLONG now=GetTickCount64();
+    static ULONGLONG lastPeriodic=0,peakBytes=0;
+    if(periodic&&now-lastPeriodic<5000)return;
+    lastPeriodic=now;
+    unsigned long long total=0,staging=0,entries=0,unknown=0,aliases=0;
+    std::set<ID3D11Resource*> seen;
+    for(const auto& item:m_List){
+        const tagImgData* image=item.second;
+        if(!image||!image->lpTexture){++unknown;continue;}
+        ++entries;
+        ID3D11Resource* resource=image->lpTexture;
+        if(!seen.insert(resource).second){++aliases;continue;}
+        D3D11_RESOURCE_DIMENSION dimension=D3D11_RESOURCE_DIMENSION_UNKNOWN;
+        resource->GetType(&dimension);
+        UINT width=0,height=1,depth=1,levels=0,array=1,samples=1;
+        DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;
+        D3D11_USAGE usage=D3D11_USAGE_DEFAULT;
+        if(dimension==D3D11_RESOURCE_DIMENSION_TEXTURE2D){
+            D3D11_TEXTURE2D_DESC d={};
+            static_cast<ID3D11Texture2D*>(resource)->GetDesc(&d);
+            width=d.Width;height=d.Height;levels=d.MipLevels;array=d.ArraySize;
+            samples=d.SampleDesc.Count;format=d.Format;usage=d.Usage;
+        }else if(dimension==D3D11_RESOURCE_DIMENSION_TEXTURE3D){
+            D3D11_TEXTURE3D_DESC d={};
+            static_cast<ID3D11Texture3D*>(resource)->GetDesc(&d);
+            width=d.Width;height=d.Height;depth=d.Depth;levels=d.MipLevels;format=d.Format;usage=d.Usage;
+        }else if(dimension==D3D11_RESOURCE_DIMENSION_TEXTURE1D){
+            D3D11_TEXTURE1D_DESC d={};
+            static_cast<ID3D11Texture1D*>(resource)->GetDesc(&d);
+            width=d.Width;levels=d.MipLevels;array=d.ArraySize;format=d.Format;usage=d.Usage;
+        }
+        if(!width||!levels||!array||!samples||!DirectX::BitsPerPixel(format)){++unknown;continue;}
+        unsigned long long bytes=0;
+        for(UINT mip=0;mip<levels;++mip){
+            size_t row=0,slice=0;
+            DirectX::ComputePitch(format,width,height,row,slice,DirectX::CP_FLAGS_NONE);
+            bytes+=static_cast<unsigned long long>(slice)*depth*array*samples;
+            if(width>1)width/=2;if(height>1)height/=2;if(depth>1)depth/=2;
+        }
+        total+=bytes;
+        if(usage==D3D11_USAGE_STAGING)staging+=bytes;
+    }
+    if(total>peakBytes)peakBytes=total;
+    PROCESS_MEMORY_COUNTERS_EX process={};process.cb=sizeof(process);
+    const bool processOK=GetProcessMemoryInfo(GetCurrentProcess(),
+        reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&process),sizeof(process))!=FALSE;
+    // DXGI reports actual process usage/budget on the renderer's adapter,
+    // not the first enumerated GPU. Unavailable telemetry is flagged.
+    DXGI_QUERY_VIDEO_MEMORY_INFO local={},nonlocal={};
+    bool localOK=false,nonlocalOK=false;
+    IDXGIDevice* device=nullptr;IDXGIAdapter* adapter=nullptr;IDXGIAdapter3* adapter3=nullptr;
+    if(m_pD3D&&SUCCEEDED(m_pD3D->QueryInterface(__uuidof(IDXGIDevice),reinterpret_cast<void**>(&device)))){
+        if(SUCCEEDED(device->GetAdapter(&adapter))&&adapter&&
+           SUCCEEDED(adapter->QueryInterface(__uuidof(IDXGIAdapter3),reinterpret_cast<void**>(&adapter3)))){
+            localOK=SUCCEEDED(adapter3->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_LOCAL,&local));
+            nonlocalOK=SUCCEEDED(adapter3->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL,&nonlocal));
+        }
+    }
+    if(adapter3)adapter3->Release();if(adapter)adapter->Release();if(device)device->Release();
+    char temp[MAX_PATH]={},path[MAX_PATH+80]={};
+    const DWORD n=GetTempPathA(MAX_PATH,temp);
+    if(!n||n>=MAX_PATH)return;
+    if(sprintf_s(path,sizeof(path),"%sGGCPW-texturetrace-%lu.csv",temp,(unsigned long)GetCurrentProcessId())<=0)return;
+    HANDLE file=CreateFileA(path,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(file==INVALID_HANDLE_VALUE)return;
+    LARGE_INTEGER length={};DWORD written=0;
+    if(GetFileSizeEx(file,&length)&&length.QuadPart==0){
+        const char header[]="tick_ms,pid,stage,image_entries,unique_resources,aliases,unknown_entries,estimated_bytes,estimated_staging_bytes,observed_peak_bytes,process_valid,working_set_bytes,private_bytes,peak_working_set_bytes,dxgi_local_valid,dxgi_local_usage_bytes,dxgi_local_budget_bytes,dxgi_nonlocal_valid,dxgi_nonlocal_usage_bytes,dxgi_nonlocal_budget_bytes\r\n";
+        WriteFile(file,header,sizeof(header)-1,&written,nullptr);
+    }
+    char row[1024]={};
+    const int count=sprintf_s(row,sizeof(row),"%llu,%lu,%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%d,%llu,%llu,%llu,%d,%llu,%llu,%d,%llu,%llu\r\n",
+        (unsigned long long)now,(unsigned long)GetCurrentProcessId(),stage,
+        entries,(unsigned long long)seen.size(),aliases,unknown,total,staging,(unsigned long long)peakBytes,
+        processOK?1:0,(unsigned long long)process.WorkingSetSize,(unsigned long long)process.PrivateUsage,(unsigned long long)process.PeakWorkingSetSize,
+        localOK?1:0,(unsigned long long)local.CurrentUsage,(unsigned long long)local.Budget,
+        nonlocalOK?1:0,(unsigned long long)nonlocal.CurrentUsage,(unsigned long long)nonlocal.Budget);
+    if(count>0)WriteFile(file,row,(DWORD)count,&written,nullptr);
+    CloseHandle(file);
+#else
+    (void)stage;(void)periodic;
+#endif
+}
 
 DARKSDK void ImageDestructorD3D ( void )
 {
@@ -1484,8 +1582,8 @@ DARKSDK LPGGTEXTURE GetTextureCore ( char* szFilename, GGIMAGE_INFO* info, int i
 							{
 
 								//PE: some files fails ?
-								//PE: PATH not found ...s\für hub level\schild level 1\junksign3_d.dds
-								//PE: Some unicode chars like 'für' cant be found by CreateDDSTextureFromFile ?. D3DX11CreateTextureFromFile works :)
+								//PE: PATH not found ...s\fÃ¼r hub level\schild level 1\junksign3_d.dds
+								//PE: Some unicode chars like 'fÃ¼r' cant be found by CreateDDSTextureFromFile ?. D3DX11CreateTextureFromFile works :)
 								D3DX11_IMAGE_LOAD_INFO loadinfo;
 								loadinfo.Format = (*info).Format;
 								loadinfo.MipLevels = (*info).MipLevels;
