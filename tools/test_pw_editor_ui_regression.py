@@ -60,6 +60,23 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('inline bool OpenEntityScript(HWND owner', lua)
         self.assertIn('if (!CanDiscard()) return false;', lua)
 
+    def test_native_lifecycle_preserves_body_checkpoint_and_owned_weapon(self):
+        physics = (ROOT / "GameGuru Core/GameGuru/Source/M-Physics.cpp").read_text(encoding="utf-8")
+        game = (ROOT / "GameGuru Core/GameGuru/Source/M-Game.cpp").read_text(encoding="utf-8")
+        entities = (ROOT / "GameGuru Core/GameGuru/Source/M-LUA-Entity.cpp").read_text(encoding="utf-8")
+        native = (ROOT / "GameGuru Core/Dark Basic Public Shared/Dark Basic Pro SDK/DarkSDKMore/DarkLUA/DarkLUA.cpp").read_text(encoding="utf-8")
+        self.assertIn("++pc.thirdperson.pwLifecycleEpoch", physics)
+        self.assertIn("t.playercontrol.deadtime>0", physics)
+        self.assertIn("t.e=e;entity_lua_spawn_core();", physics)
+        self.assertIn("state.playcsi=t.csi_stood[style]", physics)
+        self.assertIn("owned&&PWThirdPerson::PrepareEquip(weapon,stage)", physics)
+        self.assertIn("t.gunmustreleasefirst=1", physics)
+        self.assertIn("ObjectPositionX(body)", physics)
+        self.assertIn("CaptureBodyCheckpoint(CameraAngleY(0))", game)
+        self.assertIn("CaptureBodyCheckpoint(t.entityelement[t.e].ry)", entities)
+        self.assertIn("lastEpoch!=epoch", native)
+        self.assertIn("lastEpoch!=tp.pwLifecycleEpoch", native)
+
     def test_native_player_air_slots_and_camera_stance(self):
         native = (ROOT / "GameGuru Core/Dark Basic Public Shared/Dark Basic Pro SDK/DarkSDKMore/DarkLUA/DarkLUA.cpp").read_text(encoding="utf-8")
         dai = (ROOT / "GameGuru Core/GameGuru/Source/M-DAI.cpp").read_text(encoding="utf-8")
