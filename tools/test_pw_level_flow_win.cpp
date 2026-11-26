@@ -271,6 +271,14 @@ int main()
     assert(press.Step(false,true,4)==0);
     assert(press.Step(true,true,4)==4);
     assert(EquipAllowed(0,100,false,false));
+    const int ownedSlots[10]={2,0,7,0,0,0,0,0,0,0};
+    const int invalidSlots[10]={2,0,100,0,0,0,0,0,0,0};
+    assert(ValidInventoryIds(ownedSlots,10));
+    assert(!ValidInventoryIds(invalidSlots,10));
+    assert(RestoredWeapon(7,ownedSlots,10,true)==7);
+    assert(RestoredWeapon(7,ownedSlots,10,false)==0);
+    assert(RestoredWeapon(3,ownedSlots,10,true)==0);
+    assert(RestoredWeapon(0,ownedSlots,10,true)==0);
     assert(EquipAllowed(4,100,true,true));
     assert(!EquipAllowed(4,100,false,true));
     assert(!EquipAllowed(4,100,true,false));
