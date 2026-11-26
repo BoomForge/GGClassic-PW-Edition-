@@ -71,6 +71,39 @@ inline float JumpHoldFrame(float first,float last,float authored) {
     if(!std::isfinite(first)||!std::isfinite(last)||first<=0.f||last<=first)return -1.f;
     return Clamp(authored>0.f?authored:last-10.f,first,last-1.f);
 }
+// Two opt-in native player CSI clips and their return instruction are appended
+// after Classic's existing slots. Old CSI numbers and FPM format stay intact.
+inline int FallCSI(int lastCSI){return lastCSI-2;}
+inline int LandCSI(int lastCSI){return lastCSI-1;}
+inline bool AirCSI(int seq,int lastCSI){return seq==FallCSI(lastCSI)||seq==LandCSI(lastCSI);}
+inline float ApproachScalar(float from,float target,float dt,float rate){
+    return from+(target-from)*Clamp(1.f-std::exp(-rate*Clamp(dt,0.f,0.1f)),0.f,1.f);
+}
+struct AirEvent {bool falling=false,landed=false;};
+// Sample Bullet's grounded flag, not a timer-based fake jump. Ignore tiny
+// step-downs, uninitialised/spawn-in-air states and discontinuities.
+struct AirMotion {
+    bool seenGround=false,wasGrounded=false;
+    float peak=0.f,seconds=0.f;
+    AirEvent Step(bool grounded,float y,float dt,bool reset=false){
+        AirEvent event;
+        if(reset||!std::isfinite(y)||!std::isfinite(dt)||dt<0.f||dt>0.25f){
+            *this=AirMotion{};
+            if(grounded&&std::isfinite(y)){seenGround=wasGrounded=true;peak=y;}
+            return event;
+        }
+        if(grounded){
+            event.landed=seenGround&&!wasGrounded&&seconds>=0.12f&&peak-y>=12.f;
+            seenGround=wasGrounded=true;peak=y;seconds=0.f;return event;
+        }
+        if(!seenGround)return event;
+        if(wasGrounded){seconds=0.f;wasGrounded=false;}
+        if(y>peak)peak=y;
+        seconds+=dt;
+        event.falling=seconds>=0.12f&&peak-y>=12.f;
+        return event;
+    }
+};
 struct Orbit {Vec offset,right,up;};
 inline Orbit Build(float yaw,float pitch,float distance,float shoulder,float height,bool locked){
     yaw=Radians(Finite(yaw,0));pitch=Radians(Clamp(Signed(Finite(pitch,0)),-65.f,80.f));
