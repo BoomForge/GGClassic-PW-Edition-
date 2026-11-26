@@ -60,6 +60,27 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('inline bool OpenEntityScript(HWND owner', lua)
         self.assertIn('if (!CanDiscard()) return false;', lua)
 
+    def test_texture_preload_ownership_and_cache_recovery(self):
+        image = (ROOT / "GameGuru Core/Dark Basic Public Shared/Dark Basic Pro SDK/Shared/Image/CImageC.cpp").read_text(encoding="utf-8")
+        banks = (ROOT / "GameGuru Core/GameGuru/Source/Common-Images.cpp").read_text(encoding="utf-8")
+        self.assertIn("std::atomic<bool> g_bT1(false)", image)
+        self.assertIn("std::lock_guard<std::mutex> lock(pwPreloadOutputMutex)", image)
+        self.assertIn("pending.pTexture=nullptr; // move ownership", image)
+        self.assertIn("pending.pTexture=complete.pTexture;complete.pTexture=nullptr", image)
+        self.assertIn("for(auto& pending:g_image_list)PWReleasePreload(pending)", image)
+        self.assertIn("for(auto& complete:g_image_outputv)PWReleasePreload(complete)", image)
+        self.assertIn("a.iMipMaps==b.iMipMaps", image)
+        self.assertIn("_stricmp(complete.pFilename,full)!=0", image)
+        self.assertIn("if(divide>1)return nullptr", image)
+        self.assertIn("d.Format!=info.Format", image)
+        self.assertIn("if(pPreCreatedTexture){pPreCreatedTexture->Release();", image)
+        self.assertIn("if (tmpid > 0 && ImageExist(tmpid))", image)
+        self.assertIn("if(imgid>0&&!ImageExist(imgid))", banks)
+        self.assertEqual(banks.count("if(texid>0&&!ImageExist(texid))"), 2)
+        self.assertIn("return ImageExist(imgid)?imgid:0", banks)
+        self.assertEqual(banks.count("return ImageExist(texid)?texid:0"), 2)
+        self.assertIn("image_preload_files_reset();", image.split("DARKSDK void ImageDestructorD3D",1)[1])
+
     def test_texture_memory_capture_is_opt_in_and_read_only(self):
         image = (ROOT / "GameGuru Core/Dark Basic Public Shared/Dark Basic Pro SDK/Shared/Image/CImageC.cpp").read_text(encoding="utf-8")
         game = (ROOT / "GameGuru Core/GameGuru/Source/M-Game.cpp").read_text(encoding="utf-8")
