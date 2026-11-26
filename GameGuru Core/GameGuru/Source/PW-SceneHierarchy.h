@@ -682,8 +682,16 @@ static void PWRenderPlayerClipEditor(int e)
         } else {
             ImGui::Text("Native animation extent: %d", limit);
             ImGui::TextWrapped("Enable only the ranges to replace. Base weapon style only; the original FPE is never edited.");
+            const int offset=t.entityprofile[bank].startofaianim;
+            ImGui::BeginChild("##PWPlayerClipRows", ImVec2(405, 340), true);
             for (size_t i=0;i<rows.size();++i) {
                 auto& row=rows[i]; ImGui::PushID(static_cast<int>(i));
+                if (offset<0 || offset>g.animmax || row.slot<0 || row.slot>g.animmax-offset) {
+                    row.edit=false;
+                    ImGui::TextDisabled("%s (no available CSI slot)",row.label);
+                    ImGui::PopID();
+                    continue;
+                }
                 ImGui::Checkbox("##replace",&row.edit); ImGui::SameLine();
                 ImGui::TextUnformatted(row.label); ImGui::SameLine(175);
                 ImGui::PushItemWidth(85); ImGui::InputInt("##first",&row.first,0); ImGui::SameLine();
@@ -693,6 +701,7 @@ static void PWRenderPlayerClipEditor(int e)
                 }
                 ImGui::PopID();
             }
+            ImGui::EndChild();
             if (ImGui::Button("Save new character profile"))
                 PWWritePlayerClipVariant(source, rows, limit, status);
             if (!status.empty()) ImGui::TextWrapped("%s",status.c_str());
