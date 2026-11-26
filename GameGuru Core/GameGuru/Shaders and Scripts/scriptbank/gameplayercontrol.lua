@@ -636,7 +636,9 @@ function gameplayercontrol.lookmove()
 	if ( GetGamePlayerStateCamAngleX()<-80 ) then SetGamePlayerStateCamAngleX(-80) end
 	if ( GetGamePlayerStateCamAngleX()>85 ) then SetGamePlayerStateCamAngleX(85) end
 
-	-- Handle player ducking
+	-- Native third person uses Bullet's actual crouch/stand state and validates clips.
+	-- FPS and older engines keep the original control path.
+	if not (PWNativeThirdPersonCrouch and PWNativeThirdPersonCrouch()) then
 	if ( g_PlrKeyC == 1 ) then 
 		SetGamePlayerStatePlayerDucking(1)
 	else
@@ -646,13 +648,16 @@ function gameplayercontrol.lookmove()
 		end
 	end
 
+	end -- legacy ducking fallback
+
 	--  third person can freeze player controls if MID-anim (such as jump) then
 	g_suspendplayercontrols=0
 	if ( GetGamePlayerControlThirdpersonEnabled() == 1 ) then 
 		-- if in middle of playcsi event, suspend controls until finished
 		SetGamePlayerStateCharAnimIndex(GetGamePlayerControlThirdpersonCharacterIndex())
 		if ( GetCharAnimStatePlayCsi(GetGamePlayerStateCharAnimIndex()) > 0 ) then 
-			if ( GetCharSeqTrigger(GetCharAnimStatePlayCsi(GetGamePlayerStateCharAnimIndex())) == 0 ) then 
+			if ( GetCharSeqTrigger(GetCharAnimStatePlayCsi(GetGamePlayerStateCharAnimIndex())) == 0 and
+			 not (PWNativeThirdPersonCrouchMoving and PWNativeThirdPersonCrouchMoving()) ) then 
 				g_suspendplayercontrols=1
 			end
 		end
@@ -827,7 +832,8 @@ function gameplayercontrol.control()
 		if ( GetGamePlayerControlThirdpersonEnabled() == 1 ) then 
 			ttcharacterindex=GetGamePlayerControlThirdpersonCharacterIndex()
 			entid = GetEntityElementBankIndex(GetCharAnimStateOriginalE(ttcharacterindex))
-			if ( g_PlrKeySPACE == 1 and GetGamePlayerControlJumpMode() == 0 and GetEntityProfileJumpModifier(entid) > 0.0 ) then 
+			if ( g_PlrKeySPACE == 1 and GetGamePlayerControlJumpMode() == 0 and GetEntityProfileJumpModifier(entid) > 0.0 and
+				 (not PWNativeThirdPersonCanJump or PWNativeThirdPersonCanJump()) ) then 
 				ttplaycsi=GetCharAnimStatePlayCsi(ttcharacterindex)
 				if ( ttplaycsi >= GetCsiStoodVault(1) and ttplaycsi <= GetCsiStoodVault(1)+2 ) then 
 					--  still in jump animation action
