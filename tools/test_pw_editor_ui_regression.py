@@ -60,6 +60,24 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('inline bool OpenEntityScript(HWND owner', lua)
         self.assertIn('if (!CanDiscard()) return false;', lua)
 
+    def test_texture_memory_capture_is_opt_in_and_read_only(self):
+        image = (ROOT / "GameGuru Core/Dark Basic Public Shared/Dark Basic Pro SDK/Shared/Image/CImageC.cpp").read_text(encoding="utf-8")
+        game = (ROOT / "GameGuru Core/GameGuru/Source/M-Game.cpp").read_text(encoding="utf-8")
+        capture = image.split("void PWTextureMemorySample(", 1)[1].split("DARKSDK void ImageDestructorD3D", 1)[0]
+        self.assertIn('GetEnvironmentVariableA("GGCPW_PROFILE_TEXTURES"', capture)
+        self.assertIn("if(periodic&&now-lastPeriodic<5000)return;", capture)
+        self.assertIn("for(const auto& item:m_List)", capture)
+        self.assertIn("seen.insert(resource)", capture)
+        self.assertIn("DirectX::ComputePitch", capture)
+        self.assertIn("QueryVideoMemoryInfo", capture)
+        self.assertIn("GetProcessMemoryInfo", capture)
+        self.assertNotIn("RemoveImage(", capture)
+        self.assertNotIn("DeleteImage(", capture)
+        self.assertNotIn("GetImagePointer(", capture)
+        for stage in ("level_init_begin", "level_ready", "level_cleanup_begin", "level_cleanup_end", "gameplay"):
+            self.assertIn('PWTextureMemorySample("' + stage + '"', game)
+        self.assertIn("Capture Texture Memory (CSV)", GRID)
+
     def test_native_profile_restore_preflight_and_safe_holster(self):
         native = (ROOT / "GameGuru Core/Dark Basic Public Shared/Dark Basic Pro SDK/DarkSDKMore/DarkLUA/DarkLUA.cpp").read_text(encoding="utf-8")
         lua = (ROOT / "GameGuru Core/GameGuru/Shaders and Scripts/scriptbank/global.lua").read_text(encoding="utf-8")
