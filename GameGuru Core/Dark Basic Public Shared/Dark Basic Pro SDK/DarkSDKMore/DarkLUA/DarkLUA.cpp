@@ -7075,6 +7075,11 @@ static int PWNativeThirdPersonCanJump(lua_State* L) {
     int e=0,avatar=0;
     if(!PWNativeThirdPersonReady(e,avatar)){lua_pushboolean(L,1);return 1;}
     const int body=t.aisystem.objectstartindex;
+    const int index=t.playercontrol.thirdperson.characterindex;
+    if(index>0&&index<=g.charanimindexmax&&
+        t.charanimstates[index].playcsi==PWThirdPerson::LandCSI(g.csi_csimax)){
+        lua_pushboolean(L,0);return 1;
+    }
     lua_pushboolean(L,PWThirdPerson::CanStartGroundJump(ObjectAngleX(body)==1.f,
         t.aisystem.playerducking!=0,ODEGetCharacterControllerDucking(body)!=0));
     return 1;
@@ -7092,7 +7097,9 @@ static int PWNativeThirdPersonCrouchMoving(lua_State* L) {
     const int index=t.playercontrol.thirdperson.characterindex;
     if(index<=0||index>g.charanimindexmax){lua_pushboolean(L,0);return 1;}
     const auto& state=t.charanimstates[index];
-    lua_pushboolean(L,PWCrouchMovementSequence(state.playcsi,state.weapstyle));
+    // Air poses are also locomotion, not a scripted input lock.
+    lua_pushboolean(L,PWCrouchMovementSequence(state.playcsi,state.weapstyle)||
+        PWThirdPerson::AirCSI(state.playcsi,g.csi_csimax));
     return 1;
 }
 // Compute third-person locomotion from the same remapped digital actions used
@@ -7120,6 +7127,69 @@ static int PWNativeThirdPersonMove(lua_State* L) {
     // Return the base speed to the shared setter so the existing physics
     // frequency scaling remains identical to the FPS path.
     lua_pushboolean(L,1);lua_pushnumber(L,m.speed);return 2;
+}
+// Optional clips live in the same FPE/CSI bank as other character clips.
+static bool PWValidAirClip(int e,int seq) {
+    const int bank=t.entityelement[e].bankindex;
+    if(bank<=0||bank>g.entidmaster||t.entityprofile[bank].animstyle!=0)return false;
+    const int obj=g.entitybankoffset+bank;
+    if(!ObjectExist(obj))return false;
+    const sObject* data=GetObjectData(obj);
+    if(!data||!data->pAnimationSet||!data->pAnimationSet->pAnimation)return false;
+    const int offset=t.entityprofile[bank].startofaianim;
+    if(offset<0||offset>g.animmax||seq<0||seq>g.animmax-offset)return false;
+    const auto& clip=t.entityanim[bank][offset+seq];
+    return PWThirdPerson::ValidCharacterClip(clip.start,clip.finish,
+        static_cast<float>(data->pAnimationSet->ulLength));
+}
+static void PWNativeAirAnimation(int e,int index,int avatar,bool ducked) {
+    using namespace PWThirdPerson;
+    static AirMotion motion;
+    static DWORD lastTime=0,landStart=0;
+    static int lastAvatar=0,lastEntity=0,lastBank=0;
+    static Vec previous={};
+    const DWORD now=GetTickCount();
+    const int body=t.aisystem.objectstartindex,bank=t.entityelement[e].bankindex;
+    const Vec pos={ObjectPositionX(body),ObjectPositionY(body),ObjectPositionZ(body)};
+    const bool grounded=ObjectAngleX(body)==1.f;
+    const bool permitted=t.player[1].health>0&&t.playercontrol.gravityactive==1&&
+        t.playercontrol.underwater==0&&g.luacameraoverride!=1&&g.luacameraoverride!=3;
+    const bool reset=!permitted||lastAvatar!=avatar||lastEntity!=e||lastBank!=bank||
+        now-lastTime>250||Length(Sub(pos,previous))>200.f;
+    const float dt=static_cast<float>(now-lastTime)*0.001f;
+    const auto event=motion.Step(grounded,pos.y,dt,reset);
+    lastTime=now;lastAvatar=avatar;lastEntity=e;lastBank=bank;previous=pos;
+    const int fall=FallCSI(g.csi_csimax),land=LandCSI(g.csi_csimax);
+    auto& state=t.charanimstate;
+    auto& controls=t.charanimcontrols[index];
+    const int style=state.weapstyle;
+    if(style<1||style>5)return;
+    const int seq=state.playcsi;
+    const bool ownAir=AirCSI(seq,g.csi_csimax);
+    const bool safeLocomotion=(seq>=t.csi_stood[style]&&seq<t.csi_stoodstartled[style])||
+        (seq>=t.csi_stoodmovefore[style]&&seq<t.csi_stoodreload[style]);
+    const bool action=controls.meleeing!=0||controls.spotactioning!=0||
+        controls.impacting!=0||controls.covering!=0;
+    int next=seq;
+    if(ownAir&&(reset||ducked||action||(seq==fall&&grounded)||
+        (seq==land&&(!grounded||now-landStart>650))))next=t.csi_stood[style];
+    // Do not interrupt action, death, authored sequences or crouch. A landing
+    // can follow a normal jump or ledge drop even if no fall clip is mapped.
+    if(!reset&&permitted&&!ducked&&!action&&(ownAir||safeLocomotion)){
+        if(event.landed&&PWValidAirClip(e,land)){
+            next=land;landStart=now;
+        }else if(event.falling&&!grounded&&PWValidAirClip(e,fall)){
+            next=fall;
+        }
+    }
+    if(next!=seq){
+        state.playcsi=next;
+        state.freezeanyrotation=0;
+        state.advancedcapactive=0;
+        if(AirCSI(next,g.csi_csimax))controls.leaping=0;
+        // Force transition even if two authored ranges have the same start.
+        if(avatar>0&&avatar<=t.tmaxobjectnumber)t.smoothanim[avatar].st=-1;
+    }
 }
 static int PWNativeThirdPersonAnimate(lua_State* L) {
     using namespace PWThirdPerson;
@@ -7169,6 +7239,7 @@ static int PWNativeThirdPersonAnimate(lua_State* L) {
             t.charanimstate.freezeanyrotation=0;
         }
     }
+    PWNativeAirAnimation(e,index,avatar,ducked);
     const float polarity=GetSpeed(avatar)<0.f?-1.f:1.f;
     SetObjectSpeed(avatar,t.entityelement[e].speedmodulator_f*t.charanimstate.animationspeed_f*polarity*2.5f*g.timeelapsed_f);
     // This is the same engine animation state machine used by the original
@@ -7211,6 +7282,7 @@ static int PWNativeThirdPersonUpdate(lua_State* L) {
     const float yaw=Finite(t.playercontrol.finalcameraangley_f,CameraAngleY(0));
     const float pitch=Clamp(Signed(Finite(t.playercontrol.finalcameraanglex_f-tp.camerafocus,0.f)),-65.f,80.f);
     static DWORD last=0;static int lastAvatar=0;static Vec lastPosition={};static float fraction=1.f;
+    static float stanceOffset=0.f;
     const DWORD now=GetTickCount();
     const bool reset=lastAvatar!=avatar||now-last>250||Length(Sub(player,lastPosition))>200.f;
     const float dt=reset?0.016f:Clamp(static_cast<float>(now-last)*0.001f,0.f,0.1f);
@@ -7225,7 +7297,11 @@ static int PWNativeThirdPersonUpdate(lua_State* L) {
     // Preserve authored cutscene overrides, including angle-only overrides.
     if(g.luacameraoverride==1||g.luacameraoverride==3){lua_pushboolean(L,1);return 1;}
     const float orbitYaw=tp.camerafollow?yaw:ObjectAngleY(avatar);
-    const Vec pivot={player.x,player.y+Clamp(Finite(tp.cameraheight,100.f)-65.f,-15.f,160.f),player.z};
+    // Smooth only the extra stance offset. Do not smooth the collision
+    // result or player position through geometry; recast the entire boom.
+    const float desiredStance=ODEGetCharacterControllerDucking(body)!=0?-12.f:0.f;
+    stanceOffset=reset?desiredStance:ApproachScalar(stanceOffset,desiredStance,dt,12.f);
+    const Vec pivot={player.x,player.y+Clamp(Finite(tp.cameraheight,100.f)-65.f+stanceOffset,-27.f,160.f),player.z};
     const auto orbit=Build(orbitYaw,pitch,tp.cameradistance,static_cast<float>(tp.camerashoulder),
         tp.cameraheight-70.f,tp.cameralocked==1);
     const Vec ideal=Add(pivot,orbit.offset);
