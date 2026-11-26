@@ -173,7 +173,7 @@ All four requests require source implementation, standalone tests and actual Win
 
 ## P1 — Texture streaming and bounded memory management (25 November 2026 owner request)
 
-**Status:** requested / not implemented. Owner feedback identifies excessive eager texture loading and poor memory management across the FPS Creator / GameGuru family. Investigate the actual Classic renderer and resource ownership before confirming the cause. Treat as a major engine performance milestone after the current active native third-person work; do not disrupt existing priorities.
+**Status (26 Nov):** M1 source audit and opt-in live diagnostics implemented; measured Windows baseline and compile/runtime acceptance pending. See [PW_TEXTURE_STREAMING.md](PW_TEXTURE_STREAMING.md). Native third-person initial source is implemented; lifecycle CI/gameplay acceptance remains outstanding. Actual budgeted residency, streaming and safe eviction not implemented yet.
 
 - [ ] Audit texture creation, image banks, caches, material references, resource lifetime, CPU copies, VRAM residency and level unload; establish measured peak/steady-state RAM, VRAM, load times and frame-time baselines.
 - [ ] Implement shared texture residency with deduplication, reference-safe eviction and configurable memory budgets; prioritize visible/nearby and critical textures; retain low-resolution mip/fallback textures as needed.
