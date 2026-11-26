@@ -7147,6 +7147,7 @@ static void PWNativeAirAnimation(int e,int index,int avatar,bool ducked) {
     static AirMotion motion;
     static DWORD lastTime=0,landStart=0;
     static int lastAvatar=0,lastEntity=0,lastBank=0;
+    static unsigned int lastEpoch=0;
     static Vec previous={};
     const DWORD now=GetTickCount();
     const int body=t.aisystem.objectstartindex,bank=t.entityelement[e].bankindex;
@@ -7154,11 +7155,12 @@ static void PWNativeAirAnimation(int e,int index,int avatar,bool ducked) {
     const bool grounded=ObjectAngleX(body)==1.f;
     const bool permitted=t.player[1].health>0&&t.playercontrol.gravityactive==1&&
         t.playercontrol.underwater==0&&g.luacameraoverride!=1&&g.luacameraoverride!=3;
-    const bool reset=!permitted||lastAvatar!=avatar||lastEntity!=e||lastBank!=bank||
+    const unsigned int epoch=t.playercontrol.thirdperson.pwLifecycleEpoch;
+    const bool reset=!permitted||lastEpoch!=epoch||lastAvatar!=avatar||lastEntity!=e||lastBank!=bank||
         now-lastTime>250||Length(Sub(pos,previous))>200.f;
     const float dt=static_cast<float>(now-lastTime)*0.001f;
     const auto event=motion.Step(grounded,pos.y,dt,reset);
-    lastTime=now;lastAvatar=avatar;lastEntity=e;lastBank=bank;previous=pos;
+    lastTime=now;lastAvatar=avatar;lastEntity=e;lastBank=bank;previous=pos;lastEpoch=epoch;
     const int fall=FallCSI(g.csi_csimax),land=LandCSI(g.csi_csimax);
     auto& state=t.charanimstate;
     auto& controls=t.charanimcontrols[index];
@@ -7283,10 +7285,11 @@ static int PWNativeThirdPersonUpdate(lua_State* L) {
     const float pitch=Clamp(Signed(Finite(t.playercontrol.finalcameraanglex_f-tp.camerafocus,0.f)),-65.f,80.f);
     static DWORD last=0;static int lastAvatar=0;static Vec lastPosition={};static float fraction=1.f;
     static float stanceOffset=0.f;
+    static unsigned int lastEpoch=0;
     const DWORD now=GetTickCount();
-    const bool reset=lastAvatar!=avatar||now-last>250||Length(Sub(player,lastPosition))>200.f;
+    const bool reset=lastEpoch!=tp.pwLifecycleEpoch||lastAvatar!=avatar||now-last>250||Length(Sub(player,lastPosition))>200.f;
     const float dt=reset?0.016f:Clamp(static_cast<float>(now-last)*0.001f,0.f,0.1f);
-    last=now;lastAvatar=avatar;lastPosition=player;
+    last=now;lastAvatar=avatar;lastPosition=player;lastEpoch=tp.pwLifecycleEpoch;
     PositionObject(avatar,player.x,player.y-35.f,player.z);
     const bool aiming=t.playercontrol.camrightmousemode==1||tp.shotfired==1||tp.camerafollow==0;
     const float current=ObjectAngleY(avatar);
