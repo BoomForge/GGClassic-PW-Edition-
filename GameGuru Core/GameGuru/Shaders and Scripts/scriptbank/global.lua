@@ -321,10 +321,20 @@ function PWProfileImportPendingValues()
  local stats,scalars=pwProfileParse(g_PWProfilePayload)
  if stats then pwTransitionModule.import(scalars) end
 end
+-- Preflight only in the native single-player destination. Older engines and
+-- FPS retain their established restore behaviour.
+local function pwNativeRestorePlan(saved)
+ if not PWNativeRestoreWeaponPlan or not PWNativeRestoreWeaponApply then return nil end
+ return PWNativeRestoreWeaponPlan(saved[3],saved[4],saved[8],saved[12],saved[16],
+  saved[20],saved[24],saved[28],saved[32],saved[36],saved[40])
+end
 function PWProfileApplyPending()
  g_PWProfileValid=0
+ g_PWProfileWeaponFallback=0
  local saved,scalars=pwProfileParse(g_PWProfilePayload)
  if not saved then return end
+ local planned=pwNativeRestorePlan(saved)
+ if planned~=nil and (planned<0 or saved[1]<=0) then return end
  if not pwTransitionModule.import(scalars) then return end
  g_PlayerHealth=saved[1];g_PlayerLives=saved[2]
  SetPlayerHealth(saved[1]);SetPlayerLives(saved[2])
@@ -337,7 +347,10 @@ function PWProfileApplyPending()
   SetWeaponPoolAmmo(index,saved[offset+3])
   offset=offset+4
  end
- ChangePlayerWeaponID(saved[3])
+ if planned~=nil then
+  local selected=PWNativeRestoreWeaponApply(planned)
+  g_PWProfileWeaponFallback=(not selected or planned~=saved[3]) and 1 or 0
+ else ChangePlayerWeaponID(saved[3]) end
  SetFreezePosition(saved[44],saved[45],saved[46])
  SetFreezeAngle(saved[47],saved[48],saved[49])
  TransportToFreezePosition()
@@ -390,6 +403,8 @@ function GameLoopLoadStats()
  end
  file:close()
  if not valid then return end
+ local planned=pwNativeRestorePlan(saved)
+ if planned~=nil and planned<0 then return end
 
  g_PlayerHealth = saved[1]
  g_PlayerLives = saved[2]
@@ -404,7 +419,7 @@ function GameLoopLoadStats()
   local pool = saved[offset+3]
   if weaponID > 0 then
    SetWeaponSlot(index, weaponID, weaponID)
-   ChangePlayerWeaponID(weaponID)
+   if planned==nil then ChangePlayerWeaponID(weaponID) end
   else
    SetWeaponSlot(index, 0, 0)
   end
@@ -413,7 +428,8 @@ function GameLoopLoadStats()
   SetWeaponPoolAmmo(index, pool)
   offset = offset + 4
  end
- ChangePlayerWeaponID(heldWeaponID)
+ if planned~=nil then PWNativeRestoreWeaponApply(planned)
+ else ChangePlayerWeaponID(heldWeaponID) end
 
  if pwTransitionModule then pwTransitionModule.load() end
 end
