@@ -655,7 +655,15 @@ static void PWRenderPlayerClipEditor(int e)
             {"Jump / vault","csi_stoodvault",t.csi_stoodvaultANIM[1],0,0,false},
             {"Punch","csi_stoodpunch",t.csi_stoodpunchANIM[1],0,0,false},
             {"Kick","csi_stoodkick",t.csi_stoodkickANIM[1],0,0,false},
-            {"Reload","csi_stoodreload",t.csi_stoodreloadANIM[1],0,0,false}
+            {"Reload","csi_stoodreload",t.csi_stoodreloadANIM[1],0,0,false},
+            {"Crouch down","csi_crouchdown",t.csi_crouchdownANIM[1],0,0,false},
+            {"Crouch idle A","csi_crouchidlenormal1",t.csi_crouchidlenormalANIM0[1],0,0,false},
+            {"Crouch idle B","csi_crouchidlenormal2",t.csi_crouchidlenormalANIM1[1],0,0,false},
+            {"Crouch walk","csi_crouchmovefore",t.csi_crouchmoveforeANIM[1],0,0,false},
+            {"Crouch back","csi_crouchmoveback",t.csi_crouchmovebackANIM[1],0,0,false},
+            {"Crouch left","csi_crouchmoveleft",t.csi_crouchmoveleftANIM[1],0,0,false},
+            {"Crouch right","csi_crouchmoveright",t.csi_crouchmoverightANIM[1],0,0,false},
+            {"Stand up","csi_crouchgetup",t.csi_crouchgetupANIM[1],0,0,false}
         };
         const int offset = t.entityprofile[bank].startofaianim;
         for (auto& row : rows) {
