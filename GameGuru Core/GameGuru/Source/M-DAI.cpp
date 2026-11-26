@@ -3152,6 +3152,17 @@ void char_getcharseqcsifromplaycsi ( void )
 		t.charseqcsib_f=t.entityanim[t.ttentid][t.q+t.csi_stoodnormalANIM[t.charanimstate.weapstyle]].start+1;
 	}
 	t.charseqcsiloopback=t.charseq[t.charanimstate.playcsi].loopback;
+	// Native player crouch-walk may use custom CSI ranges. Its legacy
+	// absolute loopback (2075) must follow the mapped clip start instead.
+	if(t.playercontrol.thirdperson.enabled==1&&t.charanimstate.e==t.playercontrol.thirdperson.charactere&&
+		t.charanimstate.weapstyle>=1&&t.charanimstate.weapstyle<=5&&
+		t.charanimstate.playcsi==t.csi_crouchmoveforeANIM[t.charanimstate.weapstyle])
+	{
+		char legacy[4]={};
+		const bool useLegacy=GetEnvironmentVariableA("GGCPW_LEGACY_THIRDPERSON",legacy,sizeof(legacy))==1&&legacy[0]=='1';
+		if(!useLegacy&&t.game.runasmultiplayer==0&&g.gvrmode==0&&g.globals.riftmode==0)
+			t.charseqcsiloopback=t.charseqcsia_f;
+	}
 	if (  t.charseqcsiloopback>0 ) 
 	{
 		if (  t.charseqcsiloopback == 100  )  t.charseqcsiloopback = t.entityanim[t.ttentid][t.q+t.csi_stoodnormalANIM[t.charanimstate.weapstyle]].start;
