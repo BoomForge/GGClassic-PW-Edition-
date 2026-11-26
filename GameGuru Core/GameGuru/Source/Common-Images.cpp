@@ -182,6 +182,11 @@ int loadinternalimagecompressquality ( char* tfile_s, int compressmode, int qual
 	}
 
 	//  Did not find, load it
+    // Existing bank entry may outlive a registry resource. Restore its ID.
+    if(imgid>0&&!ImageExist(imgid)){
+        loadinternalimageexcompressquality(tfile_s,imgid,compressmode,quality,0);
+        return ImageExist(imgid)?imgid:0;
+    }
 	if (  tt>g.imagebankmax ) 
 	{
 		//  first see if we have any free slots
@@ -257,6 +262,10 @@ int loadinternaltexturemode ( char* tfile_s, int iImageLoaderMode )
 	}
 
 	//  Did not find, load it
+    if(texid>0&&!ImageExist(texid)){
+        loadinternalimageexcompressquality(tfile_s,texid,1,0,iImageLoaderMode);
+        return ImageExist(texid)?texid:0;
+    }
 	if (  tt>g.texturebankmax ) 
 	{
 		toldtexturebankmax=g.texturebankmax;
@@ -414,6 +423,10 @@ int loadinternaltextureex ( char* tfile_s, int compressmode, int quality )
 	}
 
 	//  Did not find, load it
+    if(texid>0&&!ImageExist(texid)){
+        loadinternalimageexcompressquality(tfile_s,texid,compressmode,quality,0);
+        return ImageExist(texid)?texid:0;
+    }
 	if ( tt>g.texturebankmax ) 
 	{
 		toldtexturebankmax=g.texturebankmax;
