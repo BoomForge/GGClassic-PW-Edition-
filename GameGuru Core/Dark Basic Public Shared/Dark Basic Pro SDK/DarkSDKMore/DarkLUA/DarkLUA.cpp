@@ -7020,6 +7020,76 @@ static bool PWNativeThirdPersonReady(int& e,int& avatar) {
     avatar=t.entityelement[e].obj;
     return avatar>0&&ObjectExist(avatar)&&t.entityelement[e].ragdollified==0;
 }
+// Check all normal crouch locomotion clips for the current Classic weapon
+// style. Do not shrink the player for a rig with missing/out-of-bounds clips.
+static bool PWThirdPersonCrouchSupported(int e,int index) {
+    using namespace PWThirdPerson;
+    if(index<=0||index>g.charanimindexmax)return false;
+    const int bank=t.entityelement[e].bankindex;
+    if(bank<=0||bank>g.entidmaster||t.entityprofile[bank].animstyle!=0)return false;
+    const int style=t.charanimstates[index].weapstyle;
+    if(style<1||style>5)return false;
+    const int obj=g.entitybankoffset+bank;
+    if(!ObjectExist(obj))return false;
+    const sObject* data=GetObjectData(obj);
+    if(!data||!data->pAnimationSet||!data->pAnimationSet->pAnimation)return false;
+    const float extent=static_cast<float>(data->pAnimationSet->ulLength);
+    const int offset=t.entityprofile[bank].startofaianim;
+    const bool rocket=t.charanimstates[index].rocketstyle==1;
+    const int slots[]={
+        rocket?t.csi_crouchdownrocketANIM[style]:t.csi_crouchdownANIM[style],
+        rocket?t.csi_crouchgetuprocketANIM[style]:t.csi_crouchgetupANIM[style],
+        rocket?t.csi_crouchidlerocketANIM[style]:t.csi_crouchidlenormalANIM0[style],
+        rocket?t.csi_crouchidlerocketANIM[style]:t.csi_crouchidlenormalANIM1[style],
+        t.csi_crouchmoveforeANIM[style],t.csi_crouchmovebackANIM[style],
+        t.csi_crouchmoveleftANIM[style],t.csi_crouchmoverightANIM[style]
+    };
+    for(int slot:slots){
+        if(offset<0||offset>g.animmax||slot<0||slot>g.animmax-offset)return false;
+        const auto& clip=t.entityanim[bank][offset+slot];
+        if(!ValidCharacterClip(clip.start,clip.finish,extent))return false;
+    }
+    return true;
+}
+static int PWNativeThirdPersonCrouch(lua_State* L) {
+    using namespace PWThirdPerson;
+    int e=0,avatar=0;
+    if(!PWNativeThirdPersonReady(e,avatar)){lua_pushboolean(L,0);return 1;}
+    const int body=t.aisystem.objectstartindex;
+    const bool ducked=ODEGetCharacterControllerDucking(body)!=0;
+    const bool grounded=ObjectAngleX(body)==1.f; // existing Bullet grounded flag
+    const int index=t.playercontrol.thirdperson.characterindex;
+    const bool allowed=t.player[1].health>0&&t.plrhasfocus!=0&&
+        g.luacameraoverride!=1&&g.luacameraoverride!=3&&t.playercontrol.gravityactive==1&&
+        t.playercontrol.underwater==0&&t.playercontrol.jumpmode!=1;
+    t.aisystem.playerducking=CrouchRequest(t.plrkeyC==1||g.forcecrouch==1,
+        PWThirdPersonCrouchSupported(e,index),allowed,grounded,ducked);
+    lua_pushboolean(L,1);return 1;
+}
+static int PWNativeThirdPersonCanJump(lua_State* L) {
+    int e=0,avatar=0;
+    if(!PWNativeThirdPersonReady(e,avatar)){lua_pushboolean(L,1);return 1;}
+    const int body=t.aisystem.objectstartindex;
+    lua_pushboolean(L,PWThirdPerson::CanStartGroundJump(ObjectAngleX(body)==1.f,
+        t.aisystem.playerducking!=0,ODEGetCharacterControllerDucking(body)!=0));
+    return 1;
+}
+// The old crouch movement sequences include trigger-zero segments designed
+// for AI root motion. Keep player input responsive during those segments,
+// while preserving animation locks for actual actions and stance changes.
+static bool PWCrouchMovementSequence(int csi,int style) {
+    if(style<1||style>5)return false;
+    return csi>=t.csi_crouchmovefore[style]&&csi<t.csi_crouchmoverun[style];
+}
+static int PWNativeThirdPersonCrouchMoving(lua_State* L) {
+    int e=0,avatar=0;
+    if(!PWNativeThirdPersonReady(e,avatar)){lua_pushboolean(L,0);return 1;}
+    const int index=t.playercontrol.thirdperson.characterindex;
+    if(index<=0||index>g.charanimindexmax){lua_pushboolean(L,0);return 1;}
+    const auto& state=t.charanimstates[index];
+    lua_pushboolean(L,PWCrouchMovementSequence(state.playcsi,state.weapstyle));
+    return 1;
+}
 // Compute third-person locomotion from the same remapped digital actions used
 // by the native physics controller. Keep its existing acceleration/slope and
 // jump integration, rather than teleporting the avatar.
@@ -7037,7 +7107,8 @@ static int PWNativeThirdPersonMove(lua_State* L) {
     t.playercontrol.camrightmousemode=allowed&&(buttons&2)!=0?1:0;
     const bool aim=t.playercontrol.camrightmousemode!=0||tp.shotfired!=0||tp.camerafollow==0;
     const auto m=DecideMovement(CameraAngleY(0),t.plrkeyW,t.plrkeyA,t.plrkeyS,t.plrkeyD,
-        t.plrkeySHIFT==1||t.plrkeySHIFT2==1,t.playercontrol.canrun!=0,aim,false,allowed);
+        t.plrkeySHIFT==1||t.plrkeySHIFT2==1,t.playercontrol.canrun!=0,aim,
+        t.aisystem.playerducking!=0||ODEGetCharacterControllerDucking(t.aisystem.objectstartindex)!=0,allowed);
     t.playercontrol.movement=m.moving?1:0;
     if(m.moving)t.playercontrol.movey_f=m.direction;
     t.playercontrol.isrunning=m.running?1:0;
@@ -7058,23 +7129,56 @@ static int PWNativeThirdPersonAnimate(lua_State* L) {
     const bool moving=t.playercontrol.movement!=0&&t.player[1].health>0&&g.luacameraoverride!=1&&g.luacameraoverride!=3;
     t.charanimstate=t.charanimstates[index];
     t.charanimstate.e=e;
-    t.charanimcontrols[index].moving=MovementAnimation(moving,t.playercontrol.isrunning!=0,
+    const bool ducked=ODEGetCharacterControllerDucking(t.aisystem.objectstartindex)!=0;
+    const bool crouchSupported=PWThirdPersonCrouchSupported(e,index);
+    t.charanimcontrols[index].ducking=CrouchAnimation(ducked&&crouchSupported);
+    const int movement=MovementAnimation(moving,t.playercontrol.isrunning!=0&&!ducked,
         aim,t.playercontrol.movey_f,t.playercontrol.cy_f);
+    t.charanimcontrols[index].moving=movement;
+    const int style=t.charanimstate.weapstyle;
+    // Interrupt only existing crouch locomotion (never reload/death/attack)
+    // when stopping, changing direction or when Bullet actually stands.
+    if(PWCrouchMovementSequence(t.charanimstate.playcsi,style)){
+        const int current=t.charanimstate.playcsi;
+        const int desired=movement==1?t.csi_crouchmovefore[style]:
+            movement==2?t.csi_crouchmoveback[style]:
+            movement==3?t.csi_crouchmoveleft[style]:
+            movement==4?t.csi_crouchmoveright[style]:t.csi_crouchidle[style];
+        const int currentStart=current<t.csi_crouchmoveback[style]?t.csi_crouchmovefore[style]:
+            current<t.csi_crouchmoveleft[style]?t.csi_crouchmoveback[style]:
+            current<t.csi_crouchmoveright[style]?t.csi_crouchmoveleft[style]:t.csi_crouchmoveright[style];
+        if(!ducked||!crouchSupported||desired!=currentStart){
+            t.charanimstate.playcsi=ducked&&crouchSupported?desired:
+                (t.charanimstate.rocketstyle==1?t.csi_crouchgetuprocket[style]:t.csi_crouchgetup[style]);
+            t.charanimstate.freezeanyrotation=0;
+        }
+    }
     const float polarity=GetSpeed(avatar)<0.f?-1.f:1.f;
     SetObjectSpeed(avatar,t.entityelement[e].speedmodulator_f*t.charanimstate.animationspeed_f*polarity*2.5f*g.timeelapsed_f);
     // This is the same engine animation state machine used by the original
     // script. It continues to own melee, reload and authored sequences.
+    const int previousIndex=g.charanimindex;
+    g.charanimindex=index;
     char_loop();
+    g.charanimindex=previousIndex;
     const int original=t.charanimstate.originale;
     if(original>0&&original<=g.entityelementlist&&t.charanimstate.obj==avatar&&ObjectExist(avatar)){
         const int bank=t.entityelement[original].bankindex;
-        if(bank>0){
-            const int anim=t.entityprofile[bank].startofaianim+t.csi_stoodvault[1];
+        const int style=t.charanimstate.weapstyle;
+        if(bank>0&&bank<=g.entidmaster&&style>=1&&style<=5){
+            const int anim=t.entityprofile[bank].startofaianim+t.csi_stoodvaultANIM[style];
+            if(anim>=0&&anim<=g.animmax){
             const float first=t.entityanim[bank][anim].start,last=t.entityanim[bank][anim].finish;
             const float hold=JumpHoldFrame(first,last,t.entityprofile[bank].jumphold);
             const float frame=GetFrame(avatar);
-            if(hold>=0.f&&t.playercontrol.jumpmode==1&&frame>=first&&frame<=last&&frame>hold)
-                SetObjectFrame(avatar,hold);
+            const bool airborne=ObjectAngleX(t.aisystem.objectstartindex)!=1.f;
+            const int csi=t.charanimstate.playcsi;
+            // Only hold the actual vault sequence, not other clips that
+            // happen to overlap its frame range. Release on ground contact.
+            if(hold>=0.f&&airborne&&t.playercontrol.jumpmode==1&&
+                csi>=t.csi_stoodvault[style]&&csi<t.csi_stoodvault[style]+3&&
+                frame>=first&&frame<=last&&frame>hold)SetObjectFrame(avatar,hold);
+            }
         }
     }
     t.charanimstate.e=0;
@@ -7148,6 +7252,9 @@ static int PWCanInteract(lua_State* L) {
 void addFunctions()
 {
     lua_register(lua,"PWCanInteract",PWCanInteract);
+    lua_register(lua,"PWNativeThirdPersonCrouch",PWNativeThirdPersonCrouch);
+    lua_register(lua,"PWNativeThirdPersonCanJump",PWNativeThirdPersonCanJump);
+    lua_register(lua,"PWNativeThirdPersonCrouchMoving",PWNativeThirdPersonCrouchMoving);
     lua_register(lua,"PWNativeThirdPersonMove",PWNativeThirdPersonMove);
     lua_register(lua,"PWNativeThirdPersonAnimate",PWNativeThirdPersonAnimate);
     lua_register(lua,"PWNativeThirdPersonUpdate",PWNativeThirdPersonUpdate);
