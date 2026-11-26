@@ -30,6 +30,7 @@
 #include <atomic>
 #include <mutex>
 #include "PW-TextureBudget.h"
+#include "PW-TextureStage.h"
 
 extern "C" HANDLE GG_CreateFile( LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile );
 extern "C" void GG_GetRealPath( char* fullPath, int create );
@@ -202,6 +203,156 @@ static ID3D11Resource* PWTakePreloadedTexture(const char* filename,int mipPolicy
     return nullptr; // never stall on an unfinished preload
 }
 #endif
+
+#ifdef DX11
+namespace {
+struct PWStagedDDS {
+    std::string path;
+    std::vector<std::uint8_t> bytes;
+    BY_HANDLE_FILE_INFORMATION stamp={};
+    DirectX::TexMetadata metadata={};
+    std::uint64_t generation=0;
+};
+struct PWStageState {
+    std::mutex mutex;
+    std::atomic<bool> cancel{false};
+    std::thread worker;
+    std::vector<PWStagedDDS> ready;
+    std::vector<std::string> hints; // main-thread only, previous level observations
+    std::uint64_t generation=0;
+    bool active=false;
+    std::size_t uploaded=0,missed=0,invalid=0;
+    std::atomic<std::size_t> prepared{0},preparedBytes{0};
+    void Stop(){
+        cancel.store(true);
+        if(worker.joinable())worker.join();
+        std::lock_guard<std::mutex> lock(mutex);
+        ready.clear();
+    }
+    ~PWStageState(){Stop();}
+};
+PWStageState pwStage;
+static bool PWStageEnabled(){
+    char enabled[8]={};
+    return GetEnvironmentVariableA("GGCPW_TEXTURE_STAGE",enabled,sizeof(enabled))==1&&enabled[0]=='1';
+}
+static void PWStageReport(){
+    if(!pwStage.active)return;
+    char temp[MAX_PATH]={},path[MAX_PATH+80]={};
+    const DWORD n=GetTempPathA(MAX_PATH,temp);
+    if(!n||n>=MAX_PATH||sprintf_s(path,sizeof(path),"%sGGCPW-texturestage-%lu.csv",temp,(unsigned long)GetCurrentProcessId())<=0)return;
+    HANDLE file=CreateFileA(path,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(file==INVALID_HANDLE_VALUE)return;
+    LARGE_INTEGER size={};DWORD written=0;
+    if(GetFileSizeEx(file,&size)&&size.QuadPart==0){
+        const char header[]="generation,prepared_files,prepared_bytes,uploaded,missed,invalid,hints_next\r\n";
+        WriteFile(file,header,sizeof(header)-1,&written,nullptr);
+    }
+    char row[256]={};
+    const int count=sprintf_s(row,sizeof(row),"%llu,%llu,%llu,%llu,%llu,%llu,%llu\r\n",
+        (unsigned long long)pwStage.generation,(unsigned long long)pwStage.prepared.load(),
+        (unsigned long long)pwStage.preparedBytes.load(),(unsigned long long)pwStage.uploaded,
+        (unsigned long long)pwStage.missed,(unsigned long long)pwStage.invalid,(unsigned long long)pwStage.hints.size());
+    if(count>0)WriteFile(file,row,(DWORD)count,&written,nullptr);
+    CloseHandle(file);
+}
+static void PWStageObserve(const char* path){
+    if(pwStage.hints.size()>=PWTextureStage::HintLimit)return;
+    for(const auto& hint:pwStage.hints)if(_stricmp(hint.c_str(),path)==0)return;
+    try{pwStage.hints.emplace_back(path);}catch(...){/* optional optimisation */}
+}
+// Called only from the original texture-load thread, never from the worker.
+static ID3D11Resource* PWStageTake(const char* resolved,const GGIMAGE_INFO& info){
+    if(!pwStage.active||info.MipLevels<=1)return nullptr;
+    char full[1024]={};
+    if(!PWPreloadPath(resolved,full))return nullptr;
+    PWStageObserve(full);
+    PWStagedDDS item;
+    {
+        std::lock_guard<std::mutex> lock(pwStage.mutex);
+        auto& ready=pwStage.ready;
+        auto found=std::find_if(ready.begin(),ready.end(),[&](const PWStagedDDS& x){
+            return x.generation==pwStage.generation&&_stricmp(x.path.c_str(),full)==0;
+        });
+        if(found==ready.end()){++pwStage.missed;return nullptr;}
+        item=std::move(*found);ready.erase(found);
+    }
+    const auto& meta=item.metadata;
+    if(meta.width!=info.Width||meta.height!=info.Height||meta.mipLevels!=info.MipLevels||meta.format!=info.Format){
+        ++pwStage.invalid;return nullptr;
+    }
+    // Retain the same-file read handle through upload, preventing concurrent
+    // writes/replacement. A changed/locked file uses the ordinary loader.
+    PWTextureStage::File current(full);
+    BY_HANDLE_FILE_INFORMATION now={};
+    if(!current.Info(now)||!PWTextureStage::SameFile(item.stamp,now)){++pwStage.invalid;return nullptr;}
+    ID3D11Resource* resource=nullptr;
+    const HRESULT hr=DirectX::CreateDDSTextureFromMemory(m_pD3D,item.bytes.data(),item.bytes.size(),&resource,nullptr);
+    if(SUCCEEDED(hr)&&resource){
+        D3D11_RESOURCE_DIMENSION dimension=D3D11_RESOURCE_DIMENSION_UNKNOWN;
+        resource->GetType(&dimension);
+        if(dimension==D3D11_RESOURCE_DIMENSION_TEXTURE2D){
+            D3D11_TEXTURE2D_DESC desc={};
+            static_cast<ID3D11Texture2D*>(resource)->GetDesc(&desc);
+            if(desc.Width==info.Width&&desc.Height==info.Height&&desc.MipLevels==info.MipLevels&&
+                desc.Format==info.Format&&desc.ArraySize==1&&desc.SampleDesc.Count==1){
+                ++pwStage.uploaded;return resource;
+            }
+        }
+    }
+    if(resource)resource->Release();
+    ++pwStage.invalid;return nullptr;
+}
+}
+#endif
+void PWTextureStageEnd(){
+#ifdef DX11
+    pwStage.Stop();PWStageReport();pwStage.active=false;
+#endif
+}
+void PWTextureStageBegin(){
+#ifdef DX11
+    PWTextureStageEnd();
+    if(!PWStageEnabled()){pwStage.hints.clear();return;}
+    std::vector<std::string> hints;
+    hints.swap(pwStage.hints);
+    ++pwStage.generation;
+    pwStage.uploaded=pwStage.missed=pwStage.invalid=0;
+    pwStage.prepared.store(0);pwStage.preparedBytes.store(0);
+    pwStage.cancel.store(false);pwStage.active=true;
+    if(hints.empty())return;
+    const auto generation=pwStage.generation;
+    try{
+        pwStage.worker=std::thread([hints=std::move(hints),generation](){
+            std::size_t remaining=PWTextureStage::BatchLimit;
+            try{
+                for(const auto& path:hints){
+                    if(pwStage.cancel.load()||remaining<128)break;
+                    PWStagedDDS item;
+                    if(!PWTextureStage::Read(path.c_str(),remaining,pwStage.cancel,item.bytes,item.stamp))continue;
+                    // Parse headers on CPU. The native upload path consumes the
+                    // original DDS mip payload; do not expand BC data to RGBA.
+                    if(FAILED(DirectX::GetMetadataFromDDSMemory(item.bytes.data(),item.bytes.size(),DirectX::DDS_FLAGS_NONE,item.metadata)))continue;
+                    const auto& m=item.metadata;
+                    if(m.dimension!=DirectX::TEX_DIMENSION_TEXTURE2D||m.arraySize!=1||m.IsCubemap()||
+                        m.mipLevels<=1||!m.width||!m.height||DirectX::IsTypeless(m.format))continue;
+                    if(pwStage.cancel.load())break;
+                    item.path=path;item.generation=generation;
+                    const auto bytes=item.bytes.size();
+                    {
+                        std::lock_guard<std::mutex> lock(pwStage.mutex);
+                        if(pwStage.cancel.load())break;
+                        pwStage.ready.push_back(std::move(item));
+                    }
+                    // Charge for the entire batch, including entries already
+                    // handed off to the render thread, to bound in-flight data.
+                    remaining-=bytes;pwStage.prepared.fetch_add(1);pwStage.preparedBytes.fetch_add(bytes);
+                }
+            }catch(...){/* allocation/decoder failures are ordinary cache misses */}
+        });
+    }catch(...){/* no worker; retain synchronous fallback */}
+#endif
+}
 
 namespace
 {
@@ -963,6 +1114,10 @@ DARKSDK void ImageDestructorD3D ( void )
 {
     // No preloader may retain allocations or use the device during teardown.
     image_preload_files_reset();
+    PWTextureStageEnd();
+#ifdef DX11
+    pwStage.hints.clear();
+#endif
     m_CurrentId = 0;
     m_imgptr = NULL;
 
@@ -1539,7 +1694,7 @@ DARKSDK LPGGTEXTURE GetTextureCore ( char* szFilename, GGIMAGE_INFO* info, int i
 		else
 		{
 			bool bIsDDS = false;
-			if (strnicmp(szFilename + strlen(szFilename) - 4, ".dds", 4) == NULL) bIsDDS = true;
+			if (strlen(szFilename)>=4 && strnicmp(szFilename + strlen(szFilename) - 4, ".dds", 4) == NULL) bIsDDS = true;
 
 			bool bFormatDDSLoadFriendly = true;
 
@@ -1594,7 +1749,12 @@ DARKSDK LPGGTEXTURE GetTextureCore ( char* szFilename, GGIMAGE_INFO* info, int i
 
 						DARKSDK int Timer(void);
 						int t = Timer();
-						hRes = DirectX::CreateDDSTextureFromFile(m_pD3D, m_pImmediateContext, wcstringTextureFilename, &lpTexture, NULL);
+						// M4: optional ready CPU data, original full-resolution upload on this thread.
+                        if(m_iMipMapNum==-1&&!g_bImageBlockActive)
+                            lpTexture=PWStageTake(szRealFilename,*info);
+                        if(!lpTexture)
+                            hRes = DirectX::CreateDDSTextureFromFile(m_pD3D, m_pImmediateContext, wcstringTextureFilename, &lpTexture, NULL);
+                        else hRes=S_OK;
 						direct_load_time += Timer() - t;
 						if (lpTexture != NULL)
 						{
@@ -1685,7 +1845,7 @@ DARKSDK LPGGTEXTURE GetTextureCore ( char* szFilename, GGIMAGE_INFO* info, int i
 			else
 			{
 				//PE: Make sure we keep current compression, if we just need to generate mipmaps.
-				if ( m_iMipMapNum == -1 && (*info).MipLevels == 1 && strnicmp(szFilename + strlen(szFilename) - 4, ".dds", 4) == NULL ) 
+				if ( m_iMipMapNum == -1 && (*info).MipLevels == 1 && strlen(szFilename)>=4 && strnicmp(szFilename + strlen(szFilename) - 4, ".dds", 4) == NULL ) 
 				{
 
 					//Only need to generate mipmaps so keep original compression.

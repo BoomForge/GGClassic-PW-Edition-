@@ -2,6 +2,26 @@
 // Compile with VS2022 x64; does not need licensed GameGuru media.
 #include "PW-LoadTrace.h"
 #include "PW-TextureBudget.h"
+#include "PW-TextureStage.h"
+static bool TestStage(){
+    using namespace PWTextureStage;
+    if(!Fits(128,BatchLimit)||Fits(127,BatchLimit)||Fits(FileLimit+1,BatchLimit)||Fits(256,128))return false;
+    char folder[MAX_PATH]={},path[MAX_PATH]={};
+    const DWORD n=GetTempPathA(MAX_PATH,folder);
+    if(!n||n>=MAX_PATH||!GetTempFileNameA(folder,"pws",0,path))return false;
+    unsigned char contents[256]={'D','D','S',' '};
+    HANDLE file=CreateFileA(path,GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    DWORD written=0;
+    bool ok=file!=INVALID_HANDLE_VALUE&&WriteFile(file,contents,sizeof(contents),&written,nullptr)&&written==sizeof(contents);
+    if(file!=INVALID_HANDLE_VALUE)CloseHandle(file);
+    std::atomic<bool> cancelled{false};std::vector<std::uint8_t> data;BY_HANDLE_FILE_INFORMATION stamp={},now={};
+    ok=ok&&Read(path,BatchLimit,cancelled,data,stamp)&&data.size()==sizeof(contents)&&data[0]=='D';
+    {File current(path);ok=ok&&current.Info(now)&&SameFile(stamp,now);}
+    cancelled.store(true);ok=ok&&!Read(path,BatchLimit,cancelled,data,stamp)&&data.empty();
+    cancelled.store(false);ok=ok&&!Read(path,128,cancelled,data,stamp)&&data.empty();
+    ++now.nFileSizeLow;ok=ok&&!SameFile(stamp,now);
+    DeleteFileA(path);return ok;
+}
 static bool TestBudget(){
     using namespace PWTextureBudget;
     Bytes parsed=0;
@@ -34,7 +54,7 @@ static bool TestBudget(){
 }
 int main()
 {
-    if(!TestBudget())return 1;
+    if(!TestBudget()||!TestStage())return 1;
     PWLoadTraceScope testLoad("test.synthetic_load");
     Sleep(3);
     return 0;

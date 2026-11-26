@@ -249,6 +249,7 @@ void game_masterroot_gameloop_initcode(int iUseVRTest)
 {
 	PWLoadTraceScope pwTraceGameLevelInit("game.transition.next_level_init");
     PWTextureMemorySample("level_init_begin");
+    PWTextureStageBegin();
 	//PE: For this to work we need to support decrypting files.
 	#ifdef WIP_PROLOADLEVELTEXTURES
 	//PE: START level proloader here.
@@ -3437,6 +3438,7 @@ void game_stopallsounds ( void )
 void game_freelevel ( void )
 {
 	PWLoadTraceScope pwTraceLevelCleanup("game.transition.cleanup");
+    PWTextureStageEnd();
     PWTextureMemorySample("level_cleanup_begin");
 	//  hide any jetpacks, etc
 	hud_free ( );
