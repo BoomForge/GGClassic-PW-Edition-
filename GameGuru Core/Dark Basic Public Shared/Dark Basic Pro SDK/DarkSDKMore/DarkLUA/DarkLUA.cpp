@@ -7059,7 +7059,12 @@ static int PWNativeThirdPersonCrouch(lua_State* L) {
     const bool ducked=ODEGetCharacterControllerDucking(body)!=0;
     const bool grounded=ObjectAngleX(body)==1.f; // existing Bullet grounded flag
     const int index=t.playercontrol.thirdperson.characterindex;
-    const bool allowed=t.player[1].health>0&&t.plrhasfocus!=0&&
+    bool stanceCanChange=ducked;
+    if(index>0&&index<=g.charanimindexmax){
+        const int seq=t.charanimstates[index].playcsi;
+        stanceCanChange=stanceCanChange||(seq>0&&seq<=g.csi_csimax&&t.charseq[seq].trigger!=0);
+    }
+    const bool allowed=stanceCanChange&&t.player[1].health>0&&t.plrhasfocus!=0&&
         g.luacameraoverride!=1&&g.luacameraoverride!=3&&t.playercontrol.gravityactive==1&&
         t.playercontrol.underwater==0&&t.playercontrol.jumpmode!=1;
     t.aisystem.playerducking=CrouchRequest(t.plrkeyC==1||g.forcecrouch==1,
@@ -7136,6 +7141,16 @@ static int PWNativeThirdPersonAnimate(lua_State* L) {
         aim,t.playercontrol.movey_f,t.playercontrol.cy_f);
     t.charanimcontrols[index].moving=movement;
     const int style=t.charanimstate.weapstyle;
+    // Standing locomotion's loop mode does not inspect ducking. Explicitly
+    // enter the crouch transition when the physical controller has crouched.
+    if(ducked&&crouchSupported&&style>=1&&style<=5){
+        const int seq=t.charanimstate.playcsi;
+        if((seq>=t.csi_stoodmovefore[style]&&seq<t.csi_stoodvault[style])||
+           (seq>=t.csi_stoodmoverun[style]&&seq<t.csi_stoodreload[style])){
+            t.charanimstate.playcsi=t.charanimstate.rocketstyle==1?
+                t.csi_crouchdownrocket[style]:t.csi_crouchdown[style];
+        }
+    }
     // Interrupt only existing crouch locomotion (never reload/death/attack)
     // when stopping, changing direction or when Bullet actually stands.
     if(PWCrouchMovementSequence(t.charanimstate.playcsi,style)){
@@ -7148,8 +7163,9 @@ static int PWNativeThirdPersonAnimate(lua_State* L) {
             current<t.csi_crouchmoveleft[style]?t.csi_crouchmoveback[style]:
             current<t.csi_crouchmoveright[style]?t.csi_crouchmoveleft[style]:t.csi_crouchmoveright[style];
         if(!ducked||!crouchSupported||desired!=currentStart){
-            t.charanimstate.playcsi=ducked&&crouchSupported?desired:
-                (t.charanimstate.rocketstyle==1?t.csi_crouchgetuprocket[style]:t.csi_crouchgetup[style]);
+            t.charanimstate.playcsi=!crouchSupported?t.csi_stood[style]:
+                (ducked?desired:(t.charanimstate.rocketstyle==1?
+                t.csi_crouchgetuprocket[style]:t.csi_crouchgetup[style]));
             t.charanimstate.freezeanyrotation=0;
         }
     }
