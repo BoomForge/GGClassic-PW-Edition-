@@ -3,6 +3,51 @@
 #include "PW-LoadTrace.h"
 #include "PW-TextureBudget.h"
 #include "PW-TextureStage.h"
+#include "PW-TextureMip.h"
+#include <wrl/client.h>
+#pragma comment(lib,"d3d11.lib")
+static bool TestMip(){
+    using Microsoft::WRL::ComPtr;
+    using namespace PWMip;
+    if(Tail(1024,512,11)!=2||Tail(128,128,8)!=0||
+        !Eligible(512,512,10,DXGI_FORMAT_BC1_UNORM)||Eligible(4096,4096,13,DXGI_FORMAT_BC3_UNORM)||
+        Eligible(512,512,9,DXGI_FORMAT_BC1_UNORM))return false;
+    ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> ctx;
+    const D3D_FEATURE_LEVEL level=D3D_FEATURE_LEVEL_11_0;
+    if(FAILED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,&level,1,D3D11_SDK_VERSION,
+        device.GetAddressOf(),nullptr,ctx.GetAddressOf())))return false;
+    std::vector<std::uint8_t> pixels[10];Span spans[10]={};
+    UINT dim=512;
+    for(UINT mip=0;mip<10;++mip){
+        const UINT blocks=(dim+3)/4;
+        pixels[mip].resize(static_cast<std::size_t>(blocks)*blocks*8,static_cast<std::uint8_t>(mip+1));
+        spans[mip].pixels=pixels[mip].data();spans[mip].row=blocks*8;
+        spans[mip].bytes=static_cast<UINT>(pixels[mip].size());
+        if(dim>1)dim/=2;
+    }
+    UINT first=0;ComPtr<ID3D11Texture2D> tex;
+    tex.Attach(Create(device.Get(),ctx.Get(),512,512,10,DXGI_FORMAT_BC1_UNORM,spans,first));
+    if(!tex||first!=1||ctx->GetResourceMinLOD(tex.Get())!=1.0f)return false;
+    ComPtr<ID3D11ShaderResourceView> view;
+    if(FAILED(device->CreateShaderResourceView(tex.Get(),nullptr,view.GetAddressOf())))return false;
+    if(!Promote(ctx.Get(),tex.Get(),first,spans[0])||first||ctx->GetResourceMinLOD(tex.Get())!=0.0f)return false;
+    ComPtr<ID3D11Resource> fromView;view->GetResource(fromView.GetAddressOf());
+    if(fromView.Get()!=tex.Get())return false;
+    D3D11_TEXTURE2D_DESC desc={};tex->GetDesc(&desc);
+    desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=0;desc.MiscFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+    ComPtr<ID3D11Texture2D> readback;
+    if(FAILED(device->CreateTexture2D(&desc,nullptr,readback.GetAddressOf())))return false;
+    ctx->CopyResource(readback.Get(),tex.Get());
+    D3D11_MAPPED_SUBRESOURCE map={};
+    if(FAILED(ctx->Map(readback.Get(),0,D3D11_MAP_READ,0,&map)))return false;
+    bool ok=map.RowPitch>=spans[0].row;
+    for(UINT row=0;ok&&row<128;++row){
+        const auto* data=static_cast<const std::uint8_t*>(map.pData)+static_cast<std::size_t>(row)*map.RowPitch;
+        for(UINT i=0;i<spans[0].row;++i)if(data[i]!=1){ok=false;break;}
+    }
+    ctx->Unmap(readback.Get(),0);
+    return ok;
+}
 static bool TestStage(){
     using namespace PWTextureStage;
     if(!Fits(128,BatchLimit)||Fits(127,BatchLimit)||Fits(FileLimit+1,BatchLimit)||Fits(256,128))return false;
@@ -54,7 +99,7 @@ static bool TestBudget(){
 }
 int main()
 {
-    if(!TestBudget()||!TestStage())return 1;
+    if(!TestBudget()||!TestStage()||!TestMip())return 1;
     PWLoadTraceScope testLoad("test.synthetic_load");
     Sleep(3);
     return 0;

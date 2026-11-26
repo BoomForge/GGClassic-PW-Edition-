@@ -178,6 +178,7 @@ DARKSDK void				image_preload_files_reset	( void );
 DARKSDK bool				image_preload_files_in_progress	(void);
 void PWTextureStageBegin();
 void PWTextureStageEnd();
+void PWTextureStageTick();
 
 DARKSDK unsigned char*		DecompressImage ( LPGGSURFACE pTexSurface );
 

@@ -3911,6 +3911,7 @@ extern int NumberOfObjectsShown;
 
 void game_main_loop ( void )
 {
+    PWTextureStageTick();
     PWTextureMemorySample("gameplay",true);	
 	//  Timer (  based movement )
 	if ( g.gproducelogfiles == 2 ) timestampactivity(0,"calling game_timeelapsed");

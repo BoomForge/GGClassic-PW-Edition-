@@ -31,6 +31,8 @@
 #include <mutex>
 #include "PW-TextureBudget.h"
 #include "PW-TextureStage.h"
+#include "PW-TextureMip.h"
+#include <memory>
 
 extern "C" HANDLE GG_CreateFile( LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile );
 extern "C" void GG_GetRealPath( char* fullPath, int create );
@@ -211,6 +213,7 @@ struct PWStagedDDS {
     std::vector<std::uint8_t> bytes;
     BY_HANDLE_FILE_INFORMATION stamp={};
     DirectX::TexMetadata metadata={};
+    std::unique_ptr<DirectX::ScratchImage> decoded;
     std::uint64_t generation=0;
 };
 struct PWStageState {
@@ -232,6 +235,68 @@ struct PWStageState {
     ~PWStageState(){Stop();}
 };
 PWStageState pwStage;
+struct PWMipRelease { void operator()(ID3D11Texture2D* p)const{if(p)p->Release();} };
+struct PWPendingMip {
+    std::unique_ptr<ID3D11Texture2D,PWMipRelease> texture;
+    std::unique_ptr<DirectX::ScratchImage> decoded;
+    UINT first=0;
+    std::uint64_t generation=0;
+};
+static std::vector<PWPendingMip> pwMipPending;
+static std::size_t pwMipStarted=0,pwMipSteps=0,pwMipFinished=0;
+static bool PWMipEnabled(){
+    char value[8]={};
+    return GetEnvironmentVariableA("GGCPW_TEXTURE_PROMOTE",value,sizeof(value))==1&&value[0]=='1';
+}
+static bool PWMipMarked(const std::string& path){
+    std::string lower=path;
+    for(auto& c:lower){if(c>='A'&&c<='Z')c=static_cast<char>(c-'A'+'a');}
+    const char suffix[]="_pwstream_d.dds";
+    return lower.find("\\entitybank\\user\\")!=std::string::npos&&lower.size()>=sizeof(suffix)-1&&
+        lower.compare(lower.size()-(sizeof(suffix)-1),sizeof(suffix)-1,suffix)==0;
+}
+static PWMip::Span PWMipSpan(const DirectX::ScratchImage& image,UINT mip){
+    const auto* src=image.GetImage(mip,0,0);
+    PWMip::Span span;
+    if(src&&src->rowPitch<=PWMip::FrameBytes&&src->slicePitch<=PWMip::FrameBytes){
+        span.pixels=src->pixels;span.row=static_cast<UINT>(src->rowPitch);span.bytes=static_cast<UINT>(src->slicePitch);
+    }
+    return span;
+}
+static bool PWMipStep(PWPendingMip& pending){
+    if(!m_pD3D||!m_pImmediateContext||FAILED(m_pD3D->GetDeviceRemovedReason())||
+        pending.generation!=pwStage.generation||!pending.first)return false;
+    if(!PWMip::Promote(m_pImmediateContext,pending.texture.get(),pending.first,PWMipSpan(*pending.decoded,pending.first-1)))return false;
+    ++pwMipSteps;
+    if(!pending.first)++pwMipFinished;
+    return true;
+}
+// Finish a specific borrowed CPU resource before returning it to legacy code.
+// For level transitions finish all, as editor assets may survive teardown.
+static void PWMipDrain(ID3D11Resource* only=nullptr){
+    for(auto it=pwMipPending.begin();it!=pwMipPending.end();){
+        if(only&&it->texture.get()!=only){++it;continue;}
+        while(it->first&&PWMipStep(*it)){}
+        it=pwMipPending.erase(it);
+    }
+}
+static ID3D11Resource* PWMipStart(PWStagedDDS& item){
+    if(!item.decoded||!PWMipEnabled()||pwMipPending.size()>=PWMip::MaxPending||
+        !m_pD3D||!m_pImmediateContext)return nullptr;
+    const auto& m=item.decoded->GetMetadata();
+    if(m.mipLevels>12)return nullptr;
+    PWMip::Span spans[12]={};
+    for(UINT i=0;i<static_cast<UINT>(m.mipLevels);++i)spans[i]=PWMipSpan(*item.decoded,i);
+    PWPendingMip p;
+    p.texture.reset(PWMip::Create(m_pD3D,m_pImmediateContext,static_cast<UINT>(m.width),static_cast<UINT>(m.height),
+        static_cast<UINT>(m.mipLevels),m.format,spans,p.first));
+    if(!p.texture)return nullptr;
+    p.generation=item.generation;p.decoded=std::move(item.decoded);
+    try{pwMipPending.push_back(std::move(p));}catch(...){return nullptr;}
+    ID3D11Texture2D* result=pwMipPending.back().texture.get();
+    result->AddRef(); // registry's original load reference; queue owns a separate ref
+    ++pwMipStarted;return result;
+}
 static bool PWStageEnabled(){
     char enabled[8]={};
     return GetEnvironmentVariableA("GGCPW_TEXTURE_STAGE",enabled,sizeof(enabled))==1&&enabled[0]=='1';
@@ -245,14 +310,15 @@ static void PWStageReport(){
     if(file==INVALID_HANDLE_VALUE)return;
     LARGE_INTEGER size={};DWORD written=0;
     if(GetFileSizeEx(file,&size)&&size.QuadPart==0){
-        const char header[]="generation,prepared_files,prepared_bytes,uploaded,missed,invalid,hints_next\r\n";
+        const char header[]="generation,prepared_files,prepared_bytes,uploaded,missed,invalid,hints_next,mip_started,mip_steps,mip_finished\r\n";
         WriteFile(file,header,sizeof(header)-1,&written,nullptr);
     }
     char row[256]={};
-    const int count=sprintf_s(row,sizeof(row),"%llu,%llu,%llu,%llu,%llu,%llu,%llu\r\n",
+    const int count=sprintf_s(row,sizeof(row),"%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\r\n",
         (unsigned long long)pwStage.generation,(unsigned long long)pwStage.prepared.load(),
         (unsigned long long)pwStage.preparedBytes.load(),(unsigned long long)pwStage.uploaded,
-        (unsigned long long)pwStage.missed,(unsigned long long)pwStage.invalid,(unsigned long long)pwStage.hints.size());
+        (unsigned long long)pwStage.missed,(unsigned long long)pwStage.invalid,(unsigned long long)pwStage.hints.size(),
+        (unsigned long long)pwMipStarted,(unsigned long long)pwMipSteps,(unsigned long long)pwMipFinished);
     if(count>0)WriteFile(file,row,(DWORD)count,&written,nullptr);
     CloseHandle(file);
 }
@@ -262,7 +328,7 @@ static void PWStageObserve(const char* path){
     try{pwStage.hints.emplace_back(path);}catch(...){/* optional optimisation */}
 }
 // Called only from the original texture-load thread, never from the worker.
-static ID3D11Resource* PWStageTake(const char* resolved,const GGIMAGE_INFO& info){
+static ID3D11Resource* PWStageTake(const char* resolved,const GGIMAGE_INFO& info,bool allowPromotion){
     if(!pwStage.active||info.MipLevels<=1)return nullptr;
     char full[1024]={};
     if(!PWPreloadPath(resolved,full))return nullptr;
@@ -286,6 +352,9 @@ static ID3D11Resource* PWStageTake(const char* resolved,const GGIMAGE_INFO& info
     PWTextureStage::File current(full);
     BY_HANDLE_FILE_INFORMATION now={};
     if(!current.Info(now)||!PWTextureStage::SameFile(item.stamp,now)){++pwStage.invalid;return nullptr;}
+    if(allowPromotion){
+        if(auto* promoted=PWMipStart(item)){++pwStage.uploaded;return promoted;}
+    }
     ID3D11Resource* resource=nullptr;
     const HRESULT hr=DirectX::CreateDDSTextureFromMemory(m_pD3D,item.bytes.data(),item.bytes.size(),&resource,nullptr);
     if(SUCCEEDED(hr)&&resource){
@@ -307,7 +376,7 @@ static ID3D11Resource* PWStageTake(const char* resolved,const GGIMAGE_INFO& info
 #endif
 void PWTextureStageEnd(){
 #ifdef DX11
-    pwStage.Stop();PWStageReport();pwStage.active=false;
+    pwStage.Stop();PWMipDrain();PWStageReport();pwStage.active=false;
 #endif
 }
 void PWTextureStageBegin(){
@@ -318,12 +387,14 @@ void PWTextureStageBegin(){
     hints.swap(pwStage.hints);
     ++pwStage.generation;
     pwStage.uploaded=pwStage.missed=pwStage.invalid=0;
+    pwMipStarted=pwMipSteps=pwMipFinished=0;
     pwStage.prepared.store(0);pwStage.preparedBytes.store(0);
     pwStage.cancel.store(false);pwStage.active=true;
     if(hints.empty())return;
     const auto generation=pwStage.generation;
+    const bool promote=PWMipEnabled();
     try{
-        pwStage.worker=std::thread([hints=std::move(hints),generation](){
+        pwStage.worker=std::thread([hints=std::move(hints),generation,promote](){
             std::size_t remaining=PWTextureStage::BatchLimit;
             try{
                 for(const auto& path:hints){
@@ -338,7 +409,20 @@ void PWTextureStageBegin(){
                         m.mipLevels<=1||!m.width||!m.height||DirectX::IsTypeless(m.format))continue;
                     if(pwStage.cancel.load())break;
                     item.path=path;item.generation=generation;
-                    const auto bytes=item.bytes.size();
+                    std::size_t bytes=item.bytes.size();
+                    // Reserve worst-case 2048-square BC3 mip chain before decoding.
+                    // Both raw and decoded payload count against the same batch limit.
+                    if(promote&&remaining-bytes>=PWMip::DecodeReserve&&PWMipMarked(path)&&
+                        m.width<=PWMip::MaxDimension&&m.height<=PWMip::MaxDimension&&m.mipLevels<=12&&
+                        PWMip::Eligible(static_cast<UINT>(m.width),static_cast<UINT>(m.height),static_cast<UINT>(m.mipLevels),m.format)){
+                        std::unique_ptr<DirectX::ScratchImage> decoded(new DirectX::ScratchImage);
+                        DirectX::TexMetadata decodedMeta={};
+                        if(SUCCEEDED(DirectX::LoadFromDDSMemory(item.bytes.data(),item.bytes.size(),DirectX::DDS_FLAGS_NONE,&decodedMeta,*decoded))&&
+                            decodedMeta.width==m.width&&decodedMeta.height==m.height&&decodedMeta.format==m.format&&
+                            decodedMeta.mipLevels==m.mipLevels&&decoded->GetPixelsSize()<=PWMip::DecodeReserve){
+                            bytes+=decoded->GetPixelsSize();item.decoded=std::move(decoded);
+                        }
+                    }
                     {
                         std::lock_guard<std::mutex> lock(pwStage.mutex);
                         if(pwStage.cancel.load())break;
@@ -351,6 +435,15 @@ void PWTextureStageBegin(){
             }catch(...){/* allocation/decoder failures are ordinary cache misses */}
         });
     }catch(...){/* no worker; retain synchronous fallback */}
+#endif
+}
+
+void PWTextureStageTick(){
+#ifdef DX11
+    if(!pwStage.active||pwMipPending.empty())return;
+    // One subresource per game frame, no more than 4 MiB for eligible formats.
+    auto& pending=pwMipPending.front();
+    if(!PWMipStep(pending)||!pending.first)pwMipPending.erase(pwMipPending.begin());
 #endif
 }
 
@@ -1751,7 +1844,7 @@ DARKSDK LPGGTEXTURE GetTextureCore ( char* szFilename, GGIMAGE_INFO* info, int i
 						int t = Timer();
 						// M4: optional ready CPU data, original full-resolution upload on this thread.
                         if(m_iMipMapNum==-1&&!g_bImageBlockActive)
-                            lpTexture=PWStageTake(szRealFilename,*info);
+                            lpTexture=PWStageTake(szRealFilename,*info,iOneToOnePixels==0&&iFullTexturePlateMode==0);
                         if(!lpTexture)
                             hRes = DirectX::CreateDDSTextureFromFile(m_pD3D, m_pImmediateContext, wcstringTextureFilename, &lpTexture, NULL);
                         else hRes=S_OK;
@@ -2457,6 +2550,9 @@ DARKSDK LPGGTEXTURE GetImagePointer ( int iID )
 		return NULL;
 
 	if (m_imgptr->lpTexture) {
+#ifdef DX11
+        if(!pwMipPending.empty())PWMipDrain(m_imgptr->lpTexture);
+#endif
 
 #ifdef PETESTIMAGEUSAGE
 		m_imgptr->AccessCountCPU++;
