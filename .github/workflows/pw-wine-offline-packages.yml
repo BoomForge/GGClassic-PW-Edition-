@@ -1,0 +1,32 @@
+name: Wine offline Debian package preparation
+on:
+  push:
+    branches:
+      - work/pw-community-integration-20261121
+    paths:
+      - '.github/workflows/pw-wine-offline-packages.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  packages:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Download official Debian 13 amd64 packages and dependencies
+        run: |
+          mkdir -p "$PWD/wine-debs"
+          docker run --rm -v "$PWD/wine-debs:/out" debian:13-slim bash -ec '
+            apt-get update
+            apt-get -y --download-only --no-install-recommends install wine64 wine libwine fonts-wine libgl1-mesa-dri xvfb xauth mesa-utils
+            cp /var/cache/apt/archives/*.deb /out/
+          '
+          cd wine-debs
+          sha256sum *.deb > SHA256SUMS
+          du -sh .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debian13-wine-amd64-offline
+          path: wine-debs/
+          compression-level: 0
+          retention-days: 1
