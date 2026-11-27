@@ -35,6 +35,7 @@
 #include "PW-TextureResidency.h"
 #ifdef DX11
 #include "PW-TextureTiled.h"
+#include "PW-TextureBenchmark.h"
 #endif
 #include <memory>
 
@@ -354,7 +355,7 @@ struct PWTiledLive {
     bool observed=false,everObserved=false,pinned=false;
 };
 static std::vector<PWTiledLive> pwTiled;
-static bool pwTiledEnabled=false;
+static bool pwTiledEnabled=false,pwTiledBroad=false;
 static unsigned pwTiledAttempts=0,pwTiledAdmitted=0,pwTiledDown=0,pwTiledUp=0,pwTiledFailures=0,pwTiledPins=0;
 static ULONGLONG pwTiledLastPolicy=0,pwTiledLastSample=0,pwTiledLastFrame=0,pwTiledMaxFrameMs=0,pwTiledMaxOpMs=0;
 static unsigned long long pwTiledReclaimed=0;
@@ -387,7 +388,7 @@ static void PWTiledFinish(){
     }
 }
 static bool PWTiledCandidate(const std::string& path,const GGIMAGE_INFO& info){
-    return pwTiledEnabled&&pwTiled.size()<PWMip::MaxPending&&pwTiledAttempts<16&&PWMipMarked(path)&&
+    return pwTiledEnabled&&pwTiled.size()<PWMip::MaxPending&&pwTiledAttempts<16&&(PWMipMarked(path)||PWTextureBenchmark::ApprovedDiffusePath(path,pwTiledBroad))&&
         PWMip::Eligible(info.Width,info.Height,info.MipLevels,info.Format);
 }
 static ID3D11Resource* PWTiledStart(const DirectX::ScratchImage& decoded){
@@ -477,6 +478,72 @@ static void PWTiledSample(ULONGLONG now){
         pwTiledReclaimed,(unsigned long long)pwTiledMaxFrameMs,(unsigned long long)pwTiledMaxOpMs);
     if(len>0)WriteFile(file,row,(DWORD)len,&written,nullptr);
     CloseHandle(file);pwTiledMaxFrameMs=pwTiledMaxOpMs=0;
+}
+// Independent A/B benchmark: captures the same gameplay loop with streaming
+// entirely disabled as with M5B active. No profiling work unless opted in.
+static bool pwBenchActive=false;
+static unsigned long long pwBenchGeneration=0;
+static ULONGLONG pwBenchLastWrite=0;
+static LARGE_INTEGER pwBenchPrevious={},pwBenchFrequency={};
+static PWTextureBenchmark::Window pwBenchWindow;
+static bool PWBenchOption(const char* name){
+    char value[8]={};
+    return GetEnvironmentVariableA(name,value,sizeof(value))==1&&value[0]=='1';
+}
+static void PWBenchWrite(ULONGLONG now){
+    if(!pwBenchActive||!pwBenchWindow.count)return;
+    PWAdaptiveQuery(now);
+    unsigned long long pool=0,backing=0;
+    for(const auto& item:pwTiled){pool+=item.texture->PoolBytes();backing+=item.top.size();}
+    PROCESS_MEMORY_COUNTERS_EX pm={};pm.cb=sizeof(pm);
+    const BOOL memoryOK=GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pm),sizeof(pm));
+    char temp[MAX_PATH]={},path[MAX_PATH+80]={},row[1024]={};
+    const DWORD n=GetTempPathA(MAX_PATH,temp);
+    if(!n||n>=MAX_PATH||sprintf_s(path,sizeof(path),"%sGGCPW-texturebench-%lu.csv",temp,(unsigned long)GetCurrentProcessId())<=0)return;
+    HANDLE file=CreateFileA(path,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(file==INVALID_HANDLE_VALUE)return;
+    LARGE_INTEGER size={};DWORD written=0;
+    if(GetFileSizeEx(file,&size)&&size.QuadPart==0){
+        const char header[]="generation,tick_ms,stage_on,tiled_on,broad_on,dxgi_valid,dxgi_usage,dxgi_budget,ram_valid,working_set,private_bytes,pool_bytes,cpu_backing_bytes,admitted,demotions,promotions,pins,failures,shrink_bytes,frame_count,frame_sum_ms,frame_max_ms,le5,le8,le10,le12,le16,le20,le25,le33,le50,le100,le250,gt250\r\n";
+        WriteFile(file,header,sizeof(header)-1,&written,nullptr);
+    }
+    int used=sprintf_s(row,sizeof(row),"%llu,%llu,%d,%d,%d,%d,%llu,%llu,%d,%llu,%llu,%llu,%llu,%u,%u,%u,%u,%u,%llu,%llu,%.6f,%.6f",
+        pwBenchGeneration,(unsigned long long)now,pwStage.active?1:0,pwTiledEnabled?1:0,pwTiledBroad?1:0,
+        pwAdaptiveTelemetry?1:0,pwAdaptiveUsage,pwAdaptiveBudget,memoryOK?1:0,
+        (unsigned long long)pm.WorkingSetSize,(unsigned long long)pm.PrivateUsage,pool,backing,
+        pwTiledAdmitted,pwTiledDown,pwTiledUp,pwTiledPins,pwTiledFailures,pwTiledReclaimed,
+        (unsigned long long)pwBenchWindow.count,pwBenchWindow.sum,pwBenchWindow.max);
+    if(used>0){
+        for(auto count:pwBenchWindow.bins){
+            const int len=sprintf_s(row+used,sizeof(row)-used,",%llu",(unsigned long long)count);
+            if(len<=0){used=0;break;}
+            used+=len;
+        }
+        if(used>0&&used+2<(int)sizeof(row)){
+            row[used++]='\r';row[used++]='\n';
+            WriteFile(file,row,(DWORD)used,&written,nullptr);
+        }
+    }
+    CloseHandle(file);
+    pwBenchWindow=PWTextureBenchmark::Window{};pwBenchLastWrite=now;
+}
+static void PWBenchBegin(){
+    pwBenchActive=PWBenchOption("GGCPW_TEXTURE_BENCHMARK");
+    pwBenchPrevious.QuadPart=0;pwBenchLastWrite=0;pwBenchWindow=PWTextureBenchmark::Window{};
+    if(!pwBenchActive)return;
+    if(!QueryPerformanceFrequency(&pwBenchFrequency)||!pwBenchFrequency.QuadPart){pwBenchActive=false;return;}
+    ++pwBenchGeneration;
+}
+static void PWBenchTick(){
+    if(!pwBenchActive)return;
+    LARGE_INTEGER now={};
+    if(!QueryPerformanceCounter(&now))return;
+    if(pwBenchPrevious.QuadPart&&now.QuadPart>=pwBenchPrevious.QuadPart)
+        pwBenchWindow.Add(1000.0*double(now.QuadPart-pwBenchPrevious.QuadPart)/double(pwBenchFrequency.QuadPart));
+    pwBenchPrevious=now;
+    const ULONGLONG tick=GetTickCount64();
+    if(!pwBenchLastWrite)pwBenchLastWrite=tick;
+    if(tick-pwBenchLastWrite>=1000)PWBenchWrite(tick);
 }
 static void PWTiledTick(){
     if(pwTiled.empty()||!PWAdaptiveDeviceOK())return;
@@ -620,7 +687,9 @@ static ID3D11Resource* PWStageTake(const char* resolved,const GGIMAGE_INFO& info
         if(PWTiledCandidate(full,info)&&item.decoded){
             if(auto* tiled=PWTiledStart(*item.decoded)){++pwStage.uploaded;return tiled;}
         }
-        if(auto* promoted=PWMipStart(item)){++pwStage.uploaded;return promoted;}
+        // Ordinary approved diffuse assets must fall back to full loading,
+        // not silently enter the marked-only progressive path.
+        if(PWMipMarked(full))if(auto* promoted=PWMipStart(item)){++pwStage.uploaded;return promoted;}
     }
     ID3D11Resource* resource=nullptr;
     const HRESULT hr=DirectX::CreateDDSTextureFromMemory(m_pD3D,item.bytes.data(),item.bytes.size(),&resource,nullptr);
@@ -643,12 +712,16 @@ static ID3D11Resource* PWStageTake(const char* resolved,const GGIMAGE_INFO& info
 #endif
 void PWTextureStageEnd(){
 #ifdef DX11
-    pwStage.Stop();PWTiledSample(GetTickCount64());PWTiledFinish();PWMipDrain();PWAdaptiveForget();PWStageReport();pwStage.active=false;pwAdaptiveEnabled=false;pwTiledEnabled=false;
+    PWBenchWrite(GetTickCount64());pwBenchActive=false;
+    pwStage.Stop();PWTiledSample(GetTickCount64());PWTiledFinish();PWMipDrain();PWAdaptiveForget();PWStageReport();pwStage.active=false;pwAdaptiveEnabled=false;pwTiledEnabled=false;pwTiledBroad=false;
 #endif
 }
 void PWTextureStageBegin(){
 #ifdef DX11
     PWTextureStageEnd();
+    PWBenchBegin();
+    pwTiledAttempts=pwTiledAdmitted=pwTiledDown=pwTiledUp=pwTiledFailures=pwTiledPins=0;
+    pwTiledReclaimed=0;pwAdaptiveLastQuery=0;pwAdaptivePressure=false;pwAdaptiveTelemetry=false;pwAdaptiveUsage=pwAdaptiveBudget=0;
     if(!PWStageEnabled()){pwStage.hints.clear();return;}
     std::vector<std::string> hints;
     hints.swap(pwStage.hints);
@@ -660,6 +733,7 @@ void PWTextureStageBegin(){
     char tiled[8]={};
     pwTiledEnabled=pwAdaptiveEnabled&&PWMipEnabled()&&PWTiled::Supported(m_pD3D)&&
         GetEnvironmentVariableA("GGCPW_TEXTURE_TILED",tiled,sizeof(tiled))==1&&tiled[0]=='1';
+    pwTiledBroad=pwTiledEnabled&&PWBenchOption("GGCPW_TEXTURE_TILED_BROAD");
     pwTiledAttempts=pwTiledAdmitted=pwTiledDown=pwTiledUp=pwTiledFailures=pwTiledPins=0;
     pwTiledLastPolicy=pwTiledLastSample=pwTiledLastFrame=pwTiledMaxFrameMs=pwTiledMaxOpMs=pwTiledReclaimed=0;
     pwAdaptivePressure=false;pwAdaptiveTelemetry=false;pwAdaptiveUsage=pwAdaptiveBudget=0;
@@ -668,9 +742,9 @@ void PWTextureStageBegin(){
     pwStage.cancel.store(false);pwStage.active=true;
     if(hints.empty())return;
     const auto generation=pwStage.generation;
-    const bool promote=PWMipEnabled();
+    const bool promote=PWMipEnabled(),broader=pwTiledBroad;
     try{
-        pwStage.worker=std::thread([hints=std::move(hints),generation,promote](){
+        pwStage.worker=std::thread([hints=std::move(hints),generation,promote,broader](){
             std::size_t remaining=PWTextureStage::BatchLimit;
             try{
                 for(const auto& path:hints){
@@ -688,7 +762,7 @@ void PWTextureStageBegin(){
                     std::size_t bytes=item.bytes.size();
                     // Reserve worst-case 2048-square BC3 mip chain before decoding.
                     // Both raw and decoded payload count against the same batch limit.
-                    if(promote&&remaining-bytes>=PWMip::DecodeReserve&&PWMipMarked(path)&&
+                    if(promote&&remaining-bytes>=PWMip::DecodeReserve&&(PWMipMarked(path)||PWTextureBenchmark::ApprovedDiffusePath(path,broader))&&
                         m.width<=PWMip::MaxDimension&&m.height<=PWMip::MaxDimension&&m.mipLevels<=12&&
                         PWMip::Eligible(static_cast<UINT>(m.width),static_cast<UINT>(m.height),static_cast<UINT>(m.mipLevels),m.format)){
                         std::unique_ptr<DirectX::ScratchImage> decoded(new DirectX::ScratchImage);
@@ -737,6 +811,7 @@ void PWTextureResidencyObserve(ID3D11ShaderResourceView* view,float distance,boo
 }
 void PWTextureStageTick(){
 #ifdef DX11
+    PWBenchTick();
     if(!pwStage.active)return;
     if(!pwMipPending.empty()){
         auto& pending=pwMipPending.front();
