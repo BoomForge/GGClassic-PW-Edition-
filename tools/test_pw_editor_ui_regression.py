@@ -471,6 +471,24 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('ImGui::Button("Refresh 3D Preview")', inspector)
         self.assertIn("s.renderRequested=true;", inspector)
 
+    def test_live_tiled_texture_admission_and_safety(self):
+        image = (ROOT / "GameGuru Core/Dark Basic Public Shared/Dark Basic Pro SDK/Shared/Image/CImageC.cpp").read_text(encoding="utf-8")
+        renderer = (ROOT / "GameGuru Core/Dark Basic Public Shared/Dark Basic Pro SDK/Shared/Objects/CObjectManagerDBP.cpp").read_text(encoding="utf-8")
+        self.assertIn('GetEnvironmentVariableA("GGCPW_TEXTURE_TILED"', image)
+        self.assertIn("PWTiled::Supported(m_pD3D)", image)
+        self.assertIn("pwTiled.size()<PWMip::MaxPending", image)
+        self.assertIn("PWMipMarked(path)", image)
+        self.assertIn("PWTiledLoadFile(full,info)", image)
+        self.assertIn("PWTiledRegister(pImgPtr->lpTexture,pImgPtr->lpTextureView)", image)
+        self.assertIn("if(!PWTiledPin(m_imgptr->lpTexture))return NULL;", image)
+        self.assertIn("PWTiledPin(pImage->second->lpTexture)", image)
+        self.assertIn("PWTiledObserve(view,distance,safeMainDiffuse&&!shadowCamera)", image)
+        self.assertIn("PWTiledFinish();", image)
+        self.assertIn("pwTiled.clear();", image)
+        self.assertIn("GGCPW-texturetiled-%lu.csv", image)
+        self.assertIn("const bool pwShadowCamera=g_pGlob->dwRenderCameraID>=31;", renderer)
+        self.assertIn("PWTextureResidencyObserve(lpTexture,pwDistance,pwSafeMain&&i==0,pwShadowCamera)", renderer)
+
     def test_editor_quit_joins_workers_before_process_exit(self):
         finish = GRID.split("void mapeditorexecutable_finish(void)", 1)[1].split("void mapeditorexecutable(void)", 1)[0]
         order = [
