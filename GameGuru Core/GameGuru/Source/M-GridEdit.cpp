@@ -496,15 +496,15 @@ static ID3D11ShaderResourceView* pwInspectorCapture=nullptr;
 static void PWReleaseInspectorCapture(){
     if(pwInspectorCapture){pwInspectorCapture->Release();pwInspectorCapture=nullptr;}
 }
-static bool PWCaptureInspectorSurface(ID3D11Texture2D* surface,const D3D11_VIEWPORT& viewport){
+static bool PWCaptureInspectorSurface(ID3D11Texture2D* surface,const GGVIEWPORT& viewport){
     PWReleaseInspectorCapture();
     if(!surface)return false;
     D3D11_TEXTURE2D_DESC source={};surface->GetDesc(&source);
     if(!source.Width||!source.Height||source.SampleDesc.Count!=1||source.ArraySize!=1)return false;
     // Crop around the actual rendered viewport, not the backing texture centre.
-    const UINT vx=static_cast<UINT>((std::max)(0.f,viewport.TopLeftX));
-    const UINT vy=static_cast<UINT>((std::max)(0.f,viewport.TopLeftY));
-    if(vx>=source.Width||vy>=source.Height||viewport.Width<1.f||viewport.Height<1.f)return false;
+    const UINT vx=static_cast<UINT>(viewport.X);
+    const UINT vy=static_cast<UINT>(viewport.Y);
+    if(vx>=source.Width||vy>=source.Height||viewport.Width==0||viewport.Height==0)return false;
     const UINT vw=(std::min)(source.Width-vx,static_cast<UINT>(viewport.Width));
     const UINT vh=(std::min)(source.Height-vy,static_cast<UINT>(viewport.Height));
     const UINT side=(std::min)(512u,(std::min)(vw,vh));
@@ -21443,8 +21443,8 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
                                      fLargestY*fLargestY +
                                      fLargestZ*fLargestZ);
         const float safeExtent=std::isfinite(extent) ? extent : 100.0f;
-        const float viewportHeight=(std::max)(1.f,previewCamera->viewPort3D.Height);
-        const float viewportWidth=(std::max)(1.f,previewCamera->viewPort3D.Width);
+        const float viewportHeight=(std::max)(1.f,static_cast<float>(previewCamera->viewPort3D.Height));
+        const float viewportWidth=(std::max)(1.f,static_cast<float>(previewCamera->viewPort3D.Width));
         const float cropSide=(std::min)(512.f,(std::min)(viewportWidth,viewportHeight));
         const float tanVertical=std::tan((std::max)(10.f,(std::min)(150.f,previewCamera->fFOV))*0.00872664626f);
         const float tanCrop=(std::max)(0.01f,tanVertical*cropSide/viewportHeight*(std::min)(1.f,previewCamera->fAspect*viewportHeight/viewportWidth));
