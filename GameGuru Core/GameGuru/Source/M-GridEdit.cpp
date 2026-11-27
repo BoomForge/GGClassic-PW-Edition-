@@ -490,6 +490,40 @@ bool CheckTutorialPlaceit(void);
 bool CheckTutorialAction(const char * action, float x_adder = 0.0f );
 void RenderToPreview(int displayobj, int previewImageId = 0, float yaw = 0.0f, float pitch = 0.0f, float zoom = 1.0f);
 namespace PWAssetInspector { void RenderPending(); }
+// Inspector owns its capture separately from the legacy image registry. The
+// native tooltip still uses its original GrabImage path.
+static ID3D11ShaderResourceView* pwInspectorCapture=nullptr;
+static void PWReleaseInspectorCapture(){
+    if(pwInspectorCapture){pwInspectorCapture->Release();pwInspectorCapture=nullptr;}
+}
+static bool PWCaptureInspectorSurface(ID3D11Texture2D* surface){
+    PWReleaseInspectorCapture();
+    if(!surface)return false;
+    D3D11_TEXTURE2D_DESC source={};surface->GetDesc(&source);
+    if(!source.Width||!source.Height||source.SampleDesc.Count!=1||source.ArraySize!=1)return false;
+    const UINT side=(std::min)(512u,(std::min)(source.Width,source.Height));
+    ID3D11Device* device=nullptr;surface->GetDevice(&device);
+    if(!device)return false;
+    ID3D11DeviceContext* context=nullptr;device->GetImmediateContext(&context);
+    D3D11_TEXTURE2D_DESC desc={};
+    desc.Width=side;desc.Height=side;desc.MipLevels=1;desc.ArraySize=1;
+    desc.Format=source.Format;desc.SampleDesc.Count=1;desc.Usage=D3D11_USAGE_DEFAULT;
+    desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+    ID3D11Texture2D* copy=nullptr;ID3D11ShaderResourceView* view=nullptr;
+    bool ok=context&&SUCCEEDED(device->CreateTexture2D(&desc,nullptr,&copy))&&copy&&
+        SUCCEEDED(device->CreateShaderResourceView(copy,nullptr,&view))&&view;
+    if(ok){
+        const UINT x=(source.Width-side)/2,y=(source.Height-side)/2;
+        D3D11_BOX region={x,y,0,x+side,y+side,1};
+        context->CopySubresourceRegion(copy,0,0,0,0,surface,0,&region);
+        ok=SUCCEEDED(device->GetDeviceRemovedReason());
+    }
+    if(ok){pwInspectorCapture=view;view=nullptr;}
+    if(view)view->Release();if(copy)copy->Release();
+    if(context)context->Release();device->Release();
+    return ok;
+}
+
 void CheckTooltipObjectDelete(void);
 void get_tutorials(void);
 void SmallTutorialVideo(char *tutorial,char* combo_items[] = NULL, int combo_entries = 0,int iVideoSection = 0);
@@ -21512,10 +21546,10 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
     if (inspectorRender) RotateObject(displayobj, restoreAngleX, restoreAngleY, restoreAngleZ);
 	
 	// delete previous thumbnail
-	if (GetImageExistEx((inspectorRender ? previewImageId : g.importermenuimageoffset + 50)))
+	if (!inspectorRender && GetImageExistEx(g.importermenuimageoffset + 50))
 	{
 		image_setlegacyimageloading(true);
-		DeleteImage((inspectorRender ? previewImageId : g.importermenuimageoffset + 50));
+		DeleteImage(g.importermenuimageoffset + 50);
 		image_setlegacyimageloading(false);
 	}
 
@@ -21524,7 +21558,11 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
 	DBPRO_GLOBAL tagCameraData* m_mycam;
 	m_mycam = m_CameraManager.GetData(0);
 	float thumbnail_dimension = 512;
-	if (m_mycam)
+	if (inspectorRender)
+	{
+		PWCaptureInspectorSurface(m_mycam ? m_mycam->pCameraToImageSurface : nullptr);
+	}
+	else if (m_mycam)
 	{
 		extern GlobStruct* g_pGlob;
 		LPGGSURFACE	pTmpSurface = g_pGlob->pCurrentBitmapSurface;
@@ -21532,7 +21570,7 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
 
 		ImVec2 grab = ImVec2((m_mycam->viewPort3D.Width*0.5) - (thumbnail_dimension*0.5) , (m_mycam->viewPort3D.Height*0.5) - (thumbnail_dimension*0.5) );
 
-		GrabImage((inspectorRender ? previewImageId : g.importermenuimageoffset + 50), grab.x, grab.y, grab.x+thumbnail_dimension, grab.y + thumbnail_dimension, 0);
+		GrabImage(g.importermenuimageoffset + 50, grab.x, grab.y, grab.x+thumbnail_dimension, grab.y + thumbnail_dimension, 0);
 		g_pGlob->pCurrentBitmapSurface = pTmpSurface;
 	}
 
