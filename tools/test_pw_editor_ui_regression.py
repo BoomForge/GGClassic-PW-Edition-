@@ -471,6 +471,22 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('ImGui::Button("Refresh 3D Preview")', inspector)
         self.assertIn("s.renderRequested=true;", inspector)
 
+    def test_editor_quit_joins_workers_before_process_exit(self):
+        finish = GRID.split("void mapeditorexecutable_finish(void)", 1)[1].split("void mapeditorexecutable(void)", 1)[0]
+        order = [
+            "PWTextureStageEnd();",
+            "image_preload_files_reset();",
+            "object_preload_files_reset();",
+            "PWReleaseInspectorCapture();",
+            "common_justbeforeend();",
+            "ExitProcess ( 0 );",
+        ]
+        positions = [finish.index(call) for call in order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn('PWShutdownTrace("before texture stage shutdown")', finish)
+        self.assertIn('PWShutdownTrace("image preload reset returned; before object preload reset")', finish)
+        self.assertNotIn("TerminateProcess(", finish)
+
     def test_shutdown_trace_records_cleanup_milestones(self):
         self.assertIn('PWShutdownTrace("file-exit accepted")', GRID)
         self.assertIn('PWShutdownTrace("finish entered; before common_justbeforeend")', GRID)
