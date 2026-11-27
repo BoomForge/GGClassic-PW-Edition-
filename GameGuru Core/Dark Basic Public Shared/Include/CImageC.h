@@ -180,7 +180,7 @@ void PWTextureStageBegin();
 void PWTextureStageEnd();
 void PWTextureStageTick();
 bool PWTextureResidencyObserving();
-void PWTextureResidencyObserve(ID3D11ShaderResourceView* view,float distance,bool safeMainDiffuse);
+void PWTextureResidencyObserve(ID3D11ShaderResourceView* view,float distance,bool safeMainDiffuse,bool shadowCamera=false);
 
 DARKSDK unsigned char*		DecompressImage ( LPGGSURFACE pTexSurface );
 
