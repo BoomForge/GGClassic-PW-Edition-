@@ -686,7 +686,7 @@ inline void Draw() {
     ImGui::SetNextWindowSize(ImVec2(920,610),ImGuiCond_FirstUseEver);
     const bool visible=ImGui::Begin("Asset Inspector##PWAssetInspector",&s.open,
                                     ImGuiWindowFlags_NoDocking);
-    if (visible) {
+    if (visible && s.open) {
         const float left=(std::min)(300.f,ImGui::GetContentRegionAvail().x*0.35f);
         ImGui::BeginChild("##PWAssetDirectoryTree",ImVec2(left,0),true);
         ImGui::TextUnformatted("3D Models");
