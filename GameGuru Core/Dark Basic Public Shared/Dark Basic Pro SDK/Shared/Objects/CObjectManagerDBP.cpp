@@ -4168,7 +4168,8 @@ bool CObjectManager::DrawMesh ( sMesh* pMesh, bool bIgnoreOwnMeshVisibility, sOb
 
 			// apply textures for shader
 			#ifdef DX11
-            const bool pwObserve=PWTextureResidencyObserving()&&g_pGlob->dwRenderCameraID<31&&!bSkipDrawNow;
+            const bool pwShadowCamera=g_pGlob->dwRenderCameraID>=31;
+            const bool pwObserve=PWTextureResidencyObserving()&&!bSkipDrawNow;
             bool pwSafeMain=false;float pwDistance=0.0f;
             if(pwObserve&&g_pGlob->dwRenderCameraID==0&&pObject&&!pObject->bLockedObject&&!pObject->position.iGluedToObj){
                 if(GetCameraInternalData(0)){pwDistance=CalculateObjectDistanceFromCamera(pObject);pwSafeMain=true;}
@@ -4184,7 +4185,7 @@ bool CObjectManager::DrawMesh ( sMesh* pMesh, bool bIgnoreOwnMeshVisibility, sOb
 					lpTexture = pMesh->pTextures[i].pTexturesRefView;
 				else
 					lpTexture = GetImagePointerView ( pMesh->pTextures[i].iImageID );
-                if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,pwSafeMain&&i==0);
+                if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,pwSafeMain&&i==0,pwShadowCamera);
 				m_pImmediateContext->PSSetShaderResources ( i, 1, &lpTexture );
 
 				//PE: Only single texture on shadow maps.
@@ -4236,30 +4237,30 @@ bool CObjectManager::DrawMesh ( sMesh* pMesh, bool bIgnoreOwnMeshVisibility, sOb
 							{
 								// set mesh-part texture (090217 - added support for NSG)
 								ID3D11ShaderResourceView* lpTexture = pMultiMaterial [ dwMaterialIndex ].pTexturesRef;//GetImagePointerView ( pMesh->pTextures[i].iImageID );
-								if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,pwSafeMain);
+								if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,pwSafeMain,pwShadowCamera);
                                 m_pImmediateContext->PSSetShaderResources ( 0, 1, &lpTexture );
 								if ( pMultiMaterial [ dwMaterialIndex ].pTexturesRefN ) 
 								{
 									lpTexture = pMultiMaterial [ dwMaterialIndex ].pTexturesRefN;
-									if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,false);
+									if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,false,pwShadowCamera);
                                 m_pImmediateContext->PSSetShaderResources ( 2, 1, &lpTexture );
 								}
 								if ( pMultiMaterial [ dwMaterialIndex ].pTexturesRefS )
 								{
 									lpTexture = pMultiMaterial [ dwMaterialIndex ].pTexturesRefS;
-									if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,false);
+									if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,false,pwShadowCamera);
                                 m_pImmediateContext->PSSetShaderResources ( 3, 1, &lpTexture );
 								}
 								if ( pMultiMaterial [ dwMaterialIndex ].pTexturesRefG )
 								{
 									lpTexture = pMultiMaterial [ dwMaterialIndex ].pTexturesRefG;
-									if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,false);
+									if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,false,pwShadowCamera);
                                 m_pImmediateContext->PSSetShaderResources ( 6, 1, &lpTexture );
 								}
 								if ( pMultiMaterial [ dwMaterialIndex ].pTexturesRefM )
 								{
 									lpTexture = pMultiMaterial [ dwMaterialIndex ].pTexturesRefM;
-									if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,false);
+									if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,false,pwShadowCamera);
                                 m_pImmediateContext->PSSetShaderResources ( 5, 1, &lpTexture );
 								}
 							}
@@ -4267,9 +4268,16 @@ bool CObjectManager::DrawMesh ( sMesh* pMesh, bool bIgnoreOwnMeshVisibility, sOb
 							{
 								// 150217 - now supports full range of normal mapping in shader
 								ID3D11ShaderResourceView* lpTexture = pMultiMaterial [ dwMaterialIndex ].pTexturesRef;
-								if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,pwSafeMain);
+								if(pwObserve)PWTextureResidencyObserve(lpTexture,pwDistance,pwSafeMain,pwShadowCamera);
                                 m_pImmediateContext->PSSetShaderResources ( 0, 1, &lpTexture );
-								GGHANDLE diffuseHandle = pMesh->pVertexShaderEffect->m_pEffect->GetVariableByName( "DiffuseMap" );
+								// Effect-based material maps must also be observed as protected uses.
+                                if(pwObserve){
+                                    PWTextureResidencyObserve(pMultiMaterial[dwMaterialIndex].pTexturesRefN,pwDistance,false,pwShadowCamera);
+                                    PWTextureResidencyObserve(pMultiMaterial[dwMaterialIndex].pTexturesRefS,pwDistance,false,pwShadowCamera);
+                                    PWTextureResidencyObserve(pMultiMaterial[dwMaterialIndex].pTexturesRefG,pwDistance,false,pwShadowCamera);
+                                    PWTextureResidencyObserve(pMultiMaterial[dwMaterialIndex].pTexturesRefM,pwDistance,false,pwShadowCamera);
+                                }
+                                GGHANDLE diffuseHandle = pMesh->pVertexShaderEffect->m_pEffect->GetVariableByName( "DiffuseMap" );
 								if ( diffuseHandle ) 
 								{
 									diffuseHandle->AsShaderResource()->SetResource ( pMultiMaterial [ dwMaterialIndex ].pTexturesRef );
