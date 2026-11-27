@@ -54,6 +54,21 @@ jobs:
         working-directory: original
         shell: cmd
         run: msbuild "GameGuru Core\SDK\OGG\ogg_vorbis_static.sln" /t:Build /p:Configuration=Release /p:Platform=x64 /m:2 /nologo /v:minimal
+      - name: Remove missing unused DirectShow linker reference (build metadata only)
+        shell: pwsh
+        working-directory: original
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $needle = '$(ProjectDir)..\Dark Basic Public Shared\Dark Basic Pro SDK\Shared\BaseClasses\strmbase.lib;'
+          foreach ($path in @('GameGuru Core/Guru-MapEditor/DarkEXE.vcxproj','GameGuru Core/Guru-Lightmapper/Guru-Lightmapper.vcxproj')) {
+            $file = (Resolve-Path -LiteralPath $path).Path
+            $s = [IO.File]::ReadAllText($file)
+            if (-not $s.Contains($needle)) { throw "Missing expected obsolete linker entry: $path" }
+            [IO.File]::WriteAllText($file,$s.Replace($needle,''))
+          }
+          git diff --stat
+          $changed = @(git diff --name-only)
+          if ($changed.Count -ne 2 -or @($changed | Where-Object { $_ -notmatch '\.vcxproj$' }).Count -ne 0) { throw 'Unexpected tracked changes' }
       - name: Compile original engine
         shell: pwsh
         working-directory: original
@@ -73,8 +88,49 @@ jobs:
           if ([System.Text.Encoding]::Latin1.GetString($bytes).Contains('GameGuru Classic - PW Edition | ')) { throw 'Unexpected PW branding in upstream baseline' }
           $sha = (git rev-parse HEAD).Trim()
           $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
-          $report = [ordered]@{source_commit=$sha;binary_sha256=$hash;binary_bytes=$bytes.Length;compiled=$true;gameplay_tested=$false;media_available=$false}
+          $report = [ordered]@{source_commit=$sha;binary_sha256=$hash;binary_bytes=$bytes.Length;compiled=$true;build_metadata_change='Remove absent unused strmbase.lib reference';gameplay_tested=$false;media_available=$false}
           $report | ConvertTo-Json | Tee-Object -FilePath original-build-evidence.json
+      - name: Seal benchmark binary for local licensed testing
+        shell: pwsh
+        working-directory: original
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $publicKey = @'
+          -----BEGIN PUBLIC KEY-----
+          MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAxNFfXV5xlSVKnYmzJXQz
+          V67LSEc8ucPSSv9H4GcVuYwjylE+2vb58MzEZSBBR/xbevqTNJRD71t0AeQ67nW5
+          p9lygvRYwDOL8xGDPynKBd5+toub99cSatsnCt8I9Yeu/br2ys6EOvJTrgabcTJj
+          fsRFAYvZB4CEHxqQNdkhIci8J8lIkmUFi0A35wrGtc8e9co4waoCxkw2I7ZlXiyq
+          OcNacxu/u4Qf5TOaTkhATtFGpDE40wt6LKlO0RPZ9UhW2cTfoUjagnhIbE3xAbUa
+          QJ4i/+1fElzDqsZCABHFDYBUT+VnfxvPe2Snn4saHcTrtyhxjcJO9xicOEY1Grsc
+          uw51xNRCxaBoS9K2RL4g4+aQG9xiGMrRwzRi1ffIRxyBJrXOEK9H1o2J/vt4BTSo
+          cW+reZ8zFZld33RWoc+P/w9NEEWfbH8e8yff62YjaI4o/LA1z5pfSJpXuD5NLio/
+          n+/udUO22XygnoVQ/aCCD6Xp8D1/qQEvkbnfgb1xbzWtAgMBAAE=
+          -----END PUBLIC KEY-----
+          '@
+          $rsa = [System.Security.Cryptography.RSA]::Create()
+          $rsa.ImportFromPem($publicKey)
+          $key = [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
+          $nonce = [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(12)
+          $plain = [IO.File]::ReadAllBytes('D:\DEV\BUILDS\GameGuru Classic Build Area\Guru-MapEditor.exe')
+          $cipher = [byte[]]::new($plain.Length)
+          $tag = [byte[]]::new(16)
+          $aes = [System.Security.Cryptography.AesGcm]::new($key,16)
+          $aes.Encrypt($nonce,$plain,$cipher,$tag)
+          $wrapped = $rsa.Encrypt($key,[System.Security.Cryptography.RSAEncryptionPadding]::OaepSHA256)
+          New-Item -ItemType Directory -Force sealed | Out-Null
+          foreach ($entry in @{ 'cipher.bin'=$cipher; 'wrapped-key.bin'=$wrapped; 'nonce.bin'=$nonce; 'tag.bin'=$tag }.GetEnumerator()) {
+            [IO.File]::WriteAllBytes((Join-Path (Resolve-Path sealed).Path $entry.Key),$entry.Value)
+          }
+          $aes.Dispose()
+          $rsa.Dispose()
+      - name: Transfer encrypted binary only (no plaintext binary or game media)
+        uses: actions/upload-artifact@v4
+        with:
+          name: original-classic-sealed-local-test
+          path: original/sealed/
+          compression-level: 0
+          retention-days: 1
       - name: Upload evidence only
         if: always()
         uses: actions/upload-artifact@v4
