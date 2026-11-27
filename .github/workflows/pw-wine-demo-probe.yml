@@ -1,0 +1,51 @@
+name: PW Wine official demo availability
+on:
+  push:
+    branches:
+      - work/pw-community-integration-20261121
+    paths:
+      - '.github/workflows/pw-wine-demo-probe.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  official-demo:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check free official GameGuru demo via anonymous SteamCMD
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates curl lib32gcc-s1 file
+          mkdir -p "$RUNNER_TEMP/steamcmd" "$RUNNER_TEMP/gg-demo"
+          cd "$RUNNER_TEMP/steamcmd"
+          curl -fsSL --retry 2 https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar -xz
+          # Official demo app only. No paid depot, credentials, or entitlement bypass.
+          timeout 900s ./steamcmd.sh +@sSteamCmdForcePlatformType windows +force_install_dir "$RUNNER_TEMP/gg-demo" +login anonymous +app_update 1172740 validate +quit 2>&1 | tee "$GITHUB_WORKSPACE/demo-download.log"
+          grep -F "Success! App '1172740' fully installed." "$GITHUB_WORKSPACE/demo-download.log"
+      - name: Inventory runtime compatibility without publishing media
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/gg-demo"
+          {
+            du -sh "$root"
+            find "$root" -type f \( -iname '*.exe' -o -iname 'steam_api*.dll' -o -iname 'sdkencryptedappticket*.dll' \) -exec file {} +
+            echo "Map count:"
+            find "$root" -type f -iname '*.fpm' | wc -l
+            echo "Files directory:"
+            find "$root" -maxdepth 3 -type d -iname files
+          } | tee demo-inventory.log
+      - name: Upload logs only, never proprietary runtime or media
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-demo-probe-logs
+          path: |
+            demo-download.log
+            demo-inventory.log
+          if-no-files-found: warn
+          retention-days: 7
