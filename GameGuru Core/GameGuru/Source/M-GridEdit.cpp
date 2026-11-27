@@ -496,12 +496,19 @@ static ID3D11ShaderResourceView* pwInspectorCapture=nullptr;
 static void PWReleaseInspectorCapture(){
     if(pwInspectorCapture){pwInspectorCapture->Release();pwInspectorCapture=nullptr;}
 }
-static bool PWCaptureInspectorSurface(ID3D11Texture2D* surface){
+static bool PWCaptureInspectorSurface(ID3D11Texture2D* surface,const D3D11_VIEWPORT& viewport){
     PWReleaseInspectorCapture();
     if(!surface)return false;
     D3D11_TEXTURE2D_DESC source={};surface->GetDesc(&source);
     if(!source.Width||!source.Height||source.SampleDesc.Count!=1||source.ArraySize!=1)return false;
-    const UINT side=(std::min)(512u,(std::min)(source.Width,source.Height));
+    // Crop around the actual rendered viewport, not the backing texture centre.
+    const UINT vx=static_cast<UINT>((std::max)(0.f,viewport.TopLeftX));
+    const UINT vy=static_cast<UINT>((std::max)(0.f,viewport.TopLeftY));
+    if(vx>=source.Width||vy>=source.Height||viewport.Width<1.f||viewport.Height<1.f)return false;
+    const UINT vw=(std::min)(source.Width-vx,static_cast<UINT>(viewport.Width));
+    const UINT vh=(std::min)(source.Height-vy,static_cast<UINT>(viewport.Height));
+    const UINT side=(std::min)(512u,(std::min)(vw,vh));
+    if(!side)return false;
     ID3D11Device* device=nullptr;surface->GetDevice(&device);
     if(!device)return false;
     ID3D11DeviceContext* context=nullptr;device->GetImmediateContext(&context);
@@ -513,7 +520,7 @@ static bool PWCaptureInspectorSurface(ID3D11Texture2D* surface){
     bool ok=context&&SUCCEEDED(device->CreateTexture2D(&desc,nullptr,&copy))&&copy&&
         SUCCEEDED(device->CreateShaderResourceView(copy,nullptr,&view))&&view;
     if(ok){
-        const UINT x=(source.Width-side)/2,y=(source.Height-side)/2;
+        const UINT x=vx+(vw-side)/2,y=vy+(vh-side)/2;
         D3D11_BOX region={x,y,0,x+side,y+side,1};
         context->CopySubresourceRegion(copy,0,0,0,0,surface,0,&region);
         ok=SUCCEEDED(device->GetDeviceRemovedReason());
@@ -21329,10 +21336,34 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
 	int entid = displayobj - g.entitybankoffset;
     const bool inspectorRender = previewImageId > 0;
     if (!ObjectExist(displayobj)) return;
+    extern DBPRO_GLOBAL CCameraManager m_CameraManager;
+    tagCameraData* previewCamera=inspectorRender?m_CameraManager.GetData(0):nullptr;
+    if(inspectorRender&&!previewCamera)return;
+    const auto savedSmoothCamera=t.editorfreeflight.s;
+    const float restoreNear=previewCamera?previewCamera->fZNear:1.f;
+    const float restoreFar=previewCamera?previewCamera->fZFar:300000.f;
+    const float restoreCameraX=inspectorRender?CameraPositionX(0):0.f;
+    const float restoreCameraY=inspectorRender?CameraPositionY(0):0.f;
+    const float restoreCameraZ=inspectorRender?CameraPositionZ(0):0.f;
+    const float restoreCameraAX=inspectorRender?CameraAngleX(0):0.f;
+    const float restoreCameraAY=inspectorRender?CameraAngleY(0):0.f;
+    const float restoreCameraAZ=inspectorRender?CameraAngleZ(0):0.f;
+    sObject* previewObject=inspectorRender?GetObjectData(displayobj):nullptr;
+    const GGVECTOR3 restoreScale=previewObject?previewObject->position.vecScale:GGVECTOR3(1,1,1);
     const float restoreAngleX = ObjectAngleX(displayobj);
     const float restoreAngleY = ObjectAngleY(displayobj);
     const float restoreAngleZ = ObjectAngleZ(displayobj);
-    if (inspectorRender) RotateObject(displayobj, pitch, yaw, 0.0f);
+    if (inspectorRender) {
+        // Only the temporary preview object is resized; restore before it can
+        // be inserted/exported. Native DBO/X assets can have wildly different units.
+        const float largest=(std::max)({ObjectSizeX(displayobj,1),ObjectSizeY(displayobj,1),ObjectSizeZ(displayobj,1)});
+        if(std::isfinite(largest)&&largest>0.00001f){
+            const float factor=100.0f/largest;
+            ScaleObject(displayobj,restoreScale.x*100.f*factor,restoreScale.y*100.f*factor,restoreScale.z*100.f*factor);
+        }
+        RotateObject(displayobj, pitch, yaw, 0.0f);
+        SetCameraRange(0,1.f,300000.f);
+    }
 
 	// prepare for thumb , set camera.
 	oldx_f = t.editorfreeflight.c.x_f;
@@ -21378,22 +21409,13 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
             // away from its actual mesh. Aim at the scaled bounding-box centre.
             // Rotate the centre with the model so drag-orbit stays centred even
             // when the model pivot is offset from the geometry.
-            const float cx = (pObject->collision.vecMax[0] +
-                              pObject->collision.vecMin[0]) * 0.5f *
-                              pObject->position.vecScale[0] * fAdjustScaleX;
-            const float cy = (pObject->collision.vecMax[1] +
-                              pObject->collision.vecMin[1]) * 0.5f *
-                              pObject->position.vecScale[1] * fAdjustScaleY;
-            const float cz = (pObject->collision.vecMax[2] +
-                              pObject->collision.vecMin[2]) * 0.5f *
-                              pObject->position.vecScale[2] * fAdjustScaleZ;
-            const float radians = 0.01745329251994329577f;
-            const float p = pitch * radians, y = yaw * radians;
-            const float pitchedY = cy * std::cos(p) - cz * std::sin(p);
-            const float pitchedZ = cy * std::sin(p) + cz * std::cos(p);
-            fOffsetX = cx * std::cos(y) + pitchedZ * std::sin(y);
-            fOffsetY = pitchedY;
-            fOffsetZ = pitchedZ * std::cos(y) - cx * std::sin(y);
+            GGVECTOR3 centre=(pObject->collision.vecMax+pObject->collision.vecMin)*0.5f;
+            // Use the engine's actual scale/pivot/rotation matrix, rather than
+            // assuming a hand-written Euler order matches the object renderer.
+            if(previewObject){
+                GGVec3TransformCoord(&centre,&centre,&previewObject->position.matObjectNoTran);
+                fOffsetX=centre.x;fOffsetY=centre.y;fOffsetZ=centre.z;
+            }
             if (!std::isfinite(fOffsetX) || !std::isfinite(fOffsetY) ||
                 !std::isfinite(fOffsetZ)) {
                 // Malformed bounds must not send the preview camera to NaN.
@@ -21408,8 +21430,8 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
 	
 	fLargest += (fLargestY * 0.2);
 	//Prevent camera for getting to far away.
-	if (fLargest >= 1500) fLargest = 1500;
-	if (fLargestY >= 1500) fLargestY = 1500;
+	if (!inspectorRender && fLargest >= 1500) fLargest = 1500;
+	if (!inspectorRender && fLargestY >= 1500) fLargestY = 1500;
 
     if (inspectorRender) {
         // The native tooltip uses a hard-coded world camera and terrain
@@ -21421,7 +21443,12 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
                                      fLargestY*fLargestY +
                                      fLargestZ*fLargestZ);
         const float safeExtent=std::isfinite(extent) ? extent : 100.0f;
-        const float radius=(std::max)(35.0f,(std::min)(8000.0f,safeExtent)*1.6f)
+        const float viewportHeight=(std::max)(1.f,previewCamera->viewPort3D.Height);
+        const float viewportWidth=(std::max)(1.f,previewCamera->viewPort3D.Width);
+        const float cropSide=(std::min)(512.f,(std::min)(viewportWidth,viewportHeight));
+        const float tanVertical=std::tan((std::max)(10.f,(std::min)(150.f,previewCamera->fFOV))*0.00872664626f);
+        const float tanCrop=(std::max)(0.01f,tanVertical*cropSide/viewportHeight*(std::min)(1.f,previewCamera->fAspect*viewportHeight/viewportWidth));
+        const float radius=(std::max)(2.f,safeExtent*0.5f*(1.f+1.10f/tanCrop)/1.49345f)
                               * (std::max)(0.35f,(std::min)(4.0f,zoom));
         t.editorfreeflight.c.x_f=GGORIGIN_X + fOffsetX + radius;
         t.editorfreeflight.c.y_f=terrain_height + fOffsetY + radius*0.48f;
@@ -21479,15 +21506,15 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
 	}
 
 
-	PositionCamera(t.editorfreeflight.c.x_f, t.editorfreeflight.c.y_f, t.editorfreeflight.c.z_f);
-	RotateCamera(t.editorfreeflight.c.angx_f, t.editorfreeflight.c.angy_f, 0);
-    PointCamera(GGORIGIN_X + fOffsetX,
-                terrain_height + (inspectorRender ? fOffsetY : 0.0f),
-                GGORIGIN_Z + fOffsetZ);
     if (inspectorRender) {
-        t.editorfreeflight.c.angx_f=CameraAngleX();
-        t.editorfreeflight.c.angy_f=CameraAngleY();
+        PositionCamera(0,t.editorfreeflight.c.x_f,t.editorfreeflight.c.y_f,t.editorfreeflight.c.z_f);
+        PointCamera(0,GGORIGIN_X+fOffsetX,terrain_height+fOffsetY,GGORIGIN_Z+fOffsetZ);
+        t.editorfreeflight.c.angx_f=CameraAngleX(0);
+        t.editorfreeflight.c.angy_f=CameraAngleY(0);
     } else {
+        PositionCamera(t.editorfreeflight.c.x_f,t.editorfreeflight.c.y_f,t.editorfreeflight.c.z_f);
+        RotateCamera(t.editorfreeflight.c.angx_f,t.editorfreeflight.c.angy_f,0);
+        PointCamera(GGORIGIN_X+fOffsetX,terrain_height,GGORIGIN_Z+fOffsetZ);
 	if(fLargestY > 1000.0f)
 		t.editorfreeflight.c.angx_f = CameraAngleX() - 9.0f; //6.0
 	else if (fLargestY > 500.0f)
@@ -21555,7 +21582,10 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
 
 
 	PositionObject(displayobj, fOldObjPosX, fOldObjPosY, fOldObjPosZ);
-    if (inspectorRender) RotateObject(displayobj, restoreAngleX, restoreAngleY, restoreAngleZ);
+    if (inspectorRender) {
+        ScaleObject(displayobj,restoreScale.x*100.f,restoreScale.y*100.f,restoreScale.z*100.f);
+        RotateObject(displayobj, restoreAngleX, restoreAngleY, restoreAngleZ);
+    }
 	
 	// delete previous thumbnail
 	if (!inspectorRender && GetImageExistEx(g.importermenuimageoffset + 50))
@@ -21566,13 +21596,12 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
 	}
 
 	// we can't grab from the backbuffer when we use a camera image.
-	extern DBPRO_GLOBAL CCameraManager m_CameraManager;
 	DBPRO_GLOBAL tagCameraData* m_mycam;
 	m_mycam = m_CameraManager.GetData(0);
 	float thumbnail_dimension = 512;
 	if (inspectorRender)
 	{
-		PWCaptureInspectorSurface(m_mycam ? m_mycam->pCameraToImageSurface : nullptr);
+		if(m_mycam)PWCaptureInspectorSurface(m_mycam->pCameraToImageSurface,m_mycam->viewPort3D);
 	}
 	else if (m_mycam)
 	{
@@ -21593,8 +21622,15 @@ void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch,
 	t.editorfreeflight.c.z_f = oldz_f;
 	t.editorfreeflight.c.angx_f = oldangx_f;
 	t.editorfreeflight.c.angy_f = oldangy_f;
-	PositionCamera(t.editorfreeflight.c.x_f, t.editorfreeflight.c.y_f, t.editorfreeflight.c.z_f);
-	RotateCamera(t.editorfreeflight.c.angx_f, t.editorfreeflight.c.angy_f, 0);
+    if(inspectorRender){
+        t.editorfreeflight.s=savedSmoothCamera;
+        SetCameraRange(0,restoreNear,restoreFar);
+        PositionCamera(0,restoreCameraX,restoreCameraY,restoreCameraZ);
+        RotateCamera(0,restoreCameraAX,restoreCameraAY,restoreCameraAZ);
+    }else{
+        PositionCamera(t.editorfreeflight.c.x_f,t.editorfreeflight.c.y_f,t.editorfreeflight.c.z_f);
+        RotateCamera(t.editorfreeflight.c.angx_f,t.editorfreeflight.c.angy_f,0);
+    }
 
 
 	//Display everything again.
