@@ -471,6 +471,21 @@ class PWEditorUiRegressions(unittest.TestCase):
         self.assertIn('ImGui::Button("Refresh 3D Preview")', inspector)
         self.assertIn("s.renderRequested=true;", inspector)
 
+    def test_m6_benchmark_baseline_and_approved_eligibility(self):
+        import subprocess
+        import sys
+        image = (ROOT / "GameGuru Core/Dark Basic Public Shared/Dark Basic Pro SDK/Shared/Image/CImageC.cpp").read_text(encoding="utf-8")
+        header = (ROOT / "GameGuru Core/GameGuru/Include/PW-TextureBenchmark.h").read_text(encoding="utf-8")
+        self.assertIn('PWBenchOption("GGCPW_TEXTURE_BENCHMARK")', image)
+        self.assertIn("PWBenchTick();\n    if(!pwStage.active)return;", image)
+        self.assertIn("PWBenchBegin();", image)
+        self.assertIn('PWBenchOption("GGCPW_TEXTURE_TILED_BROAD")', image)
+        self.assertIn("ApprovedDiffusePath(path,pwTiledBroad)", image)
+        self.assertIn("pwstreamingapproved", header)
+        self.assertIn("if(PWMipMarked(full))if(auto* promoted=PWMipStart(item))", image)
+        self.assertIn("GGCPW-texturebench-%lu.csv", image)
+        subprocess.run([sys.executable, str(ROOT / "tools/pw_texture_benchmark.py"), "--self-test"], check=True)
+
     def test_live_tiled_texture_admission_and_safety(self):
         image = (ROOT / "GameGuru Core/Dark Basic Public Shared/Dark Basic Pro SDK/Shared/Image/CImageC.cpp").read_text(encoding="utf-8")
         renderer = (ROOT / "GameGuru Core/Dark Basic Public Shared/Dark Basic Pro SDK/Shared/Objects/CObjectManagerDBP.cpp").read_text(encoding="utf-8")
