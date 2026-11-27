@@ -68,6 +68,15 @@ static bool TestMip(){
 
 static bool TestTiled(){
     using Microsoft::WRL::ComPtr;
+    // Opt-in only; no reclaim for pinned, stale, unregistered, invisible
+    // or nearby use, even with high DXGI pressure.
+    if(PWTiled::Target(false,false,true,true,true,5000,true,0)||
+       PWTiled::Target(true,true,true,true,true,5000,true,0)||
+       PWTiled::Target(true,false,false,true,true,5000,true,0)||
+       PWTiled::Target(true,false,true,false,true,5000,true,0)||
+       PWTiled::Target(true,false,true,true,false,5000,true,0)||
+       PWTiled::Target(true,false,true,true,true,500,true,1)||
+       PWTiled::Target(true,false,true,true,true,5000,false,0)!=1)return false;
     PWTiled::Layout layout;layout.total=20;layout.finest=16;
     if(!layout.Valid()||layout.Bytes(true)!=20*65536u||layout.Bytes(false)!=4*65536u)return false;
     layout.finest=20;if(layout.Valid()||layout.Bytes(false))return false;
