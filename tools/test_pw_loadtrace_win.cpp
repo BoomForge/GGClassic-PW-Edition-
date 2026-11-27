@@ -6,6 +6,10 @@
 #include "PW-TextureMip.h"
 #include "PW-TextureResidency.h"
 #include "PW-TextureTiled.h"
+#include "PW-TextureBenchmark.h"
+#include <dxgi1_4.h>
+#include <psapi.h>
+#pragma comment(lib,"psapi.lib")
 #include <cstdio>
 static bool TestResidency(){
     using namespace PWResidency;
@@ -66,6 +70,52 @@ static bool TestMip(){
     return ok;
 }
 
+static bool TestBenchmark(){
+    using namespace PWTextureBenchmark;
+    const char* approved="C:\\Games\\GameGuru\\Files\\entitybank\\user\\PWStreamingApproved\\props\\crate_D.dds";
+    if(!ApprovedDiffusePath(approved,true)||ApprovedDiffusePath(approved,false)||
+        !ApprovedDiffusePath("D:/GG/Files/entitybank/user/PWStreamingApproved/rock_d.dds",true)||
+        ApprovedDiffusePath("C:\\GG\\Files\\entitybank\\user\\other\\rock_d.dds",true)||
+        ApprovedDiffusePath("C:\\GG\\Files\\entitybank\\user\\PWStreamingApproved\\..\\rock_d.dds",true)||
+        ApprovedDiffusePath("C:\\GG\\Files\\entitybank\\user\\PWStreamingApproved\\grass_d.dds",true)||
+        ApprovedDiffusePath("C:\\GG\\Files\\entitybank\\user\\PWStreamingApproved\\crate_n.dds",true))return false;
+    Window window;window.Add(5);window.Add(5.1);window.Add(16);window.Add(300);window.Add(-1);
+    return window.count==4&&window.bins[0]==1&&window.bins[1]==1&&window.bins[4]==1&&
+        window.bins[11]==1&&window.max==300&&std::abs(window.sum-326.1)<0.001;
+}
+// Flush submitted GPU work using a bounded event query. Do not report
+// post-shrink usage before queued copies and mappings have completed.
+static bool BenchmarkFence(ID3D11Device* device,ID3D11DeviceContext* ctx){
+    Microsoft::WRL::ComPtr<ID3D11Query> query;
+    D3D11_QUERY_DESC desc={D3D11_QUERY_EVENT,0};
+    if(FAILED(device->CreateQuery(&desc,query.GetAddressOf())))return false;
+    ctx->End(query.Get());ctx->Flush();
+    const ULONGLONG begin=GetTickCount64();
+    for(;;){
+        BOOL complete=FALSE;
+        const HRESULT hr=ctx->GetData(query.Get(),&complete,sizeof(complete),D3D11_ASYNC_GETDATA_DONOTFLUSH);
+        if(hr==S_OK&&complete)return true;
+        if(FAILED(hr)||GetTickCount64()-begin>=5000)return false;
+        Sleep(1);
+    }
+}
+static bool BenchmarkHardwareSample(ID3D11Device* device,ID3D11DeviceContext* ctx,
+    const char* phase,unsigned cycle,unsigned pool,ULONGLONG operationMs){
+    using Microsoft::WRL::ComPtr;
+    if(!BenchmarkFence(device,ctx))return false;
+    ComPtr<IDXGIDevice> dxgi;ComPtr<IDXGIAdapter> adapter;ComPtr<IDXGIAdapter3> adapter3;
+    DXGI_QUERY_VIDEO_MEMORY_INFO info={};
+    bool valid=SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(dxgi.GetAddressOf())))&&
+        SUCCEEDED(dxgi->GetAdapter(adapter.GetAddressOf()))&&
+        SUCCEEDED(adapter.As(&adapter3))&&
+        SUCCEEDED(adapter3->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_LOCAL,&info))&&info.Budget;
+    PROCESS_MEMORY_COUNTERS_EX pm={};pm.cb=sizeof(pm);
+    const BOOL ram=GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pm),sizeof(pm));
+    printf("M6_SAMPLE,%s,%u,%u,%d,%llu,%llu,%d,%llu,%llu,%llu\n",phase,cycle,pool,valid?1:0,
+        (unsigned long long)info.CurrentUsage,(unsigned long long)info.Budget,ram?1:0,
+        (unsigned long long)pm.WorkingSetSize,(unsigned long long)pm.PrivateUsage,(unsigned long long)operationMs);
+    return true;
+}
 static bool TestTiled(){
     using Microsoft::WRL::ComPtr;
     // Opt-in only; no reclaim for pinned, stale, unregistered, invisible
@@ -93,6 +143,8 @@ static bool TestTiled(){
         printf("M5B hardware tile mapping SKIPPED: tier 2 adapter unavailable\n");
         return !mustRun;
     }
+    printf("M6_SAMPLE_HEADER,phase,cycle,pool_bytes,dxgi_valid,dxgi_usage,dxgi_budget,ram_valid,working_set,private_bytes,operation_ms\n");
+    if(!BenchmarkHardwareSample(device.Get(),ctx.Get(),"before",0,0,0))return false;
     constexpr UINT size=1024,mips=11;
     std::vector<std::uint8_t> pixels[mips];PWMip::Span spans[mips]={};
     UINT dim=size;
@@ -125,13 +177,18 @@ static bool TestTiled(){
     };
     const UINT full=tex.PoolBytes(),coarse=tex.CoarseBytes();
     if(!coarse||coarse>=full||!check(0)||!check(mips-1))return false;
+    if(!BenchmarkHardwareSample(device.Get(),ctx.Get(),"full",0,full,0))return false;
     for(int cycle=0;cycle<3;++cycle){
+        const ULONGLONG demoteStart=GetTickCount64();
         if(!tex.Demote()||tex.Full()||tex.PoolBytes()!=coarse||ctx->GetResourceMinLOD(tex.Resource())!=1.0f||
             !check(1)||!check(mips-1))return false;
+        if(!BenchmarkHardwareSample(device.Get(),ctx.Get(),"coarse",cycle+1,coarse,GetTickCount64()-demoteStart))return false;
         PWMip::Span invalid={};
         if(tex.Promote(invalid)||tex.Full()||tex.PoolBytes()!=coarse)return false;
+        const ULONGLONG promoteStart=GetTickCount64();
         if(!tex.Promote(spans[0])||!tex.Full()||tex.PoolBytes()!=full||
             ctx->GetResourceMinLOD(tex.Resource())!=0.0f||!check(0)||!check(mips-1))return false;
+        if(!BenchmarkHardwareSample(device.Get(),ctx.Get(),"restored",cycle+1,full,GetTickCount64()-promoteStart))return false;
         ComPtr<ID3D11Resource> identity;view->GetResource(identity.GetAddressOf());
         if(identity.Get()!=tex.Resource())return false;
     }
@@ -190,7 +247,7 @@ static bool TestBudget(){
 }
 int main()
 {
-    if(!TestBudget()||!TestStage()||!TestMip()||!TestResidency()||!TestTiled())return 1;
+    if(!TestBudget()||!TestStage()||!TestMip()||!TestResidency()||!TestBenchmark()||!TestTiled())return 1;
     PWLoadTraceScope testLoad("test.synthetic_load");
     Sleep(3);
     return 0;
