@@ -18,6 +18,7 @@ namespace PWAssetInspector {
 struct State {
     bool open = false;
     bool renderRequested = false;
+    bool reloadRequested = false;
     std::string selected;
     std::string root;
     std::string status;
@@ -29,7 +30,6 @@ struct State {
     int modelId = 0;
     int modelTextureId = 0;
     int modelEffectId = 0;
-    int previewId = 0;
     float yaw = 0.f;
     float pitch = 0.f;
     float zoom = 1.f;
@@ -182,15 +182,15 @@ inline void Release(bool keepShader=false) {
     if (s.modelId && ObjectExist(s.modelId)) DeleteObject(s.modelId);
     if (s.imageId && ImageExist(s.imageId)) DeleteImage(s.imageId);
     if (s.modelTextureId && ImageExist(s.modelTextureId)) DeleteImage(s.modelTextureId);
-    if (s.previewId && ImageExist(s.previewId)) DeleteImage(s.previewId);
-    if (!keepShader && s.modelEffectId>0) deleteinternaleffect(s.modelEffectId);
-    s.modelId=s.imageId=s.modelTextureId=s.previewId=0;
+    PWReleaseInspectorCapture();
+    if (!keepShader && s.modelEffectId>0 && GetEffectExist(s.modelEffectId)) deleteinternaleffect(s.modelEffectId);
+    s.modelId=s.imageId=s.modelTextureId=0;
     if (!keepShader) s.modelEffectId=0;
-    s.isModel=s.isImage=s.renderRequested=false;
+    s.isModel=s.isImage=s.renderRequested=s.reloadRequested=false;
 }
-inline void Select(const std::string& file) {
+inline void Select(std::string file, bool force=false) {
     State& s=Current();
-    if (file==s.selected) return;
+    if (!force && file==s.selected && ((s.isModel && s.modelId && ObjectExist(s.modelId)) || (s.isImage && s.imageId && ImageExist(s.imageId)))) return;
     Release(true); // Keep the compiled preview shader between model selections.
     const DWORD loadStarted=GetTickCount();
     s.loadMilliseconds=0;
@@ -255,7 +255,7 @@ inline void Select(const std::string& file) {
     // has no GameGuru object effect. Assign an inspector-owned shader just as
     // the native model importer does: without this it may render no pixels.
     char basicShader[]="effectbank\\reloaded\\entity_basic.fx";
-    if (s.modelEffectId<=0)
+    if (s.modelEffectId<=0 || !GetEffectExist(s.modelEffectId))
         s.modelEffectId=loadinternaleffectunique(basicShader,1);
     if (s.modelEffectId>0) {
         SetObjectEffect(s.modelId,s.modelEffectId);
@@ -273,8 +273,6 @@ inline void Select(const std::string& file) {
             if (ImageExist(s.modelTextureId)) TextureObject(s.modelId,s.modelTextureId);
         }
     }
-    s.previewId=FreeImageId();
-    if (!s.previewId) { s.status="No free image ID for a 3D preview."; return; }
     HideObject(s.modelId);
     s.isModel=true;
     s.renderRequested=true;
@@ -681,6 +679,9 @@ inline void DrawSearchResults(const std::string& query) {
 inline void Draw() {
     State& s=Current();
     if (!s.open) return;
+    // Test Level / device teardown can invalidate the cached model or shader.
+    if (s.isModel && !s.selected.empty() && (!s.modelId || !ObjectExist(s.modelId) ||
+        (s.modelEffectId>0 && !GetEffectExist(s.modelEffectId)))) Select(s.selected,true);
     if (s.root.empty()) s.root=std::string(g.fpscrootdir_s.Get())+"\\Files";
     ImGui::SetNextWindowSize(ImVec2(920,610),ImGuiCond_FirstUseEver);
     const bool visible=ImGui::Begin("Asset Inspector##PWAssetInspector",&s.open,
@@ -726,7 +727,7 @@ inline void Draw() {
             if (view) ImGui::Image((ImTextureID)view,ImVec2(w*scale,h*scale));
             ImGui::Text("%d x %d pixels",ImageWidth(s.imageId),ImageHeight(s.imageId));
         } else if (s.isModel && s.modelId && ObjectExist(s.modelId)) {
-            ID3D11ShaderResourceView* view=s.previewId?GetImagePointerView(s.previewId):NULL;
+            ID3D11ShaderResourceView* view=pwInspectorCapture;
             const float availableWidth=ImGui::GetContentRegionAvail().x;
             const float size=(std::max)(120.f,(std::min)(500.f,availableWidth-5.f));
             // Keep the square 3D viewport centred within the right pane,
@@ -771,8 +772,8 @@ inline void Draw() {
             }
             ImGui::SameLine();
             if (ImGui::Button("Refresh 3D Preview")) {
-                s.renderRequested=true;
-                s.status.clear();
+                // Defer destruction until after ImGui has submitted its SRV.
+                s.reloadRequested=true;
             }
             // Scrub the independent preview object; never touch the live player
             // or its shared entity bank model. Render only on frame changes.
@@ -791,7 +792,7 @@ inline void Draw() {
             }
             if (ImGui::Button("Insert into Scene"))
                 InsertIntoScene();
-            if (s.renderRequested && iLaunchAfterSync==0)
+            if ((s.renderRequested || s.reloadRequested) && iLaunchAfterSync==0)
                 iLaunchAfterSync=32; // render after ImGui, as native preview does
         } else if (!s.status.empty()) {
             ImGui::TextWrapped("%s",s.status.c_str());
@@ -815,11 +816,12 @@ inline void Draw() {
 }
 inline void RenderPending() {
     State& s=Current();
+    if (s.open && s.reloadRequested) { s.reloadRequested=false; Select(s.selected,true); }
     if (s.open && s.isModel && s.renderRequested &&
-        s.modelId>0 && ObjectExist(s.modelId) && s.previewId>0) {
-        RenderToPreview(s.modelId,s.previewId,s.yaw,s.pitch,s.zoom);
+        s.modelId>0 && ObjectExist(s.modelId)) {
+        RenderToPreview(s.modelId,1,s.yaw,s.pitch,s.zoom);
         s.renderRequested=false;
-        if (!ImageExist(s.previewId) || !GetImagePointerView(s.previewId))
+        if (!pwInspectorCapture)
             s.status="3D preview capture failed. Use Refresh 3D Preview to retry.";
         else if (s.status.find("3D preview capture failed")==0)
             s.status.clear();
