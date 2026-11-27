@@ -3,6 +3,7 @@
 // One stable tiled resource, one private pool, one independently reclaimable
 // finest mip. Coarse and packed mips are permanently backed.
 #include "PW-TextureMip.h"
+#include "PW-TextureResidency.h"
 #include <d3d11_2.h>
 #include <wrl/client.h>
 namespace PWTiled {
@@ -13,6 +14,12 @@ struct Layout {
     UINT Coarse() const {return Valid()?total-finest:0;}
     UINT Bytes(bool full) const {return Valid()?(full?total:Coarse())*TileBytes:0;}
 };
+// Shared deterministic admission policy, independently testable on WARP.
+inline unsigned Target(bool enabled,bool pinned,bool sameGeneration,bool registered,
+    bool recent,float distance,bool pressure,unsigned current){
+    if(!enabled||pinned||!sameGeneration||!registered)return 0;
+    return PWResidency::Desired(current,1,distance,recent,pressure);
+}
 inline bool Supported(ID3D11Device* device){
     D3D11_FEATURE_DATA_D3D11_OPTIONS1 options={};
     return device&&SUCCEEDED(device->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS1,&options,sizeof(options)))&&
