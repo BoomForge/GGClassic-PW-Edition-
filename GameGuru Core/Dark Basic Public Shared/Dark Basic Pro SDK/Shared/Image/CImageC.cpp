@@ -489,8 +489,8 @@ static void PWTiledTick(){
         // transition per policy tick. Mandatory raw-access restores are separate.
         for(auto& item:pwTiled){
             const bool recent=item.everObserved&&now-item.lastSeen<=PWResidency::UnseenDelay;
-            const bool protect=item.pinned||item.generation!=pwStage.generation||!pwTiledEnabled||!item.view;
-            const unsigned desired=protect?0:PWResidency::Desired(item.policy.current,1,item.nearest,recent,pwAdaptivePressure);
+            const unsigned desired=PWTiled::Target(pwTiledEnabled,item.pinned,item.generation==pwStage.generation,
+                item.view!=nullptr,recent,item.nearest,pwAdaptivePressure,item.policy.current);
             if(!transitioned&&!desired&&!item.texture->Full()){
                 PWTiledRestore(item);transitioned=true;
             }
@@ -498,8 +498,8 @@ static void PWTiledTick(){
         }
         for(auto& item:pwTiled){
             const bool recent=item.everObserved&&now-item.lastSeen<=PWResidency::UnseenDelay;
-            const unsigned target=(!pwTiledEnabled||item.pinned||item.generation!=pwStage.generation||!item.view)?0:
-                PWResidency::Desired(item.policy.current,1,item.nearest,recent,pwAdaptivePressure);
+            const unsigned target=PWTiled::Target(pwTiledEnabled,item.pinned,item.generation==pwStage.generation,
+                item.view!=nullptr,recent,item.nearest,pwAdaptivePressure,item.policy.current);
             if(!transitioned&&target&&item.texture->Full()&&PWResidency::Step(item.policy,1,now)){
                 const UINT before=item.texture->PoolBytes();const ULONGLONG start=GetTickCount64();
                 const bool ok=item.texture->Demote();transitioned=true;
