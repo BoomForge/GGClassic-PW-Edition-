@@ -26,7 +26,7 @@ class Texture {
     TexturePtr tex_;
     Layout layout_;
     UINT allocated_=0;
-    bool finestMapped_=false;
+    bool finestMapped_=false,ready_=false;
     bool Healthy() const {return device_&&SUCCEEDED(device_->GetDeviceRemovedReason());}
     HRESULT MapFinest(bool mapped){
         D3D11_TILED_RESOURCE_COORDINATE start={};
@@ -44,12 +44,12 @@ public:
     Texture()=default;
     Texture(const Texture&)=delete;
     Texture& operator=(const Texture&)=delete;
-    ID3D11Texture2D* Resource() const {return tex_.Get();}
+    ID3D11Texture2D* Resource() const {return ready_?tex_.Get():nullptr;}
     UINT PoolBytes() const {return allocated_;}
     bool Full() const {return finestMapped_;}
     UINT CoarseBytes() const {return layout_.Bytes(false);}
     bool Initialize(ID3D11Device* device,ID3D11DeviceContext* context,UINT w,UINT h,UINT levels,DXGI_FORMAT format,const PWMip::Span* spans){
-        if(tex_||!Supported(device)||!context||context->GetType()!=D3D11_DEVICE_CONTEXT_IMMEDIATE||
+        if(device_||!Supported(device)||!context||context->GetType()!=D3D11_DEVICE_CONTEXT_IMMEDIATE||
             !spans||!PWMip::Eligible(w,h,levels,format))return false;
         Microsoft::WRL::ComPtr<ID3D11Device> owner;context->GetDevice(owner.GetAddressOf());
         if(owner.Get()!=device)return false;
@@ -86,10 +86,10 @@ public:
         if(FAILED(ctx_->UpdateTileMappings(tex_.Get(),1,nullptr,nullptr,pool_.Get(),2,nullptr,offsets,counts,0)))return false;
         for(UINT i=0;i<levels;++i)ctx_->UpdateSubresource(tex_.Get(),i,nullptr,spans[i].pixels,spans[i].row,spans[i].bytes);
         ctx_->SetResourceMinLOD(tex_.Get(),0.0f);
-        finestMapped_=true;return Healthy();
+        finestMapped_=true;ready_=Healthy();return ready_;
     }
     bool Demote(){
-        if(!Healthy()||!tex_||!pool_||!layout_.Valid())return false;
+        if(!ready_||!Healthy()||!tex_||!pool_||!layout_.Valid())return false;
         if(finestMapped_){
             ctx_->SetResourceMinLOD(tex_.Get(),1.0f);
             if(FAILED(MapFinest(false))){ctx_->SetResourceMinLOD(tex_.Get(),0.0f);return false;}
@@ -100,16 +100,17 @@ public:
         return Resize(layout_.Bytes(false));
     }
     bool Promote(const PWMip::Span& original){
-        if(!Healthy()||!tex_||!pool_||!layout_.Valid())return false;
+        if(!ready_||!Healthy()||!tex_||!pool_||!layout_.Valid())return false;
         if(finestMapped_)return true;
         D3D11_TEXTURE2D_DESC desc={};tex_->GetDesc(&desc);
         if(!PWMip::Valid(original,desc.Width,desc.Height,desc.Format))return false;
         if(!Resize(layout_.Bytes(true)))return false;
         if(FAILED(MapFinest(true))){Resize(layout_.Bytes(false));return false;}
-        // Clamp remains raised until original pixels have been restored.
-        ctx_->UpdateSubresource(tex_.Get(),0,nullptr,original.pixels,original.row,original.bytes);
-        if(!Healthy())return false;
+        // D3D11 clamps also restrict update/copy access. Lower it only
+        // after successful remapping, then upload before any following draw.
         ctx_->SetResourceMinLOD(tex_.Get(),0.0f);
+        ctx_->UpdateSubresource(tex_.Get(),0,nullptr,original.pixels,original.row,original.bytes);
+        if(!Healthy()){ready_=false;return false;}
         finestMapped_=true;return true;
     }
 };
