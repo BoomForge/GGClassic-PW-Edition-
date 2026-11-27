@@ -8231,6 +8231,18 @@ void mapeditorexecutable_finish(void)
 {
 #ifdef ENABLEIMGUI
     PWShutdownTrace("finish entered; before common_justbeforeend");
+    // ExitProcess terminates other threads before DLL detach. A live loader
+    // may hold a graphics/file-system lock needed by detach, so cancel and
+    // join while the device and engine services are still alive.
+    PWShutdownTrace("before texture stage shutdown");
+    PWTextureStageEnd();
+    PWShutdownTrace("texture stage shutdown returned; before image preload reset");
+    image_preload_files_reset();
+    PWShutdownTrace("image preload reset returned; before object preload reset");
+    object_preload_files_reset();
+    PWShutdownTrace("object preload reset returned; before inspector capture release");
+    PWReleaseInspectorCapture();
+    PWShutdownTrace("preview capture released");
 #endif
 	// End map editor program (moved above chdir and pref writes)
 	common_justbeforeend();
