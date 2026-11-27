@@ -1,7 +1,7 @@
 # Compare stock Classic and PW Edition from the same Windows PC.
 # External, read-only process measurements. No media/install changes.
 [CmdletBinding()]
-param([ValidateRange(15,600)][int]$Seconds=60)
+param([ValidateRange(15,600)][int]$Seconds=60,[switch]$IncludeStreaming)
 $ErrorActionPreference='Stop'
 $out=Join-Path $env:LOCALAPPDATA ('Pixelwolf\GGClassicPW\Comparison-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
 New-Item -ItemType Directory -Path $out -Force | Out-Null
@@ -62,6 +62,7 @@ function Capture-Run([string]$label){
     }
     if($samples.Count -lt 2){throw "Insufficient measurements for $label"}
     $samples | Export-Csv -NoTypeInformation -Encoding UTF8 (Join-Path $out "$label.csv")
+    $clock.Stop()
     $complete=$clock.Elapsed.TotalSeconds -ge $Seconds
     Write-Host 'Capture complete. Use the normal exit command now; do not force-close unless necessary.'
     Read-Host 'Press Enter immediately before attempting to exit the editor/game' | Out-Null
@@ -75,7 +76,7 @@ function Capture-Run([string]$label){
     $gpuRows=@($samples | Where-Object gpu_valid)
     $validCpu=@($samples | Where-Object {$null -ne $_.cpu_percent})
     [pscustomobject]@{
-        mode=$label;pid=$processId;exe=$exePath;sha256=$hash;complete=$complete;sample_count=$samples.Count;capture_seconds=$clock.Elapsed.TotalSeconds-$exitClock.Elapsed.TotalSeconds
+        mode=$label;pid=$processId;exe=$exePath;sha256=$hash;complete=$complete;sample_count=$samples.Count;capture_seconds=$clock.Elapsed.TotalSeconds
         mean_private_mib=($samples|Measure-Object private_mib -Average).Average;peak_private_mib=($samples|Measure-Object private_mib -Maximum).Maximum
         mean_working_set_mib=($samples|Measure-Object working_set_mib -Average).Average
         mean_cpu_percent=$(if($validCpu.Count){($validCpu|Measure-Object cpu_percent -Average).Average})
@@ -90,7 +91,9 @@ Write-Host 'Use a verified clean stock installation for baseline; a modified sha
 Write-Host 'This captures process CPU/RAM/GPU memory only, not FPS or render timings.'
 Write-Host 'Run each configuration separately; confirm the actual game PID, not Steam or the launcher.'
 $results=@()
-foreach($mode in @('original-classic','pw-default','pw-streaming')){
+$modes=@('original-classic','pw-default')
+if($IncludeStreaming){$modes+='pw-streaming'}
+foreach($mode in $modes){
     Write-Host "Prepare $mode with the intended flags and confirmed hardware support before continuing."
     $results+=Capture-Run $mode
     $results | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 (Join-Path $out 'summary.json')
