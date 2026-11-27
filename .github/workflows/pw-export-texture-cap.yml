@@ -1,0 +1,22 @@
+name: PW export texture cap validation
+on:
+  push:
+    branches:
+      - work/pw-community-integration-20261121
+    paths:
+      - 'GameGuru Core/GameGuru/Include/PW-ExportTextureCap.h'
+      - 'tools/test_pw_export_texture_cap.cpp'
+      - '.github/workflows/pw-export-texture-cap.yml'
+  pull_request:
+    paths:
+      - 'GameGuru Core/GameGuru/Include/PW-ExportTextureCap.h'
+      - 'tools/test_pw_export_texture_cap.cpp'
+      - '.github/workflows/pw-export-texture-cap.yml'
+permissions:
+  contents: read
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: g++ -std=c++14 -O2 -Wall -Wextra tools/test_pw_export_texture_cap.cpp -o /tmp/pw-export-test && /tmp/pw-export-test

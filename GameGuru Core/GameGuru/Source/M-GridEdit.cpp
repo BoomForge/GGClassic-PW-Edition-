@@ -3999,6 +3999,13 @@ void mapeditorexecutable_loop(void)
 				ImGui::PopItemWidth();
 
 
+				if (iStandaloneCycle == 0) {
+					extern bool g_pwExportCap2048;
+					ImGui::Checkbox("Compact export: max 2048px entity DDS", &g_pwExportCap2048);
+					ImGui::TextWrapped("Optional: reduces texture detail; source files remain unchanged.");
+					ImGui::TextWrapped("Public build: assets are not encrypted.");
+				}
+
 				// Save or Cancel button
 				ImGui::Indent(-10);
 				float save_gadget_size = ImGui::GetFontSize()*10.0;

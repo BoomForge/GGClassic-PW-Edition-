@@ -9,6 +9,7 @@
 #include "PW-LoadTrace.h" // PW Edition: loading measurements
 #include "PW-GrassMix.h" // Weighted grass mix sidecar inside FPM archive
 #include "PW-StyleImport.h" // Validate named vegetation styles used by standalone collection
+#include "PW-ExportTextureCap.h"
 #include "PW-FPMCache.h" // PW Edition: optional verified per-session FPM cache
 
 #ifdef ENABLEIMGUI
@@ -23,6 +24,17 @@ std::vector<cstr> g_sDefaultAssetFiles;
 // 
 
 // MapFile Globals
+
+// Optional export-only 2K profile, selected in the standalone dialog.
+// Source textures remain unchanged; unsupported formats remain full size.
+bool g_pwExportCap2048=false;
+static void PWCapStandaloneCopy(const char* relative,const char* destination)
+{
+    if(!g_pwExportCap2048)return;
+    const auto saved=PWExportTextureCap::CapCopiedFile(relative,destination,2048);
+    if(saved) timestampactivity(0,cstr(cstr("PW export texture cap: ")+relative).Get());
+}
+
 int g_mapfile_iStage = 0;
 int g_mapfile_iNumberOfLevels = 0;
 int g_mapfile_iNumberOfEntitiesAcrossAllLevels = 0;
@@ -2784,6 +2796,7 @@ void mapfile_savestandalone_stage4 ( void )
 			t.dest_s = t.exepath_s+t.exename_s+"\\Files\\"+t.src_s;
 			if ( FileExist(t.dest_s.Get()) == 1 ) DeleteAFile ( t.dest_s.Get() );
 			CopyAFile ( pRealSrc, t.dest_s.Get() );
+			PWCapStandaloneCopy(t.src_s.Get(),t.dest_s.Get());
 		}
 	}
 
@@ -3131,6 +3144,8 @@ void mapfile_savestandalone_finish ( void )
 {
 	// encrypt media
 	t.dest_s=t.exepath_s+t.exename_s;
+	// Public fork has no functional asset encryption provider.
+	MessageBoxA(NULL,"Public PW Edition exports are not encrypted. Do not distribute protected third-party media unless licensed for unprotected redistribution.","Standalone asset protection",MB_OK|MB_ICONWARNING);
 	if ( g.gexportassets == 0 ) 
 	{
 		if ( PathExist( cstr(t.dest_s + "\\Files").Get() ) ) 
@@ -4197,6 +4212,7 @@ void mapfile_savestandalone_stage4 ( void )
 			t.dest_s=t.exepath_s+t.exename_s+"\\Files\\"+t.src_s;
 			if (  FileExist(t.dest_s.Get()) == 1  )  DeleteAFile (  t.dest_s.Get() );
 			CopyAFile (  t.src_s.Get(),t.dest_s.Get() );
+			PWCapStandaloneCopy(t.src_s.Get(),t.dest_s.Get());
 		}
 	}
 
@@ -4528,6 +4544,8 @@ void mapfile_savestandalone_finish ( void )
 {
 	// encrypt media
 	t.dest_s=t.exepath_s+t.exename_s;
+	// Public fork has no functional asset encryption provider.
+	MessageBoxA(NULL,"Public PW Edition exports are not encrypted. Do not distribute protected third-party media unless licensed for unprotected redistribution.","Standalone asset protection",MB_OK|MB_ICONWARNING);
 	if ( g.gexportassets == 0 ) 
 	{
 		if ( PathExist( cstr(t.dest_s + "\\Files").Get() ) ) 
