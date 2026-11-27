@@ -5,6 +5,8 @@
 #include "PW-TextureStage.h"
 #include "PW-TextureMip.h"
 #include "PW-TextureResidency.h"
+#include "PW-TextureTiled.h"
+#include <cstdio>
 static bool TestResidency(){
     using namespace PWResidency;
     if(Pressure(false,true,89,100)||!Pressure(false,true,90,100)||!Pressure(true,true,85,100)||Pressure(true,true,79,100)||Pressure(true,false,100,100))return false;
@@ -63,6 +65,71 @@ static bool TestMip(){
     ctx->Unmap(readback.Get(),0);
     return ok;
 }
+
+static bool TestTiled(){
+    using Microsoft::WRL::ComPtr;
+    PWTiled::Layout layout;layout.total=20;layout.finest=16;
+    if(!layout.Valid()||layout.Bytes(true)!=20*65536u||layout.Bytes(false)!=4*65536u)return false;
+    layout.finest=20;if(layout.Valid()||layout.Bytes(false))return false;
+    layout.total=129;layout.finest=1;if(layout.Valid())return false;
+    // Real hardware only. Hosted CI often has no tiled-capable adapter.
+    // GGCPW_REQUIRE_TILED_TEST=1 turns unsupported into an explicit failure.
+    char required[8]={};
+    const bool mustRun=GetEnvironmentVariableA("GGCPW_REQUIRE_TILED_TEST",required,sizeof(required))==1&&required[0]=='1';
+    ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> ctx;
+    const D3D_FEATURE_LEVEL levels[]={D3D_FEATURE_LEVEL_11_1,D3D_FEATURE_LEVEL_11_0};
+    HRESULT hr=D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,0,levels,2,D3D11_SDK_VERSION,
+        device.GetAddressOf(),nullptr,ctx.GetAddressOf());
+    if(FAILED(hr)||!PWTiled::Supported(device.Get())){
+        printf("M5B hardware tile mapping SKIPPED: tier 2 adapter unavailable\n");
+        return !mustRun;
+    }
+    constexpr UINT size=1024,mips=11;
+    std::vector<std::uint8_t> pixels[mips];PWMip::Span spans[mips]={};
+    UINT dim=size;
+    for(UINT mip=0;mip<mips;++mip){
+        const UINT blocks=(dim+3)/4;
+        pixels[mip].resize(static_cast<std::size_t>(blocks)*blocks*16,static_cast<std::uint8_t>(mip+17));
+        spans[mip].pixels=pixels[mip].data();spans[mip].row=blocks*16;
+        spans[mip].bytes=static_cast<UINT>(pixels[mip].size());
+        if(dim>1)dim/=2;
+    }
+    PWTiled::Texture tex;
+    if(!tex.Initialize(device.Get(),ctx.Get(),size,size,mips,DXGI_FORMAT_BC3_UNORM,spans))return false;
+    ComPtr<ID3D11ShaderResourceView> view;
+    if(FAILED(device->CreateShaderResourceView(tex.Resource(),nullptr,view.GetAddressOf())))return false;
+    D3D11_TEXTURE2D_DESC desc={};tex.Resource()->GetDesc(&desc);
+    desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=0;desc.MiscFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+    ComPtr<ID3D11Texture2D> readback;
+    if(FAILED(device->CreateTexture2D(&desc,nullptr,readback.GetAddressOf())))return false;
+    const auto check=[&](UINT mip){
+        ctx->CopySubresourceRegion(readback.Get(),mip,0,0,0,tex.Resource(),mip,nullptr);
+        D3D11_MAPPED_SUBRESOURCE map={};
+        if(FAILED(ctx->Map(readback.Get(),mip,D3D11_MAP_READ,0,&map)))return false;
+        bool ok=map.RowPitch>=spans[mip].row;
+        const UINT rows=spans[mip].bytes/spans[mip].row;
+        for(UINT row=0;ok&&row<rows;++row){
+            const auto* data=static_cast<const std::uint8_t*>(map.pData)+static_cast<std::size_t>(row)*map.RowPitch;
+            for(UINT col=0;col<spans[mip].row;++col)if(data[col]!=mip+17){ok=false;break;}
+        }
+        ctx->Unmap(readback.Get(),mip);return ok;
+    };
+    const UINT full=tex.PoolBytes(),coarse=tex.CoarseBytes();
+    if(!coarse||coarse>=full||!check(0)||!check(mips-1))return false;
+    for(int cycle=0;cycle<3;++cycle){
+        if(!tex.Demote()||tex.Full()||tex.PoolBytes()!=coarse||ctx->GetResourceMinLOD(tex.Resource())!=1.0f||
+            !check(1)||!check(mips-1))return false;
+        PWMip::Span invalid={};
+        if(tex.Promote(invalid)||tex.Full()||tex.PoolBytes()!=coarse)return false;
+        if(!tex.Promote(spans[0])||!tex.Full()||tex.PoolBytes()!=full||
+            ctx->GetResourceMinLOD(tex.Resource())!=0.0f||!check(0)||!check(mips-1))return false;
+        ComPtr<ID3D11Resource> identity;view->GetResource(identity.GetAddressOf());
+        if(identity.Get()!=tex.Resource())return false;
+    }
+    printf("M5B hardware tile mapping PASSED: pool %u -> %u -> %u bytes (not DXGI usage)\n",full,coarse,full);
+    return SUCCEEDED(device->GetDeviceRemovedReason());
+}
+
 static bool TestStage(){
     using namespace PWTextureStage;
     if(!Fits(128,BatchLimit)||Fits(127,BatchLimit)||Fits(FileLimit+1,BatchLimit)||Fits(256,128))return false;
@@ -114,7 +181,7 @@ static bool TestBudget(){
 }
 int main()
 {
-    if(!TestBudget()||!TestStage()||!TestMip()||!TestResidency())return 1;
+    if(!TestBudget()||!TestStage()||!TestMip()||!TestResidency()||!TestTiled())return 1;
     PWLoadTraceScope testLoad("test.synthetic_load");
     Sleep(3);
     return 0;
