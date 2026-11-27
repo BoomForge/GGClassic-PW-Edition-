@@ -1,0 +1,143 @@
+name: Original Classic baseline build
+on:
+  push:
+    branches:
+      - work/pw-community-integration-20261121
+    paths:
+      - '.github/workflows/pw-original-classic-build.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  original-x64:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout pinned dependency preparation scripts
+        uses: actions/checkout@v4
+        with:
+          ref: 01d507dcd514aaf4e44cae46d52c69944c9adb11
+          path: pw-tools
+          lfs: false
+      - name: Checkout pristine official Classic source
+        uses: actions/checkout@v4
+        with:
+          repository: Dark-Basic-Software-Limited/GameGuruRepo
+          ref: 821f688580821af64c8371f2b1f6e760b1c68e4f
+          path: original
+          lfs: false
+          persist-credentials: false
+      - uses: microsoft/setup-msbuild@v2
+      - name: Prepare dependencies without changing engine sources
+        shell: pwsh
+        working-directory: original
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = '../pw-tools/tools'
+          New-Item -ItemType Directory -Force tools | Out-Null
+          foreach ($name in @('pw-prepare-d3dx.ps1','pw-prepare-steam-imports.ps1','steam-api64.def','sdkencryptedappticket64.def')) {
+            Copy-Item -LiteralPath (Join-Path $source $name) -Destination (Join-Path 'tools' $name)
+          }
+          ./tools/pw-prepare-d3dx.ps1
+          ./tools/pw-prepare-steam-imports.ps1
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'Tracked upstream source changed' }
+      - name: Build DirectXTex
+        working-directory: original
+        shell: cmd
+        run: msbuild "GameGuru Core\SDK\DirectXTex\DirectXTex\DirectXTex_Desktop_2022.vcxproj" /t:Build /p:Configuration=Release /p:Platform=x64 /m:2 /nologo /v:minimal
+      - name: Build Effects11
+        working-directory: original
+        shell: cmd
+        run: msbuild "GameGuru Core\SDK\DirectX\Effect11\Effects11_2022.vcxproj" /t:Build /p:Configuration=Release /p:Platform=x64 /m:2 /nologo /v:minimal
+      - name: Build Ogg Vorbis
+        working-directory: original
+        shell: cmd
+        run: msbuild "GameGuru Core\SDK\OGG\ogg_vorbis_static.sln" /t:Build /p:Configuration=Release /p:Platform=x64 /m:2 /nologo /v:minimal
+      - name: Remove missing unused DirectShow linker reference (build metadata only)
+        shell: pwsh
+        working-directory: original
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $needle = '$(ProjectDir)..\Dark Basic Public Shared\Dark Basic Pro SDK\Shared\BaseClasses\strmbase.lib;'
+          foreach ($path in @('GameGuru Core/Guru-MapEditor/DarkEXE.vcxproj','GameGuru Core/Guru-Lightmapper/Guru-Lightmapper.vcxproj')) {
+            $file = (Resolve-Path -LiteralPath $path).Path
+            $s = [IO.File]::ReadAllText($file)
+            if (-not $s.Contains($needle)) { throw "Missing expected obsolete linker entry: $path" }
+            [IO.File]::WriteAllText($file,$s.Replace($needle,''))
+          }
+          git diff --stat
+          $changed = @(git diff --name-only)
+          if ($changed.Count -ne 2 -or @($changed | Where-Object { $_ -notmatch '\.vcxproj$' }).Count -ne 0) { throw 'Unexpected tracked changes' }
+      - name: Compile original engine
+        shell: pwsh
+        working-directory: original
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force 'D:\DEV\BUILDS\GameGuru Classic Build Area' | Out-Null
+          msbuild 'GameGuru Core\GameGuru.sln' /t:Build /p:Configuration=Release /p:Platform=x64 /m:2 /nologo /v:minimal /fl '/flp:logfile=original-build.log;verbosity=normal'
+          if ($LASTEXITCODE -ne 0) { throw "Original engine compilation failed ($LASTEXITCODE)" }
+      - name: Verify original engine binary and identity
+        shell: pwsh
+        working-directory: original
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = 'D:\DEV\BUILDS\GameGuru Classic Build Area\Guru-MapEditor.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Expected upstream editor output absent' }
+          $bytes = [System.IO.File]::ReadAllBytes($exe)
+          if ([System.Text.Encoding]::Latin1.GetString($bytes).Contains('GameGuru Classic - PW Edition | ')) { throw 'Unexpected PW branding in upstream baseline' }
+          $sha = (git rev-parse HEAD).Trim()
+          $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
+          $report = [ordered]@{source_commit=$sha;binary_sha256=$hash;binary_bytes=$bytes.Length;compiled=$true;build_metadata_change='Remove absent unused strmbase.lib reference';gameplay_tested=$false;media_available=$false}
+          $report | ConvertTo-Json | Tee-Object -FilePath original-build-evidence.json
+      - name: Seal benchmark binary for local licensed testing
+        shell: pwsh
+        working-directory: original
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $publicKey = @'
+          -----BEGIN PUBLIC KEY-----
+          MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAxNFfXV5xlSVKnYmzJXQz
+          V67LSEc8ucPSSv9H4GcVuYwjylE+2vb58MzEZSBBR/xbevqTNJRD71t0AeQ67nW5
+          p9lygvRYwDOL8xGDPynKBd5+toub99cSatsnCt8I9Yeu/br2ys6EOvJTrgabcTJj
+          fsRFAYvZB4CEHxqQNdkhIci8J8lIkmUFi0A35wrGtc8e9co4waoCxkw2I7ZlXiyq
+          OcNacxu/u4Qf5TOaTkhATtFGpDE40wt6LKlO0RPZ9UhW2cTfoUjagnhIbE3xAbUa
+          QJ4i/+1fElzDqsZCABHFDYBUT+VnfxvPe2Snn4saHcTrtyhxjcJO9xicOEY1Grsc
+          uw51xNRCxaBoS9K2RL4g4+aQG9xiGMrRwzRi1ffIRxyBJrXOEK9H1o2J/vt4BTSo
+          cW+reZ8zFZld33RWoc+P/w9NEEWfbH8e8yff62YjaI4o/LA1z5pfSJpXuD5NLio/
+          n+/udUO22XygnoVQ/aCCD6Xp8D1/qQEvkbnfgb1xbzWtAgMBAAE=
+          -----END PUBLIC KEY-----
+          '@
+          $rsa = [System.Security.Cryptography.RSA]::Create()
+          $rsa.ImportFromPem($publicKey)
+          $key = [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
+          $nonce = [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(12)
+          $plain = [IO.File]::ReadAllBytes('D:\DEV\BUILDS\GameGuru Classic Build Area\Guru-MapEditor.exe')
+          $cipher = [byte[]]::new($plain.Length)
+          $tag = [byte[]]::new(16)
+          $aes = [System.Security.Cryptography.AesGcm]::new($key,16)
+          $aes.Encrypt($nonce,$plain,$cipher,$tag)
+          $wrapped = $rsa.Encrypt($key,[System.Security.Cryptography.RSAEncryptionPadding]::OaepSHA256)
+          New-Item -ItemType Directory -Force sealed | Out-Null
+          foreach ($entry in @{ 'cipher.bin'=$cipher; 'wrapped-key.bin'=$wrapped; 'nonce.bin'=$nonce; 'tag.bin'=$tag }.GetEnumerator()) {
+            [IO.File]::WriteAllBytes((Join-Path (Resolve-Path sealed).Path $entry.Key),$entry.Value)
+          }
+          $aes.Dispose()
+          $rsa.Dispose()
+      - name: Transfer encrypted binary only (no plaintext binary or game media)
+        uses: actions/upload-artifact@v4
+        with:
+          name: original-classic-sealed-local-test
+          path: original/sealed/
+          compression-level: 0
+          retention-days: 1
+      - name: Upload evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: original-build-evidence
+          path: |
+            original/original-build.log
+            original/original-build-evidence.json
+          if-no-files-found: warn
+          retention-days: 7

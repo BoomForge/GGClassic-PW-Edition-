@@ -6,6 +6,11 @@
 #include "stdafx.h"
 #include "gameguru.h"
 #include "Common-Keys.h"
+#include "PW-LoadTrace.h" // PW Edition: loading measurements
+#include "PW-GrassMix.h" // Weighted grass mix sidecar inside FPM archive
+#include "PW-StyleImport.h" // Validate named vegetation styles used by standalone collection
+#include "PW-ExportTextureCap.h"
+#include "PW-FPMCache.h" // PW Edition: optional verified per-session FPM cache
 
 #ifdef ENABLEIMGUI
 #include "..\Imgui\imgui.h"
@@ -19,6 +24,17 @@ std::vector<cstr> g_sDefaultAssetFiles;
 // 
 
 // MapFile Globals
+
+// Optional export-only 2K profile, selected in the standalone dialog.
+// Source textures remain unchanged; unsupported formats remain full size.
+bool g_pwExportCap2048=false;
+static void PWCapStandaloneCopy(const char* relative,const char* destination)
+{
+    if(!g_pwExportCap2048)return;
+    const auto saved=PWExportTextureCap::CapCopiedFile(relative,destination,2048);
+    if(saved) { char message[512]; snprintf(message,sizeof(message),"PW export texture cap: %s",relative); timestampactivity(0,message); }
+}
+
 int g_mapfile_iStage = 0;
 int g_mapfile_iNumberOfLevels = 0;
 int g_mapfile_iNumberOfEntitiesAcrossAllLevels = 0;
@@ -34,6 +50,24 @@ bool g_bAllowBackwardCompatibleConversion = false;
 bool restore_old_map = false;
 int savestandalone_e = 1;
 #endif
+
+// Include EVERY enabled grass-mix style in standalone/media collections,
+// not just the currently selected native vegetation style.
+static void PWCollectMixedGrassStyleDependencies()
+{
+    if (!PWGrassMix::Active()) return;
+    for (int i = 0; i < PWGrassMix::MaxStyles; ++i)
+    {
+        const PWGrassMix::Slot& slot = PWGrassMix::slots[i];
+        if (!slot.enabled || slot.weight <= 0.0f ||
+            !PWStyleImport::SafeName(slot.style))
+            continue;
+        const std::string folderName = std::string("vegbank\\") + slot.style;
+        std::vector<char> path(folderName.begin(), folderName.end());
+        path.push_back(0);
+        addfoldertocollection(path.data());
+    }
+}
 
 //PE: Moved here cstr is crashing when called from M-MPSteam.cpp in 64 bit version.
 void mp_save_workshop_files_needed(void)
@@ -165,6 +199,7 @@ void mp_save_workshop_files_needed(void)
 		addfoldertocollection(cstr(cstr("terrainbank\\") + g.terrainstyle_s).Get());
 	}
 	addfoldertocollection(cstr(cstr("vegbank\\") + g.vegstyle_s).Get());
+	PWCollectMixedGrassStyleDependencies();
 
 	//  choose all entities and associated files
 	for (t.e = 1; t.e <= g.entityelementlist; t.e++)
@@ -501,6 +536,7 @@ void mapfile_saveproject_fpm ( void )
 		CopyAFile ( cfgfile_s.Get(), cfginlevelbank_s.Get() );
 	}
 
+    PWGrassMix::Save(g.mysystem.levelBankTestMap_s.Get());
 	// Create a FPM (zipfile)
 	CreateFileBlock (  1, t.ttempprojfilename_s.Get() );
 	SetFileBlockKey (  1, "mypassword" );
@@ -522,6 +558,8 @@ void mapfile_saveproject_fpm ( void )
 	AddFileToBlock (  1, "vegmask.dds" );
 	#endif
 	AddFileToBlock (  1, "vegmaskgrass.dat" );
+    if (FileExist("pw_grassmix.cfg") == 1)
+        AddFileToBlock(1, "pw_grassmix.cfg");
 	if ( FileExist ( "superpalette.ter" ) == 1 ) 
 		AddFileToBlock ( 1, "superpalette.ter" );
 
@@ -681,7 +719,8 @@ void mapfile_saveproject_fpm ( void )
 			#ifdef VRTECH
 			if ( strcmp ( strEnt.Get(), "_d.jpg" ) == NULL )
 			#else
-			if ( strcmp ( strEnt.Get(), "_d.dds" ) == NULL || strcmp ( strEnt.Get(), "_n.dds" ) == NULL || strcmp ( strEnt.Get(), "_s.dds" ) == NULL )
+			if ( strcmp ( strEnt.Get(), "_d.dds" ) == NULL || strcmp ( strEnt.Get(), "_n.dds" ) == NULL || strcmp ( strEnt.Get(), "_s.dds" ) == NULL
+				|| strcmp ( strEnt.Get(), "_d.png" ) == NULL || strcmp ( strEnt.Get(), "_n.png" ) == NULL || strcmp ( strEnt.Get(), "_s.png" ) == NULL )
 			#endif
 			{
 				AddFileToBlock ( 1, t.tfile_s.Get() );
@@ -795,6 +834,7 @@ void mapfile_emptyterrainfilesfromtestmapfolder ( void )
 
 void mapfile_loadproject_fpm ( void )
 {
+	PWLoadTraceScope pwTraceFPMTotal("game.transition.fpm_load.total");
 	//  Ensure FPM exists
 	t.trerfeshvisualsassets=0;
 	timestampactivity(0, cstr(cstr("_mapfile_loadproject_fpm: ")+g.projectfilename_s+" "+GetDir()).Get() );
@@ -806,6 +846,20 @@ void mapfile_loadproject_fpm ( void )
 
 		// empty any terrain node files
 		mapfile_emptyterrainfilesfromtestmapfolder();
+
+		// Resolve the archive to an absolute filename before Classic switches folders.
+		// Only standalone single-player opts into safe reuse of already extracted FPM data.
+		bool pwCanReuseFPM = (t.game.gameisexe == 1 && t.game.runasmultiplayer == 0 && PWFPMCache::Enabled());
+		std::string pwSourceArchive;
+		if (pwCanReuseFPM)
+		{
+			char pwAbsoluteArchive[MAX_PATH] = { 0 };
+			DWORD pwLength = GetFullPathNameA(g.projectfilename_s.Get(), MAX_PATH, pwAbsoluteArchive, NULL);
+			if (pwLength > 0 && pwLength < MAX_PATH)
+				pwSourceArchive = pwAbsoluteArchive;
+			else
+				pwCanReuseFPM = false;
+		}
 
 		//  Store and switch folders
 		t.tdirst_s=GetDir() ; SetDir ( g.mysystem.levelBankTestMap_s.Get() ); // "levelbank\\testmap\\" );
@@ -820,6 +874,7 @@ void mapfile_loadproject_fpm ( void )
 		if ( FileExist("conkit.dat") == 1 ) DeleteAFile ( "conkit.dat" );
 		if ( FileExist("map.obs") == 1 ) DeleteAFile ( "map.obs" );
 		if (FileExist("locked.cfg") == 1) DeleteAFile("locked.cfg");
+        if (FileExist("pw_grassmix.cfg") == 1) DeleteAFile("pw_grassmix.cfg");
 
 		//  Delete terrain texture files (if any)
 		if ( FileExist("Texture_D.dds") == 1 ) DeleteAFile ( "Texture_D.dds" );
@@ -839,18 +894,41 @@ void mapfile_loadproject_fpm ( void )
 		//  Restore folder to Files (for extraction)
 		SetDir ( t.tdirst_s.Get() );
 
-		//  Read FPM into testmap area
-		timestampactivity(0,"LOADMAP: read FPM block");
-		OpenFileBlock (  g.projectfilename_s.Get(),1,"mypassword" );
-		PerformCheckListForFileBlockData (  1 );
+		//  Read FPM into testmap area, reusing a verified, unmodified snapshot
+		//  only in standalone single player when GGCPW_FPM_CACHE=1 is set.
 		t.tpath_s=g.mysystem.levelBankTestMap_s.Get(); //"levelbank\\testmap\\";
-		for ( t.i = 1 ; t.i<=  ChecklistQuantity( ); t.i++ )
+		bool pwFPMRestored = false;
+		if (pwCanReuseFPM)
 		{
-			ExtractFileFromBlock (  1, ChecklistString( t.i ), t.tpath_s.Get() );
+			PWLoadTraceScope pwTraceFPMRestore("game.transition.fpm_cache.restore");
+			pwFPMRestored = PWFPMCache::Restore(pwSourceArchive, g.mysystem.levelBankTestMapAbs_s.Get());
 		}
-		CloseFileBlock (  1 );
+		if (pwFPMRestored)
+		{
+			timestampactivity(0, "PW Edition: reusing verified FPM extraction cache");
+		}
+		else
+		{
+			PWLoadTraceScope pwTraceFPMExtract("game.transition.fpm_extract.original");
+			timestampactivity(0,"LOADMAP: read FPM block");
+			OpenFileBlock (  g.projectfilename_s.Get(),1,"mypassword" );
+			PerformCheckListForFileBlockData (  1 );
+			std::vector<std::string> pwFPMFiles;
+			for ( t.i = 1 ; t.i<=  ChecklistQuantity( ); t.i++ )
+			{
+				const char* pwEntryName = ChecklistString(t.i);
+				if (pwCanReuseFPM && pwEntryName)
+					pwFPMFiles.push_back(pwEntryName);
+				ExtractFileFromBlock (  1, ChecklistString( t.i ), t.tpath_s.Get() );
+			}
+			CloseFileBlock (  1 );
+			// A corrupt/incomplete extraction must not be remembered.
+			if (pwCanReuseFPM && FileExist(cstr(g.mysystem.levelBankTestMapAbs_s + "header.dat").Get()) == 1)
+				PWFPMCache::Remember(pwSourceArchive, g.mysystem.levelBankTestMapAbs_s.Get(), pwFPMFiles);
+		}
 
 		SetDir ( g.mysystem.levelBankTestMapAbs_s.Get() );
+        PWGrassMix::Load(g.mysystem.levelBankTestMapAbs_s.Get());
 
 
 		//  If file still not present, extraction failed
@@ -1170,6 +1248,8 @@ void mapfile_collectfoldersandfiles ( cstr levelpathfolder )
 	addtocollection("scriptbank\\gameloop.lua");
 	addtocollection("scriptbank\\gameplayercontrol.lua");
 	addtocollection("scriptbank\\global.lua");
+	// PW Edition: standalone projects using connected-area state need the companion module.
+	if (FileExist("scriptbank\\pw_transition_state.lua") == 1) addtocollection("scriptbank\\pw_transition_state.lua");
 	addtocollection("scriptbank\\music.lua");
 	addfoldertocollection(cstr(cstr("languagebank\\")+g.language_s+"\\artwork\\watermark").Get() );
 	addfoldertocollection("scriptbank\\people\\ai");
@@ -1346,6 +1426,7 @@ void mapfile_collectfoldersandfiles ( cstr levelpathfolder )
 	addfoldertocollection(cstr(cstr("terrainbank\\")+g.terrainstyle_s).Get() );
 	addtocollection("skybank\\cloudportal.dds");
 	addfoldertocollection(cstr(cstr("vegbank\\")+g.vegstyle_s).Get() );
+	PWCollectMixedGrassStyleDependencies();
 
 	// pre-add the skins folder - can optimize later to find only skins we used (118MB)
 	addfoldertocollection("charactercreatorplus\\skins" );
@@ -2155,6 +2236,7 @@ int mapfile_savestandalone_stage2b ( void )
 		addfoldertocollection(cstr(cstr("terrainbank\\")+g.terrainstyle_s).Get() );
 		addtocollection("skybank\\cloudportal.dds");
 		addfoldertocollection(cstr(cstr("vegbank\\")+g.vegstyle_s).Get() );
+	PWCollectMixedGrassStyleDependencies();
 
 		// start for loop
 		t.e = 1;
@@ -2714,6 +2796,7 @@ void mapfile_savestandalone_stage4 ( void )
 			t.dest_s = t.exepath_s+t.exename_s+"\\Files\\"+t.src_s;
 			if ( FileExist(t.dest_s.Get()) == 1 ) DeleteAFile ( t.dest_s.Get() );
 			CopyAFile ( pRealSrc, t.dest_s.Get() );
+			PWCapStandaloneCopy(t.src_s.Get(),t.dest_s.Get());
 		}
 	}
 
@@ -2801,6 +2884,9 @@ void mapfile_savestandalone_stage4 ( void )
 	}
 	t.setuparr_s[t.i] = ""; t.setuparr_s[t.i] = t.setuparr_s[t.i] + "hardwareinfomode="+Str(g.ghardwareinfomode) ; ++t.i;
 	t.setuparr_s[t.i] = ""; t.setuparr_s[t.i] = t.setuparr_s[t.i] + "fullscreen="+Str(g.gfullscreen) ; ++t.i;
+	// PW standalone startup options; set to 0 in the exported setup.ini to keep Classic startup.
+	t.setuparr_s[t.i] = "pwdisplayoptions=1"; ++t.i;
+	t.setuparr_s[t.i] = "pwcontrols=1"; ++t.i;
 	t.setuparr_s[t.i] = ""; t.setuparr_s[t.i] = t.setuparr_s[t.i] + "aspectratio="+Str(g.gaspectratio) ; ++t.i;
 	t.setuparr_s[t.i] = ""; t.setuparr_s[t.i] = t.setuparr_s[t.i] + "dividetexturesize="+Str( g.gdividetexturesize ) ; ++t.i;
 	t.setuparr_s[t.i] = ""; t.setuparr_s[t.i] = t.setuparr_s[t.i] + "producelogfiles=0"; ++t.i;
@@ -3058,6 +3144,8 @@ void mapfile_savestandalone_finish ( void )
 {
 	// encrypt media
 	t.dest_s=t.exepath_s+t.exename_s;
+	// Public fork has no functional asset encryption provider.
+	MessageBoxA(NULL,"Public PW Edition exports are not encrypted. Do not distribute protected third-party media unless licensed for unprotected redistribution.","Standalone asset protection",MB_OK|MB_ICONWARNING);
 	if ( g.gexportassets == 0 ) 
 	{
 		if ( PathExist( cstr(t.dest_s + "\\Files").Get() ) ) 
@@ -3273,6 +3361,8 @@ void mapfile_savestandalone_start ( void )
 	addtocollection("scriptbank\\gameloop.lua");
 	addtocollection("scriptbank\\gameplayercontrol.lua");
 	addtocollection("scriptbank\\global.lua");
+	// PW Edition: standalone projects using connected-area state need the companion module.
+	if (FileExist("scriptbank\\pw_transition_state.lua") == 1) addtocollection("scriptbank\\pw_transition_state.lua");
 	addtocollection("scriptbank\\music.lua");
 
 	// ensure key scripts are part of standalone export
@@ -3548,6 +3638,7 @@ int mapfile_savestandalone_stage2b ( void )
 		//addfoldertocollection("skybank\\night"); // no need for NIGHT until we have day/night cycles
 		addfoldertocollection(cstr(cstr("terrainbank\\")+g.terrainstyle_s).Get() );
 		addfoldertocollection(cstr(cstr("vegbank\\")+g.vegstyle_s).Get() );
+	PWCollectMixedGrassStyleDependencies();
 
 		//add lutbank
 		addfoldertocollection("lutbank\\");
@@ -4121,6 +4212,7 @@ void mapfile_savestandalone_stage4 ( void )
 			t.dest_s=t.exepath_s+t.exename_s+"\\Files\\"+t.src_s;
 			if (  FileExist(t.dest_s.Get()) == 1  )  DeleteAFile (  t.dest_s.Get() );
 			CopyAFile (  t.src_s.Get(),t.dest_s.Get() );
+			PWCapStandaloneCopy(t.src_s.Get(),t.dest_s.Get());
 		}
 	}
 
@@ -4188,6 +4280,9 @@ void mapfile_savestandalone_stage4 ( void )
 	}
 	t.setuparr_s[t.i] = ""; t.setuparr_s[t.i] = t.setuparr_s[t.i] + "hardwareinfomode="+Str(g.ghardwareinfomode) ; ++t.i;
 	t.setuparr_s[t.i] = ""; t.setuparr_s[t.i] = t.setuparr_s[t.i] + "fullscreen="+Str(g.gfullscreen) ; ++t.i;
+	// PW standalone startup options; set to 0 in the exported setup.ini to keep Classic startup.
+	t.setuparr_s[t.i] = "pwdisplayoptions=1"; ++t.i;
+	t.setuparr_s[t.i] = "pwcontrols=1"; ++t.i;
 	t.setuparr_s[t.i] = ""; t.setuparr_s[t.i] = t.setuparr_s[t.i] + "aspectratio="+Str(g.gaspectratio) ; ++t.i;
 	t.setuparr_s[t.i] = ""; t.setuparr_s[t.i] = t.setuparr_s[t.i] + "dividetexturesize="+Str( g.gdividetexturesize ) ; ++t.i;
 	t.setuparr_s[t.i] = ""; t.setuparr_s[t.i] = t.setuparr_s[t.i] + "producelogfiles=0"; ++t.i;
@@ -4449,6 +4544,8 @@ void mapfile_savestandalone_finish ( void )
 {
 	// encrypt media
 	t.dest_s=t.exepath_s+t.exename_s;
+	// Public fork has no functional asset encryption provider.
+	MessageBoxA(NULL,"Public PW Edition exports are not encrypted. Do not distribute protected third-party media unless licensed for unprotected redistribution.","Standalone asset protection",MB_OK|MB_ICONWARNING);
 	if ( g.gexportassets == 0 ) 
 	{
 		if ( PathExist( cstr(t.dest_s + "\\Files").Get() ) ) 
@@ -5108,7 +5205,7 @@ void CreateItineraryFile ( void )
 		{
 			LPSTR pString = g_sDefaultAssetFiles[n].Get();
 			for ( int c = 0; c < strlen(pString); c++ )
-				WriteMemblockByte ( 1, pos++, (unsigned char) pString[c] ); //PE: chars like 'ö' will set -10 and generate errors.
+				WriteMemblockByte ( 1, pos++, (unsigned char) pString[c] ); //PE: chars like 'Ã¶' will set -10 and generate errors.
 			WriteMemblockByte ( 1, pos++, 0 );
 		}
 		SetDir ( g.fpscrootdir_s.Get() );

@@ -4,6 +4,8 @@
 
 #include "cstr.h"
 
+// Read-only DX11 image registry and OS memory diagnostics (opt-in).
+void PWTextureMemorySample(const char* stage,bool periodic=false);
 void deleteallinternalimages ( void );
 void refreshallinternalimages ( void );
 void refreshinternalimage ( int t );

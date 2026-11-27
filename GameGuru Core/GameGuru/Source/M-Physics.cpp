@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-ThirdPersonGameplay.h"
 
 #ifdef ENABLEIMGUI
 #include "..\..\GameGuru\Imgui\imgui.h"
@@ -344,8 +345,48 @@ void physics_prepareentityforphysics ( void )
 	}
 }
 
+namespace PWThirdPerson {
+bool NativeLifecycleEnabled() {
+    char legacy[4]={};
+    return t.playercontrol.thirdperson.enabled==1&&t.game.runasmultiplayer==0&&
+        g.gvrmode==0&&g.globals.riftmode==0&&t.conkit.editmodeactive==0&&
+        !(GetEnvironmentVariableA("GGCPW_LEGACY_THIRDPERSON",legacy,sizeof(legacy))==1&&legacy[0]=='1');
+}
+bool CaptureBodyCheckpoint(float yaw) {
+    if(!NativeLifecycleEnabled())return false;
+    const int body=t.aisystem.objectstartindex;
+    if(body<=0||!ObjectExist(body))return false;
+    const float x=ObjectPositionX(body),y=ObjectPositionY(body),z=ObjectPositionZ(body);
+    if(!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(z)||!std::isfinite(yaw))return false;
+    t.playercheckpoint.stored=1;
+    t.playercheckpoint.x=x;t.playercheckpoint.y=y;t.playercheckpoint.z=z;
+    t.playercheckpoint.a=yaw;
+    return true;
+}
+}
+static bool PWValidLifecycleAvatar(int e) {
+    if(e<=0||e>g.entityelementlist)return false;
+    const int bank=t.entityelement[e].bankindex,obj=t.entityelement[e].obj;
+    return bank>0&&bank<=g.entidmaster&&obj>0&&ObjectExist(obj);
+}
+static void PWResetPlayerMotion() {
+    auto& pc=t.playercontrol;
+    ++pc.thirdperson.pwLifecycleEpoch;
+    pc.thirdperson.shotfired=0;pc.thirdperson.meleestruck=0;
+    pc.movement=0;pc.lastmovement=0;pc.isrunning=0;pc.speed_f=0.f;
+    pc.jumpmode=0;pc.jumpmodecanaffectvelocitycountdown_f=0.f;
+    pc.pushforce_f=0.f;pc.plrhitfloormaterial=0;
+    t.aisystem.playerducking=0;
+    t.gunmustreleasefirst=1;
+    const int index=pc.thirdperson.characterindex;
+    if(index>0&&index<=g.charanimindexmax&&
+        t.charanimstates[index].originale==pc.thirdperson.charactere)
+        t.charanimcontrols[index]=charanimcontrolstype();
+}
 void physics_setupplayernoreset ( void )
 {
+    // Recreated body: clear transient movement and invalidate camera/air caches.
+    if(PWThirdPerson::NativeLifecycleEnabled())PWResetPlayerMotion();
 	//  create character controller for player
 	PositionObject (  t.aisystem.objectstartindex,t.terrain.playerx_f,t.terrain.playery_f,t.terrain.playerz_f );
 	if ( t.freezeplayerposonly==0 ) RotateObject (  t.aisystem.objectstartindex,t.terrain.playerax_f,t.terrain.playeray_f,t.terrain.playeraz_f );
@@ -1153,6 +1194,8 @@ void physics_player ( void )
 	}
 }
 
+extern bool PWGameplayControlsActive();
+extern int PWGameplayKey(int logical,int fallback);
 void physics_player_gatherkeycontrols ( void )
 {
 	// Camera in control of player one
@@ -1192,12 +1235,12 @@ void physics_player_gatherkeycontrols ( void )
 	// Read keys from config, and use in player control actions
 	if ( g.walkonkeys == 1 ) 
 	{
-		if ( KeyState(g.keymap[t.plrkeyW]) ==1 ) { t.plrkeyW=1 ; t.plrkeySLOWMOTION=0 ;} else t.plrkeyW=0;
-		if ( KeyState(g.keymap[t.plrkeyA]) ==1 ) { t.plrkeyA=1 ; t.plrkeySLOWMOTION=0 ;} else t.plrkeyA=0;
-		if ( KeyState(g.keymap[t.plrkeyS]) ==1 ) { t.plrkeyS=1 ; t.plrkeySLOWMOTION=0 ;} else t.plrkeyS=0;
-		if ( KeyState(g.keymap[t.plrkeyD]) ==1 ) { t.plrkeyD=1 ; t.plrkeySLOWMOTION=0 ;} else t.plrkeyD=0;
+		if ( PWGameplayKey(17,g.keymap[t.plrkeyW]) ==1 ) { t.plrkeyW=1 ; t.plrkeySLOWMOTION=0 ;} else t.plrkeyW=0;
+		if ( PWGameplayKey(30,g.keymap[t.plrkeyA]) ==1 ) { t.plrkeyA=1 ; t.plrkeySLOWMOTION=0 ;} else t.plrkeyA=0;
+		if ( PWGameplayKey(31,g.keymap[t.plrkeyS]) ==1 ) { t.plrkeyS=1 ; t.plrkeySLOWMOTION=0 ;} else t.plrkeyS=0;
+		if ( PWGameplayKey(32,g.keymap[t.plrkeyD]) ==1 ) { t.plrkeyD=1 ; t.plrkeySLOWMOTION=0 ;} else t.plrkeyD=0;
 	}
-	if ( g.arrowkeyson == 1 ) 
+	if ( g.arrowkeyson == 1 && !PWGameplayControlsActive() ) 
 	{
 		t.tplrkeySLOWMOTIONold=t.plrkeySLOWMOTION;
 		if ( UpKey() == 1 ) { t.plrkeyW = 1  ; t.plrkeySLOWMOTION = 1; }
@@ -1213,8 +1256,8 @@ void physics_player_gatherkeycontrols ( void )
 			t.tFinalCamZ_f=ObjectPositionZ(t.aisystem.objectstartindex);
 		}
 	}
-	if ( KeyState(g.keymap[t.plrkeySHIFT]) == 1 && g.runkeys == 1 && t.jumpaction == 0  )  t.plrkeySHIFT = 1; else t.plrkeySHIFT = 0;
-	if ( KeyState(g.keymap[t.plrkeySHIFT2]) == 1 && g.runkeys == 1 && t.jumpaction == 0  )  t.plrkeySHIFT2 = 1; else t.plrkeySHIFT2 = 0;
+	if ( PWGameplayKey(42,g.keymap[t.plrkeySHIFT]) == 1 && g.runkeys == 1 && t.jumpaction == 0  )  t.plrkeySHIFT = 1; else t.plrkeySHIFT = 0;
+	if ( !PWGameplayControlsActive() && KeyState(g.keymap[t.plrkeySHIFT2]) == 1 && g.runkeys == 1 && t.jumpaction == 0  )  t.plrkeySHIFT2 = 1; else t.plrkeySHIFT2 = 0;
 
 	#ifdef VRTECH
 	// when in vr mode
@@ -1237,16 +1280,16 @@ void physics_player_gatherkeycontrols ( void )
 	else
 	{
 		// FPS Gaming Mode
-		if ( KeyState(g.keymap[t.plrkeySPACE]) == 1 && g.jumponkey == 1  )  t.plrkeySPACE = 1; else t.plrkeySPACE = 0;
-		if ( KeyState(g.keymap[t.plrkeyQ]) == 1 && g.peekonkeys == 1  )  t.plrkeyQ = 1; else t.plrkeyQ = 0;
-		if ( KeyState(g.keymap[t.plrkeyE]) == 1 && g.peekonkeys == 1  )  t.plrkeyE = 1; else t.plrkeyE = 0;
-		if ( KeyState(g.keymap[t.plrkeyF]) == 1  )  t.plrkeyF = 1; else t.plrkeyF = 0;
-		if ( KeyState(g.keymap[t.plrkeyC]) == 1 && g.crouchonkey == 1  )  t.plrkeyC = 1; else t.plrkeyC = 0;
-		if ( ControlKey() == 1  )  t.plrkeyC = 1;
-		if ( KeyState(g.keymap[t.plrkeyZ]) == 1  )  t.plrkeyZ = 1; else t.plrkeyZ = 0;
-		if ( KeyState(g.keymap[t.plrkeyR]) == 1  )  t.plrkeyR = 1; else t.plrkeyR = 0;
-		if ( KeyState(g.keymap[t.plrkeyRETURN]) == 1  )  t.plrkeyRETURN = 1; else t.plrkeyRETURN = 0;
-		if ( KeyState(g.keymap[t.plrkeyJ]) == 1  )  t.plrkeyJ = 1; else t.plrkeyJ = 0;
+		if ( PWGameplayKey(57,g.keymap[t.plrkeySPACE]) == 1 && g.jumponkey == 1  )  t.plrkeySPACE = 1; else t.plrkeySPACE = 0;
+		if ( PWGameplayKey(16,g.keymap[t.plrkeyQ]) == 1 && g.peekonkeys == 1  )  t.plrkeyQ = 1; else t.plrkeyQ = 0;
+		if ( PWGameplayKey(18,g.keymap[t.plrkeyE]) == 1 && g.peekonkeys == 1  )  t.plrkeyE = 1; else t.plrkeyE = 0;
+		if ( PWGameplayKey(33,g.keymap[t.plrkeyF]) == 1  )  t.plrkeyF = 1; else t.plrkeyF = 0;
+		if ( PWGameplayKey(46,g.keymap[t.plrkeyC]) == 1 && g.crouchonkey == 1  )  t.plrkeyC = 1; else t.plrkeyC = 0;
+		if ( !PWGameplayControlsActive() && ControlKey() == 1 ) t.plrkeyC = 1;
+		if ( PWGameplayKey(44,g.keymap[t.plrkeyZ]) == 1  )  t.plrkeyZ = 1; else t.plrkeyZ = 0;
+		if ( PWGameplayKey(19,g.keymap[t.plrkeyR]) == 1  )  t.plrkeyR = 1; else t.plrkeyR = 0;
+		if ( PWGameplayKey(28,g.keymap[t.plrkeyRETURN]) == 1  )  t.plrkeyRETURN = 1; else t.plrkeyRETURN = 0;
+		if ( PWGameplayKey(36,g.keymap[t.plrkeyJ]) == 1  )  t.plrkeyJ = 1; else t.plrkeyJ = 0;
 	}
 
 	// XBOX/Controller Keys
@@ -1378,11 +1421,16 @@ void physics_player_gatherkeycontrols ( void )
 		break;
 	}
 
-	// Third person disables crouch/zoom/RMB
+	// Third person uses its own crouch policy in the native shared controller; legacy mode retains the old restriction.
 	t.playercontrol.camrightmousemode=0;
 	if ( t.playercontrol.thirdperson.enabled == 1 ) 
 	{
-		g.forcecrouch=0 ; t.plrkeyC=0;
+		char legacyThirdPerson[4]={};
+		const bool legacy = GetEnvironmentVariableA("GGCPW_LEGACY_THIRDPERSON",legacyThirdPerson,sizeof(legacyThirdPerson))==1&&legacyThirdPerson[0]=='1';
+		if (legacy || t.game.runasmultiplayer!=0 || g.gvrmode!=0 || g.globals.riftmode!=0 || t.conkit.editmodeactive!=0)
+		{
+			g.forcecrouch=0; t.plrkeyC=0;
+		}
 		t.gunzoommode = 0 ; if ( t.tmouseclick == 2 ) { t.tmouseclick = 0  ; t.playercontrol.camrightmousemode = 1; }
 	}
 
@@ -2165,8 +2213,10 @@ void physics_player_takedamage ( void )
 			{
 				if (  t.playercontrol.thirdperson.enabled == 1 ) 
 				{
-					//  third person character produces blood
-					if (  t.te != -1 ) 
+					// Skip cosmetic blood for missing references; still finish damage.
+                    if (t.te>0&&t.te<=g.entityelementlist&&
+                        PWValidLifecycleAvatar(t.playercontrol.thirdperson.charactere)&&
+                        t.entityelement[t.te].obj>0&&ObjectExist(t.entityelement[t.te].obj)) 
 					{
 						t.ttobj1=t.entityelement[t.playercontrol.thirdperson.charactere].obj;
 						t.decalx1=ObjectPositionX(t.ttobj1);
@@ -2260,6 +2310,10 @@ void physics_player_takedamage ( void )
 					}
 				}
 			}
+			// Forced damage can arrive again during the death pause.
+            if(PWThirdPerson::NativeLifecycleEnabled()&&t.playercontrol.deadtime>0){
+                t.player[t.plrid].health=0;return;
+            }
 			//  player looses a life
 			t.player[t.plrid].health=0;
 			if (  t.playercontrol.startlives>0 ) 
@@ -2294,10 +2348,13 @@ void physics_player_takedamage ( void )
 			{
 				music_resetall ( );
 			}
-			//  if third person, also create ragdoll of protagonist
-			if (  t.playercontrol.thirdperson.enabled == 1 ) 
-			{
-				t.ttte=t.playercontrol.thirdperson.charactere;
+			// Reuse the original ragdoll/animation death path, with validated references.
+            if(PWThirdPerson::NativeLifecycleEnabled())PWResetPlayerMotion();
+            if(t.playercontrol.thirdperson.enabled==1&&
+                PWValidLifecycleAvatar(t.playercontrol.thirdperson.charactere)&&
+                t.entityelement[t.playercontrol.thirdperson.charactere].ragdollified==0)
+            {
+                t.ttte=t.playercontrol.thirdperson.charactere;
 				t.tdamageforce=0;
 				t.entityelement[t.ttte].health=1 ; t.tdamage=1;
 				t.entityelement[t.ttte].ry=ObjectAngleY(t.entityelement[t.ttte].obj);
@@ -2431,22 +2488,61 @@ void physics_resetplayer_core ( void )
 	}
 	waypoint_hideall ( );
 
-	// if third person, resurrect ragdoll protagonist
-	if ( t.playercontrol.thirdperson.enabled == 1 ) 
-	{
-		// ensure character protagonist is respawned
-		t.e=t.playercontrol.thirdperson.charactere;
-		entity_lua_spawn_core ( );
-		physics_player_thirdpersonreset ( );
-		//PE: Something is disable Z depth buffer when 3rd die ?, just reenable.
-		//PE: https://github.com/TheGameCreators/GameGuruRepo/issues/330
-		EnableObjectZWrite(t.entityelement[t.e].obj);
-		EnableObjectZDepth(t.entityelement[t.e].obj);
-	}
+    // Restore the existing protagonist through Classic's own spawn pipeline.
+    if(t.playercontrol.thirdperson.enabled==1){
+        const int e=t.playercontrol.thirdperson.charactere;
+        if(PWValidLifecycleAvatar(e)){
+            const bool native=PWThirdPerson::NativeLifecycleEnabled();
+            const int weapon=t.gunid;
+            if(native){
+                auto& avatar=t.entityelement[e];
+                const int body=t.aisystem.objectstartindex;
+                avatar.x=ObjectPositionX(body);avatar.y=ObjectPositionY(body)-35.f;
+                avatar.z=ObjectPositionZ(body);
+                avatar.rx=0;avatar.ry=t.terrain.playeray_f;avatar.rz=0;
+            }
+            t.e=e;entity_lua_spawn_core();
+            t.e=e;physics_player_thirdpersonreset();
+            if(PWValidLifecycleAvatar(e)){
+                const int obj=t.entityelement[e].obj;
+                EnableObjectZWrite(obj);EnableObjectZDepth(obj);
+                if(native){
+                    auto& avatar=t.entityelement[e];
+                    avatar.beenkilled=0;avatar.ragdollifiedforcevalue_f=0;
+                    avatar.lua.flagschanged=1;
+                    const int index=t.playercontrol.thirdperson.characterindex;
+                    if(index>0&&index<=g.charanimindexmax&&t.charanimstates[index].originale==e){
+                        auto& state=t.charanimstates[index];
+                        state.obj=obj;state.e=0;
+                        const int style=state.weapstyle>=1&&state.weapstyle<=5?state.weapstyle:1;
+                        state.weapstyle=style;state.playcsi=t.csi_stood[style];
+                        state.freezeanyrotation=0;state.freezeallmovement=0;state.advancedcapactive=0;
+                        state.lastmoving=0;state.lastcovering=0;state.punchorkickimpact=0;
+                        t.charanimcontrols[index]=charanimcontrolstype();
+                        if(obj<=t.tmaxobjectnumber)t.smoothanim[obj]=smoothanimtype();
+                    }
+                    // Reattach only the owned weapon; do not rewrite ammo or inventory.
+                    bool owned=weapon==0;
+                    for(int slot=1;slot<=10;++slot)if(t.weaponslot[slot].got==weapon)owned=true;
+                    PWThirdPerson::EquipStage stage;
+                    if(owned&&PWThirdPerson::PrepareEquip(weapon,stage))
+                        PWThirdPerson::FinishEquip(stage,true);
+                    else {
+                        PWThirdPerson::EquipStage holster;
+                        if(PWThirdPerson::PrepareEquip(0,holster))PWThirdPerson::FinishEquip(holster,true);
+                        g.autoloadgun=0;
+                        timestampactivity(0,"PW respawn weapon unavailable; holstering");
+                    }
+                    t.gunmustreleasefirst=1;
+                }
+            }
+        }
+    }
 }
 
 void physics_player_thirdpersonreset ( void )
 {
+    if(!PWValidLifecycleAvatar(t.e))return;
 	//  convert to clone so can animate it (ragdoll makes it an instance)
 	t.tentityconverttoclonenotshared=1;
 	t.tte=t.e ; entity_converttoclone ( );
@@ -2454,8 +2550,10 @@ void physics_player_thirdpersonreset ( void )
 	t.charanimstate.e=t.e ; t.obj=t.entityelement[t.e].obj;
 	entity_setupcharobjsettings ( );
 	//  and reset any transitional states in animation system (avoid freezing it)
-	t.smoothanim[t.charanimstate.obj].transition=0;
-	t.smoothanim[t.charanimstate.obj].playstarted=0;
+	if(t.charanimstate.obj>0&&t.charanimstate.obj<=t.tmaxobjectnumber){
+        t.smoothanim[t.charanimstate.obj].transition=0;
+        t.smoothanim[t.charanimstate.obj].playstarted=0;
+    }
 	//  camera has smoothing in third person, so reset this
 	if ( g.luacameraoverride != 1 && g.luacameraoverride != 3 )
 	{

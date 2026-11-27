@@ -75,6 +75,18 @@ python tools/make_pw_release.py --build-dir "D:\GGClassic-PW-Build" --version 0.
 
 Do not publish any modified GameGuru script/media without confirming the applicable source and redistribution licence.
 
+## Persistent player profiles M1 (25 November 2026)
+
+Source implementation is staged on the development branch. See [profile API and acceptance checklist](PW_PLAYER_PROFILES.md). The historical request below describes the larger goal; M1 does not implement the full user-facing menu or all acceptance requirements.
+
+## Historical player-profile save/load request (22 November 2026)
+
+A separate, originally unimplemented engine-wide feature request proposes old-console-style player profiles with a single logical save file per player. Manual, checkpoint and autosave operations should record gameplay progress, then allow loading that profile after quitting and restarting a standalone game. The intended state includes level/position, health/lives, weapons/ammo and developer-selected Lua/quest/inventory values, with versioned serialization, safe atomic writes and corrupt-file recovery.
+
+**Do not confuse the existing level-transition module with this proposed profile-save service.** The current module persists a limited set of explicitly registered values when moving between connected levels; it does not automatically capture all engine variables, and is not a general cross-session save manager.
+
+See [general-purpose engine requests](PIXELWOLF_CLASSIC_ROADMAP.md#general-purpose-game-system-requests--22-november-2026) for the profile-saving requirements and tests.
+
 ## Deferred acceptance — do not mark as gameplay-tested
 
 - [ ] Compile the full 64-bit editor, with installed licensed GameGuru media.
@@ -88,4 +100,4 @@ Do not publish any modified GameGuru script/media without confirming the applica
 - [ ] Confirm any persistent RPG quest values required during an entity's `_init` are loaded early enough; current restore occurs later in the level preparation path.
 - [ ] Only then decide whether to enable ordinary jump persistence by default.
 
-**This upgrade does not yet implement persistent saves across unrelated game launches, seamless area streaming, or full quest/inventory systems.**
+**The original transition upgrade does not itself implement cross-session saves; the new profile M1 is separate and needs standalone acceptance. Seamless streaming and full inventory/quest systems remain future work.**

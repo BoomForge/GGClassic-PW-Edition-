@@ -1,0 +1,46 @@
+name: PW Edition updater validation
+
+on:
+  pull_request:
+    paths:
+      - "tools/**"
+      - "GameGuru Core/GameGuru/Source/M-GridEdit.cpp"
+      - "GameGuru Core/Guru-MapEditor/DarkEXE.vcxproj"
+      - ".github/workflows/pw-updater-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-contract:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Test release package allowlist and hashes
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tools -p "test_make_pw_release.py" -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s tools -p "test_pw_steam_overlay.py" -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Check Windows PowerShell updater syntax
+        shell: powershell
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $pwd 'tools/pw-updater.ps1'),
+            [ref]$tokens,
+            [ref]$parseErrors
+          )
+          if ($parseErrors.Count -ne 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.ToString() }
+            exit 1
+          }
+          Write-Host 'Updater PowerShell syntax parsed successfully.'

@@ -103,10 +103,12 @@
   #else
 	// Flags to compile the Classic version of GameGuru
 
-	//PE: Add ENABLEIMGUI,USERENDERTARGET to compile a imgui version of Classic.
-	//LB: Also ensure you 'include' in build the IMGUI source files, and add the necessary extra files in the root folder (i.e. tutorialbank, etc)
-	//#define ENABLEIMGUI
-	//#define USERENDERTARGET
+	// Pixelwolf PW Edition: compile the dockable ImGui editor in Classic.
+	// The original Classic source ships with these flags disabled, which meant
+	// PW menus, workspace, Inspector and Lua Studio were compiled out entirely.
+	// The x64 MapEditor project already includes all ImGui source files.
+	#define ENABLEIMGUI
+	#define USERENDERTARGET
 
 	#define FPSEXCHANGE
 	#define ENABLECUSTOMTERRAIN

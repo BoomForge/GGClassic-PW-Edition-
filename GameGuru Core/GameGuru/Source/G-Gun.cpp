@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-ThirdPersonGameplay.h"
 
 
 // global store for weapon shader effect indexes
@@ -196,55 +197,38 @@ void gun_manager ( void )
 	if ( t.gunclick == 1 && g.firemodes[t.gunid][g.firemode].settings.disablerunandshoot == 1 && t.playercontrol.isrunning == 1 && t.player[1].state.moving == 1  )  t.gunclick = 0;
 	if ( t.gunclick == 1 && (g.lowfpswarning == 1 || g.lowfpswarning == 2)  )  t.gunclick = 0;
 
-	// Melee control (for TPP) 
-	bool bGunshotOverridden = false;
-	if ( t.playercontrol.thirdperson.enabled == 1 ) 
-	{
-		// sometimes gunid can be zero? (start marker/fantasy ranger=zero)
-		t.gunid = t.entityelement[t.playercontrol.thirdperson.charactere].eleprof.hasweapon;
-		bool bWeaponIsMeleeBased = false;
-		if (t.gunid > 0)
-			if (t.gun[t.gunid].statuspanelcode == 7 || t.gun[t.gunid].statuspanelcode == 8 || t.gun[t.gunid].statuspanelcode == 10) // bow, axe, sword
-				bWeaponIsMeleeBased = true;
-		if (t.gunid == 0 || bWeaponIsMeleeBased == true)
-		{
-			// use gunclick to detect one off press for melee
-			if (t.gunclick != 1)	t.gunmustreleasefirst = 0;
-			if (t.gunclick != 0)
-			{
-				if (t.gunclick == 1 && t.gunmustreleasefirst == 0)
-				{
-					// if third person, detect melee override of LMB shooting
-					int iE = t.playercontrol.thirdperson.charactere;
-					int iWeaponIndex = t.entityelement[iE].eleprof.hasweapon;
-					if (iWeaponIndex == 0)
-					{
-						// but only trigger 'punch' melee if specified in FPE
-						int entid = t.entityelement[iE].bankindex;
-						t.q = t.entityprofile[entid].startofaianim;
-						if (t.entityanim[entid][t.q + t.csi_stoodpunch[1]].start > 0)
-						{
-							t.charanimcontrols[t.playercontrol.thirdperson.characterindex].meleeing = 1;
-						}
-						bGunshotOverridden = true;
-					}
-					else
-					{
-						if (bWeaponIsMeleeBased == true)
-						{
-							int entid = t.entityelement[iE].bankindex;
-							t.q = t.entityprofile[entid].startofaianim;
-							if (t.entityanim[entid][t.q + t.csi_stoodpunch[1]].start > 0)
-							{
-								t.charanimcontrols[t.playercontrol.thirdperson.characterindex].meleeing = 1;
-							}
-							bGunshotOverridden = true;
-						}
-					}
-				}
-			}
-		}
-	}
+    // TPP attacks: suppress the ordinary gun trigger for the entire
+    // unarmed/melee press, not merely the first frame of the press.
+    bool bGunshotOverridden=false;
+    if(t.playercontrol.thirdperson.enabled==1) {
+        const int e=t.playercontrol.thirdperson.charactere;
+        const int index=t.playercontrol.thirdperson.characterindex;
+        if(e<=0||e>g.entityelementlist||index<=0||index>g.charanimindexmax)
+            bGunshotOverridden=true;
+        else {
+            const int bank=t.entityelement[e].bankindex;
+            const int weapon=t.gunid;
+            if(bank<=0||weapon<0||weapon>g.gunmax)bGunshotOverridden=true;
+            else {
+                // gun_change owns selected weapon and synchronises the avatar.
+                // Never overwrite the live gun slot from the authored profile.
+                const bool melee=weapon==0||(g.firemodes[weapon][g.firemode].settings.flakindex<=0&&
+                    (t.gun[weapon].statuspanelcode==7||t.gun[weapon].statuspanelcode==8||t.gun[weapon].statuspanelcode==10));
+                if(melee) {
+                    bGunshotOverridden=true;
+                    if(t.gunclick!=1)t.gunmustreleasefirst=0;
+                    if(t.gunclick==1&&t.gunmustreleasefirst==0&&t.player[1].health>0) {
+                        t.gunmustreleasefirst=1;
+                        const int anim=t.entityprofile[bank].startofaianim+t.csi_stoodpunch[1];
+                        if(t.entityanim[bank][anim].start>0&&t.charanimcontrols[index].meleeing==0) {
+                            t.playercontrol.thirdperson.meleestruck=0;
+                            t.charanimcontrols[index].meleeing=1;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
 	// Gun controls
 	if ( t.gunmode < 100 && bGunshotOverridden == false ) 
@@ -475,74 +459,55 @@ void gun_manager ( void )
 	}
 
 	// TPP Melee Control
-	if ( t.playercontrol.thirdperson.enabled == 1 ) 
-	{
-		if ( t.charanimcontrols[t.playercontrol.thirdperson.characterindex].meleeing != 0 )
-		{
-			// player meleeing, detect strike frames and inflict damage on any entity in front of character
-			int iE = t.playercontrol.thirdperson.charactere;
-			int iObj = t.entityelement[iE].obj;
-			if ( iObj > 0 )
-			{
-				if ( ObjectExist ( iObj ) == 1 )
-				{
-					float fCurrentFrame = GetFrame(iObj);
-					float fCurrentAngle = WrapValue ( ObjectAngleY ( iObj ) );
-					int iEntID = t.entityelement[iE].bankindex;
-					t.q = t.entityprofile[iEntID].startofaianim;
-					float fStrikeRadius = t.entityprofile[iEntID].meleerange;
-					float fStrikeStart = t.entityanim[iEntID][t.q+t.csi_stoodpunch[1]].start;
-					float fStrikeFinish = t.entityanim[iEntID][t.q+t.csi_stoodpunch[1]].finish;
-					float fStrikeThird = (fStrikeFinish-fStrikeStart)/3.0f;
-					fStrikeStart += fStrikeThird;
-					fStrikeFinish -= fStrikeThird;
-					if ( t.entityprofile[iEntID].meleestrikest > 0 )
-					{
-						fStrikeStart = t.entityprofile[iEntID].meleestrikest;
-						fStrikeFinish = t.entityprofile[iEntID].meleestrikefn;
-					}
-					if ( fCurrentFrame < fStrikeStart ) t.playercontrol.thirdperson.meleestruck = 0;
-					if ( fCurrentFrame >= fStrikeStart && fCurrentFrame <= fStrikeFinish && t.playercontrol.thirdperson.meleestruck == 0 )
-					{
-						// is character facing an entity and in range
-						float fCurrentX = ObjectPositionX ( iObj );
-						float fCurrentY = ObjectPositionY ( iObj );
-						float fCurrentZ = ObjectPositionZ ( iObj );
-						for ( int iEE = 1; iEE <= g.entityelementlist; iEE++ )
-						{
-							if ( iEE != iE )
-							{
-								float fDX = t.entityelement[iEE].x - fCurrentX;
-								float fDZ = t.entityelement[iEE].z - fCurrentZ;
-								float fDD = sqrt ( fabs(fDX*fDX)+fabs(fDZ*fDZ) );
-								int entid = t.entityelement[iEE].bankindex;
-								if ( fDD < fStrikeRadius && t.entityelement[iEE].staticflag == 0 && t.entityelement[iEE].health > 0 && t.entityprofile[entid].ismarker == 0 )
-								{
-									if ( fabs ( t.entityelement[iEE].y - fCurrentY ) < 50.0f )
-									{
-										float fDA = WrapValue ( Atan2 ( fDX, fDZ ) );
-										float fCompareA = WrapValue(fabs(fCurrentAngle) - fabs(fDA));
-										if ( fCompareA > 180 ) fCompareA = fCompareA - 360;
-										if ( fabs(fCompareA) < t.entityprofile[iEntID].meleehitangle )
-										{
-											// apply some damage
-											t.tttriggerdecalimpact = 0;
-											t.tdamagesource = 1;
-											int iDamageRange = t.entityprofile[iEntID].meleedamagefn - t.entityprofile[iEntID].meleedamagest;
-											t.tdamage = t.entityprofile[iEntID].meleedamagest + (rand()%iDamageRange);
-											entity_hitentity ( iEE, t.entityelement[iEE].obj );
-											entity_triggerdecalatimpact ( t.entityelement[iEE].x, t.entityelement[iEE].y+50.0f, t.entityelement[iEE].z );
-											t.playercontrol.thirdperson.meleestruck = 1;
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
+    // Native TPP melee: one committed strike window, nearest eligible target,
+    // actual world-space origin and obstruction check. No stale bullet ray.
+    if(t.playercontrol.thirdperson.enabled==1&&t.player[1].health>0) {
+        using namespace PWThirdPerson;
+        const int e=t.playercontrol.thirdperson.charactere,index=t.playercontrol.thirdperson.characterindex;
+        if(e>0&&e<=g.entityelementlist&&index>0&&index<=g.charanimindexmax&&t.charanimcontrols[index].meleeing!=0) {
+            const int obj=t.entityelement[e].obj,bank=t.entityelement[e].bankindex;
+            if(obj>0&&ObjectExist(obj)&&bank>0) {
+                const auto& profile=t.entityprofile[bank];
+                const int anim=profile.startofaianim+t.csi_stoodpunch[1];
+                float begin=t.entityanim[bank][anim].start,finish=t.entityanim[bank][anim].finish;
+                const float third=(finish-begin)/3.f;
+                begin+=third;finish-=third;
+                if(profile.meleestrikest>0){begin=profile.meleestrikest;finish=profile.meleestrikefn;}
+                const float frame=GetFrame(obj);
+                if(finish>=begin&&frame>=begin&&frame<=finish&&t.playercontrol.thirdperson.meleestruck==0) {
+                    // Consume the strike even on a miss; one target per swing.
+                    t.playercontrol.thirdperson.meleestruck=1;
+                    Vec origin={};int ignore=0;
+                    if(PlayerOrigin(origin,ignore)) {
+                        const float yaw=ObjectAngleY(obj);
+                        int best=0,bestObj=0;Vec bestPoint={};float bestDistance=profile.meleerange;
+                        for(int candidate=1;candidate<=g.entityelementlist;++candidate) {
+                            if(candidate==e)continue;
+                            const auto& target=t.entityelement[candidate];
+                            if(target.bankindex<=0||target.staticflag!=0||target.health<=0||target.active==0||
+                                t.entityprofile[target.bankindex].ismarker!=0)continue;
+                            Vec point={};int targetObj=0;
+                            if(!EntityTarget(candidate,point,targetObj)||!GetVisible(targetObj)||
+                                !InMeleeArc(origin,point,yaw,profile.meleerange,profile.meleehitangle,70.f))continue;
+                            const Vec delta=Sub(point,origin);
+                            const float distance=std::sqrt(delta.x*delta.x+delta.z*delta.z);
+                            if((best==0||distance<bestDistance)&&LineClear(origin,point,ignore,targetObj)){
+                                best=candidate;bestObj=targetObj;bestPoint=point;bestDistance=distance;
+                            }
+                        }
+                        if(best>0) {
+                            t.tttriggerdecalimpact=0;t.tdamagesource=1;t.bulletraylimbhit=-1;
+                            t.brayx1_f=origin.x;t.brayy1_f=origin.y;t.brayz1_f=origin.z;
+                            t.brayx2_f=bestPoint.x;t.brayy2_f=bestPoint.y;t.brayz2_f=bestPoint.z;
+                            t.tdamage=StrikeDamage(profile.meleedamagest,profile.meleedamagefn,static_cast<unsigned>(rand()));
+                            entity_hitentity(best,bestObj);
+                            entity_triggerdecalatimpact(bestPoint.x,bestPoint.y,bestPoint.z);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
 	// independent handling (no matter which guns is selected)
 	gun_brass_indi ( );
@@ -563,22 +528,25 @@ void gun_change ( void )
 			}
 		}
 	}
-	else
-	{
-		if (  t.playercontrol.thirdperson.enabled == 1 ) 
-		{
-			// check if third person has weapon but not yet assigned
-			if ( t.entityelement[t.playercontrol.thirdperson.charactere].eleprof.hasweapon != 0 && t.gunid == 0 )
-			{
-				// allow g.autoloadgun through..
-			}
-			else
-			{
-				// third person character cannot equip new weapons for the moment
-				return;
-			}
-		}
-	}
+    // TPP uses the same inventory selection as FPS. Stage the world attachment
+    // before freeing the old HUD gun; never equip an unowned or missing model.
+    PWThirdPerson::EquipStage pwStage;
+    const bool pwSwitch=t.playercontrol.thirdperson.enabled==1&&g.autoloadgun!=-1;
+    if(pwSwitch){
+        const int requested=g.autoloadgun;
+        bool owned=false,hudReady=false;
+        if(requested>0&&requested<=g.gunmax&&requested<=ArrayCount(t.gun)){
+            for(int slot=1;slot<=10;++slot)if(t.weaponslot[slot].got==requested){owned=true;break;}
+            const int hud=t.gun[requested].obj;
+            hudReady=hud>0&&ObjectExist(hud);
+        }
+        if(!PWThirdPerson::EquipAllowed(requested,g.gunmax,owned,hudReady)||!PWThirdPerson::PrepareEquip(requested,pwStage)){
+            timestampactivity(0,"PW third-person equip rejected: missing inventory, HUD, world model or hand socket");
+            g.autoloadgun=-1;
+            t.gunmode=t.gunid>0?131:5;
+            return;
+        }
+    }
 
 	if ( g.autoloadgun != -1 && g.autoloadgun <= ArrayCount(t.gun) ) 
 	{
@@ -628,6 +596,15 @@ void gun_change ( void )
 		{
 			t.gunid=0;
 		}
+
+        if(pwSwitch){
+            PWThirdPerson::FinishEquip(pwStage,t.gunid==pwStage.weapon);
+            const int index=t.playercontrol.thirdperson.characterindex;
+            if(index>0&&index<=g.charanimindexmax)t.charanimcontrols[index].meleeing=0;
+            t.playercontrol.thirdperson.meleestruck=0;
+            t.playercontrol.thirdperson.shotfired=0;
+            t.gunmustreleasefirst=1;
+        }
 
 		//  Default gun action is to SHOW and reveal gun (then goes to gunmode=5 idle)
 		t.gunmode=131 ; t.keyboardpress=0;
@@ -3307,6 +3284,11 @@ void gun_updatebulletvisibility ( void )
 	}
 }
 
+// Capture the whole third-person shot at trigger time. Deferred shotgun
+// pellets must not pick a different point when the camera/character moves.
+static PWThirdPerson::Aim pwShotAim;
+static bool pwShotAimValid=false;
+static int pwShotWeapon=0,pwShotFiremode=0;
 void gun_shoot ( void )
 {
 	//  When fire Line (  active )
@@ -3315,10 +3297,19 @@ void gun_shoot ( void )
 		//  170315 - 020 - stop invincible if you shoot
 		g.mp.invincibleTimer = 0;
 
+        pwShotAimValid=false;
+        if(t.playercontrol.thirdperson.enabled==1&&t.gunid>0){
+            float range=g.firemodes[t.gunid][g.firemode].settings.range;
+            if(range<=0.f)range=3000.f;
+            if(t.gun[t.gunid].settings.ismelee==2)range=g.firemodes[t.gunid][0].settings.meleerange;
+            pwShotAimValid=PWThirdPerson::BuildPlayerAim(range,pwShotAim);
+            pwShotWeapon=t.gunid;pwShotFiremode=g.firemode;
+        }
+
 		//  if third person, trigger shot flag
 		if ( t.playercontrol.thirdperson.enabled == 1 ) 
 		{
-			int iWeaponIndex = t.entityelement[t.playercontrol.thirdperson.charactere].eleprof.hasweapon;
+			int iWeaponIndex = t.gunid;
 			if ( iWeaponIndex > 0 )
 			{
 				// this triggers the TPP to rotate to face shot direction
@@ -3448,23 +3439,12 @@ void gun_shoot ( void )
 				//  find starting GetPoint (  for projectile )
 				if (  t.playercontrol.thirdperson.enabled == 1 ) 
 				{
-					//  third person flak (fireball)
-					t.flakangle_f=CameraAngleY(t.terrain.gameplaycamera);
-					t.flakpitch_f=0;
-					t.flakx_f=ObjectPositionX(t.aisystem.objectstartindex);
-					t.flaky_f=ObjectPositionY(t.aisystem.objectstartindex);
-					t.flakz_f=ObjectPositionZ(t.aisystem.objectstartindex);
-					t.tattobj=t.entityelement[t.playercontrol.thirdperson.charactere].attachmentobj;
-					if (  t.tattobj>0 ) 
-					{
-						if (  ObjectExist(t.tattobj) == 1 ) 
-						{
-							t.tattlimb=t.entityelement[t.playercontrol.thirdperson.charactere].attachmentobjfirespotlimb;
-							t.flakx_f=LimbPositionX(t.tattobj,t.tattlimb);
-							t.flaky_f=LimbPositionY(t.tattobj,t.tattlimb);
-							t.flakz_f=LimbPositionZ(t.tattobj,t.tattlimb);
-						}
-					}
+                    // Use the captured muzzle and target direction for projectiles.
+                    if(pwShotAimValid) {
+                        t.flakx_f=pwShotAim.muzzle.x;t.flaky_f=pwShotAim.muzzle.y;t.flakz_f=pwShotAim.muzzle.z;
+                        t.flakangle_f=pwShotAim.yaw;t.flakpitch_f=pwShotAim.pitch;
+                    }
+
 				}
 				else
 				{
@@ -3489,7 +3469,7 @@ void gun_shoot ( void )
 				}
 				//  create and launch projectile
 				t.tProjectileType_s=t.gun[t.gunid].projectile_s  ; weapon_getprojectileid ( );
-				if (  t.tProjectileType>0 ) 
+				if ( t.tProjectileType>0 && (t.playercontrol.thirdperson.enabled==0||pwShotAimValid) )
 				{
 					t.tSourceEntity=0 ; t.tTracerFlag=0;
 					t.tStartX_f=t.flakx_f ; t.tStartY_f=t.flaky_f ; t.tStartZ_f=t.flakz_f;
@@ -3511,11 +3491,14 @@ void gun_shoot ( void )
 		if ( 1 )
 		{
 			t.tradius_f=2000;
-			AICreateSound ( CameraPositionX(), CameraPositionY(), CameraPositionZ(),t.tradius_f,t.tradius_f,-1 );
+			PWThirdPerson::Vec soundOrigin={CameraPositionX(),CameraPositionY(),CameraPositionZ()};
+            int ignored=0;
+            if(t.playercontrol.thirdperson.enabled==1)PWThirdPerson::PlayerOrigin(soundOrigin,ignored);
+            AICreateSound(soundOrigin.x,soundOrigin.y,soundOrigin.z,t.tradius_f,t.tradius_f,-1);
 			g.aidetectnearbymode = 1;
 			g.aidetectnearbycount = 60*4;
-			g.aidetectnearbymodeX_f = CameraPositionX();
-			g.aidetectnearbymodeZ_f = CameraPositionZ();
+			g.aidetectnearbymodeX_f = soundOrigin.x;
+			g.aidetectnearbymodeZ_f = soundOrigin.z;
 		}
 	}
 
@@ -3548,45 +3531,13 @@ void gun_shoot_oneray ( void )
 	// project gun-Line for shot
 	if ( t.playercontrol.thirdperson.enabled == 1 )
 	{
-		// if camera lock, always facing forward when firing
-		float fRangeOfRay = 7000.0f;
-		if ( t.playercontrol.thirdperson.cameralocked == 1 )
-		{
-			int iCharE = t.playercontrol.thirdperson.charactere;
-			float fPlrAngle = ObjectAngleY(t.entityelement[iCharE].obj);
-			t.x1_f = ObjectPositionX(t.entityelement[iCharE].obj);
-			t.y1_f = ObjectPositionY(t.entityelement[iCharE].obj) + 50.0f;
-			t.z1_f = ObjectPositionZ(t.entityelement[iCharE].obj);
-			t.x2_f = NewXValue(t.x1_f, fPlrAngle, 100.0f);
-			t.y2_f = t.y1_f;
-			t.z2_f = NewZValue(t.z1_f, fPlrAngle, 100.0f);
+        if(!pwShotAimValid||pwShotWeapon!=t.gunid||pwShotFiremode!=g.firemode)return;
+        t.range_f=pwShotAim.range;
+        t.x1_f=pwShotAim.muzzle.x;t.y1_f=pwShotAim.muzzle.y;t.z1_f=pwShotAim.muzzle.z;
+        PositionObject(g.hudbankoffset+3,t.x1_f,t.y1_f,t.z1_f);
+        RotateObject(g.hudbankoffset+3,pwShotAim.pitch+t.tcy_f,pwShotAim.yaw+t.tcx_f,0.f);
+        MoveObject(g.hudbankoffset+3,t.range_f);
 
-			// reduce range and scatter distortion
-			fRangeOfRay = 500.0f;
-			t.tcx_f *= (500.0f/7000.0f);
-			t.tcy_f *= (500.0f/7000.0f);
-		}
-		else
-		{
-			// special TPP shooting (from camera for accurate impact coordinate)
-			t.x1_f = t.gunshootspreadposx;
-			t.y1_f = t.gunshootspreadposy;
-			t.z1_f = t.gunshootspreadposz;
-
-			// work out cross-hair position on screen to distant 3D coordinate
-			int iDisplayWidth = GetDisplayWidth();
-			int iDisplayHeight = GetDisplayHeight();
-			PickScreen2D23D(iDisplayWidth * 0.5f, iDisplayHeight * 0.25f, 7000.0f);
-			t.x2_f = t.gunshootspreadposx + GetPickVectorX();
-			t.y2_f = t.gunshootspreadposy + GetPickVectorY();
-			t.z2_f = t.gunshootspreadposz + GetPickVectorZ();
-		}
-
-		// adjust destination vector with bullet inaccuacies
-		PositionObject ( g.hudbankoffset+3, t.x1_f, t.y1_f, t.z1_f );
-		PointObject ( g.hudbankoffset+3, t.x2_f, t.y2_f, t.z2_f );
-		RotateObject ( g.hudbankoffset+3, ObjectAngleX(g.hudbankoffset+3)+t.tcy_f,ObjectAngleY(g.hudbankoffset+3)+t.tcx_f,ObjectAngleZ(g.hudbankoffset+3) );
-		MoveObject ( g.hudbankoffset+3, fRangeOfRay );
 	}
 	else
 	{

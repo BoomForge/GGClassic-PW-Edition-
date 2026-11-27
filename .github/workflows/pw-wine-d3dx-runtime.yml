@@ -1,0 +1,39 @@
+name: Official Microsoft D3DX runtime for Wine compatibility
+on:
+  push:
+    branches:
+      - work/pw-community-integration-20261121
+    paths:
+      - '.github/workflows/pw-wine-d3dx-runtime.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  d3dx:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Retrieve official Microsoft NuGet redistributable
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 2 https://api.nuget.org/v3-flatcontainer/microsoft.dxsdk.d3dx/9.29.952.8/microsoft.dxsdk.d3dx.9.29.952.8.nupkg -o d3dx.nupkg
+          python3 - <<'PY'
+          import pathlib, zipfile
+          with zipfile.ZipFile("d3dx.nupkg") as z:
+              paths=[p for p in z.namelist() if p.lower().endswith(".dll")]
+              print("\n".join(paths))
+              dest=pathlib.Path("runtime")
+              dest.mkdir()
+              for p in paths:
+                  if "/x64/" in p.lower() and pathlib.PurePosixPath(p).name.lower() in {"d3dx11_43.dll","d3dx9_43.dll","d3dcompiler_43.dll"} and "/release/" in p.lower():
+                      (dest/pathlib.PurePosixPath(p).name).write_bytes(z.read(p))
+              if not any(p.name.lower()=="d3dx11_43.dll" for p in dest.iterdir()):
+                  raise RuntimeError("Official package has no release x64 runtime")
+          PY
+          cd runtime && sha256sum *.dll > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: microsoft-d3dx-x64-runtime
+          path: runtime/
+          retention-days: 1

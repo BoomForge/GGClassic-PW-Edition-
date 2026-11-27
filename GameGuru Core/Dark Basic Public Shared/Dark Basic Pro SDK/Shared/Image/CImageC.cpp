@@ -14,6 +14,12 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
+#include <cstdint>
+#include <psapi.h>
+#ifdef DX11
+#include <dxgi1_4.h>
+#endif
 #include ".\..\Core\SteamCheckForWorkshop.h"
 
 #include "CSpritesC.h"
@@ -21,6 +27,17 @@
 #include "CObjectsC.h"
 #include "DarkLUA.h"
 #include <thread>
+#include <atomic>
+#include <mutex>
+#include "PW-TextureBudget.h"
+#include "PW-TextureStage.h"
+#include "PW-TextureMip.h"
+#include "PW-TextureResidency.h"
+#ifdef DX11
+#include "PW-TextureTiled.h"
+#include "PW-TextureBenchmark.h"
+#endif
+#include <memory>
 
 extern "C" HANDLE GG_CreateFile( LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile );
 extern "C" void GG_GetRealPath( char* fullPath, int create );
@@ -39,8 +56,9 @@ extern LPGGDEVICE				m_pD3D;
 
 // globals for single thread (THREAD-SAFE)
 std::thread* g_pT1 = NULL;
-bool g_bT1 = false;
-bool g_bRequestCleanInteruptionT1 = false;
+std::atomic<bool> g_bT1(false);
+std::atomic<bool> g_bRequestCleanInteruptionT1(false);
+static std::mutex pwPreloadOutputMutex;
 std::vector<sPreLoadedTexture> g_image_list;
 std::vector<sPreLoadedTexture> g_image_outputv;
 int iResizeLoadImageX = 0, iResizeLoadImageY = 0;
@@ -53,137 +71,754 @@ void image_setlegacyimageloading(bool bEnable) { g_bAllowLegacyImageLoadingForUI
 char processing_filename[MAX_PATH];
 
 
-// function to execute thread code
-void image_thread_function(const std::vector<sPreLoadedTexture> &v)
+// The preload batch owns exactly one COM reference per non-null entry.
+// Pending input belongs to the main thread until launch, then to the worker;
+// completed output is guarded even when the renderer consumes a texture early.
+template<size_t N> static bool PWPreloadPath(const char* filename,char (&resolved)[N])
 {
-	// in this thread, load each DX11 texture in turn
-	g_bT1 = true;
-	g_image_outputv.clear();
-	for ( int n = 0; n < v.size(); n++ )
-	{
-		// Request ownership of the critical section.
-		EnterCriticalSection(&CriticalSection); 
-		sPreLoadedTexture item = v[n];
-		if ( item.pTexture == NULL ) item.pTexture = PreloadThreadSafeImage ( item.pFilename , item.iMipMaps );
-		g_image_outputv.push_back(item);
-		if (g_bRequestCleanInteruptionT1 == true)
-		{
-			// can interupt this load thread if required
-			LeaveCriticalSection(&CriticalSection);
-			break;
-		}
-		// Release ownership of the critical section.
-		LeaveCriticalSection(&CriticalSection);
-	}
-	g_bT1 = false;
+    // Use actual destination capacity, not the legacy MAX_PATH macro.
+    if(!filename||!*filename)return false;
+    const DWORD capacity=static_cast<DWORD>(N);
+    const DWORD n=GetFullPathNameA(filename,capacity,resolved,nullptr);
+    if(!n||n>=capacity)return false;
+    for(char* p=resolved;*p;++p)if(*p=='/')*p='\\';
+    return true;
+}
+static void PWReleasePreload(sPreLoadedTexture& item)
+{
+    if(item.pTexture){item.pTexture->Release();item.pTexture=nullptr;}
+}
+static bool PWPreloadMatch(const sPreLoadedTexture& a,const sPreLoadedTexture& b)
+{
+    return a.iMipMaps==b.iMipMaps&&_stricmp(a.pFilename,b.pFilename)==0;
+}
+void image_thread_function()
+{
+    for(auto& pending:g_image_list){
+        if(g_bRequestCleanInteruptionT1.load())break;
+        sPreLoadedTexture item=pending;
+        pending.pTexture=nullptr; // move ownership, never duplicate a reference
+        if(!item.pTexture){
+            EnterCriticalSection(&CriticalSection);
+            item.pTexture=PreloadThreadSafeImage(item.pFilename,item.iMipMaps);
+            LeaveCriticalSection(&CriticalSection);
+        }
+        {
+            std::lock_guard<std::mutex> lock(pwPreloadOutputMutex);
+            g_image_outputv.push_back(item);
+        }
+    }
+    // Cancelled or unmatched transferred input must not leak.
+    for(auto& pending:g_image_list)PWReleasePreload(pending);
+    g_bT1.store(false);
+}
+void image_preload_files_start(void)
+{
+    image_preload_files_strictwaittoend();
+    if(!g_bCriticalSectionCreated){
+        if(!InitializeCriticalSectionAndSpinCount(&CriticalSection,0x00000400))return;
+        g_bCriticalSectionCreated=true;
+    }
+    for(auto& pending:g_image_list)PWReleasePreload(pending);
+    g_image_list.clear();
+}
+void image_preload_files_add(LPSTR pFilename,int iMipMaps)
+{
+    if(!g_bCriticalSectionCreated||g_pT1)return;
+    sPreLoadedTexture item={};
+    if(!PWPreloadPath(pFilename,item.pFilename))return;
+    item.iMipMaps=iMipMaps;
+    for(const auto& pending:g_image_list)if(PWPreloadMatch(pending,item))return;
+    g_image_list.push_back(item);
+}
+void image_preload_files_finish(void)
+{
+    image_preload_files_strictwaittoend();
+    if(!g_bCriticalSectionCreated)return;
+    {
+        std::lock_guard<std::mutex> lock(pwPreloadOutputMutex);
+        // Reuse by full path AND requested mip policy, regardless of ordering.
+        // Unmatched completed allocations are released, not silently cleared.
+        for(auto& pending:g_image_list){
+            if(pending.pTexture)continue;
+            for(auto& complete:g_image_outputv){
+                if(complete.pTexture&&PWPreloadMatch(pending,complete)){
+                    pending.pTexture=complete.pTexture;complete.pTexture=nullptr;break;
+                }
+            }
+        }
+        for(auto& complete:g_image_outputv)PWReleasePreload(complete);
+        g_image_outputv.clear();
+    }
+    g_bRequestCleanInteruptionT1.store(false);
+    g_bT1.store(true);
+    try{g_pT1=new std::thread(image_thread_function);}
+    catch(...){
+        g_bT1.store(false);
+        for(auto& pending:g_image_list)PWReleasePreload(pending);
+    }
+}
+void image_preload_files_strictwaittoend(void)
+{
+    if(g_pT1){g_pT1->join();delete g_pT1;g_pT1=nullptr;}
+    g_bRequestCleanInteruptionT1.store(false);
+    g_bT1.store(false);
+}
+void image_preload_files_wait(void)
+{
+    g_bRequestCleanInteruptionT1.store(true);
+    image_preload_files_strictwaittoend();
+}
+bool image_preload_files_in_progress(void){return g_bT1.load();}
+void image_preload_files_reset(void)
+{
+    image_preload_files_wait();
+    for(auto& pending:g_image_list)PWReleasePreload(pending);
+    g_image_list.clear();
+    std::lock_guard<std::mutex> lock(pwPreloadOutputMutex);
+    for(auto& complete:g_image_outputv)PWReleasePreload(complete);
+    g_image_outputv.clear();
+}
+#ifdef DX11
+static ID3D11Resource* PWTakePreloadedTexture(const char* filename,int mipPolicy,int divide,
+    const GGIMAGE_INFO& info)
+{
+    // Only reuse a complete compatible 2D allocation. Reduced-size,
+    // cube/volume, converted and unsupported resources use the old loader.
+    if(divide>1)return nullptr;
+    char full[MAX_PATH]={};
+    if(!PWPreloadPath(filename,full))return nullptr;
+    std::lock_guard<std::mutex> lock(pwPreloadOutputMutex);
+    for(auto& complete:g_image_outputv){
+        if(!complete.pTexture||complete.iMipMaps!=mipPolicy||
+            _stricmp(complete.pFilename,full)!=0)continue;
+        D3D11_RESOURCE_DIMENSION dim=D3D11_RESOURCE_DIMENSION_UNKNOWN;
+        complete.pTexture->GetType(&dim);
+        if(dim!=D3D11_RESOURCE_DIMENSION_TEXTURE2D)continue;
+        D3D11_TEXTURE2D_DESC d={};
+        static_cast<ID3D11Texture2D*>(complete.pTexture)->GetDesc(&d);
+        if(d.Width!=info.Width||d.Height!=info.Height||d.ArraySize!=1||
+            d.SampleDesc.Count!=1||d.Format!=info.Format||
+            (mipPolicy>0&&d.MipLevels!=static_cast<UINT>(mipPolicy)))continue;
+        // For ordinary non-DDS images the normal loader converts to BGRA.
+        const size_t length=strlen(full);
+        if((length<4||_stricmp(full+length-4,".dds")!=0)&&d.Format!=DXGI_FORMAT_B8G8R8A8_UNORM)continue;
+        ID3D11Resource* resource=complete.pTexture;
+        complete.pTexture=nullptr;
+        return resource;
+    }
+    return nullptr; // never stall on an unfinished preload
+}
+#endif
+
+#ifdef DX11
+namespace {
+struct PWStagedDDS {
+    std::string path;
+    std::vector<std::uint8_t> bytes;
+    BY_HANDLE_FILE_INFORMATION stamp={};
+    DirectX::TexMetadata metadata={};
+    std::unique_ptr<DirectX::ScratchImage> decoded;
+    std::uint64_t generation=0;
+};
+struct PWStageState {
+    std::mutex mutex;
+    std::atomic<bool> cancel{false};
+    std::thread worker;
+    std::vector<PWStagedDDS> ready;
+    std::vector<std::string> hints; // main-thread only, previous level observations
+    std::uint64_t generation=0;
+    bool active=false;
+    std::size_t uploaded=0,missed=0,invalid=0;
+    std::atomic<std::size_t> prepared{0},preparedBytes{0};
+    void Stop(){
+        cancel.store(true);
+        if(worker.joinable())worker.join();
+        std::lock_guard<std::mutex> lock(mutex);
+        ready.clear();
+    }
+    ~PWStageState(){Stop();}
+};
+PWStageState pwStage;
+struct PWMipRelease { void operator()(ID3D11Texture2D* p)const{if(p)p->Release();} };
+struct PWPendingMip {
+    std::unique_ptr<ID3D11Texture2D,PWMipRelease> texture;
+    std::unique_ptr<DirectX::ScratchImage> decoded;
+    UINT first=0;
+    std::uint64_t generation=0;
+};
+static std::vector<PWPendingMip> pwMipPending;
+static std::size_t pwMipStarted=0,pwMipSteps=0,pwMipFinished=0;
+struct PWViewRelease {void operator()(ID3D11ShaderResourceView* p)const{if(p)p->Release();}};
+struct PWAdaptive {
+    std::unique_ptr<ID3D11Texture2D,PWMipRelease> texture;
+    std::unique_ptr<ID3D11ShaderResourceView,PWViewRelease> view;
+    PWResidency::State policy;
+    UINT maxMip=0;float nearest=0;
+    bool observed=false,everObserved=false,protectedUse=false;
+    ULONGLONG lastSeen=0;std::uint64_t generation=0;
+};
+static std::vector<PWAdaptive> pwAdaptive;
+static bool pwAdaptiveEnabled=false,pwAdaptivePressure=false,pwAdaptiveTelemetry=false;
+static ULONGLONG pwAdaptiveLastQuery=0,pwAdaptiveLastPolicy=0;
+static std::size_t pwAdaptiveUp=0,pwAdaptiveDown=0;
+static unsigned long long pwAdaptiveUsage=0,pwAdaptiveBudget=0;
+static bool PWMipPendingResource(ID3D11Resource* resource){
+    for(const auto& p:pwMipPending)if(p.texture.get()==resource)return true;
+    return false;
+}
+static bool PWAdaptiveDeviceOK(){
+    return m_pD3D&&m_pImmediateContext&&SUCCEEDED(m_pD3D->GetDeviceRemovedReason());
+}
+static void PWAdaptiveForget(ID3D11Resource* only=nullptr){
+    if(pwAdaptive.empty())return;
+    for(auto it=pwAdaptive.begin();it!=pwAdaptive.end();){
+        if(only&&it->texture.get()!=only){++it;continue;}
+        if(PWAdaptiveDeviceOK())m_pImmediateContext->SetResourceMinLOD(it->texture.get(),0.0f);
+        it=pwAdaptive.erase(it);
+    }
+}
+static void PWAdaptiveRegister(ID3D11Resource* resource,ID3D11ShaderResourceView* view){
+    if(!pwAdaptiveEnabled||!resource||!view||pwAdaptive.size()>=PWMip::MaxPending||!PWMipPendingResource(resource))return;
+    for(const auto& item:pwAdaptive)if(item.texture.get()==resource)return;
+    ID3D11Texture2D* texture=nullptr;
+    if(FAILED(resource->QueryInterface(__uuidof(ID3D11Texture2D),reinterpret_cast<void**>(&texture)))||!texture)return;
+    PWAdaptive item;item.texture.reset(texture);view->AddRef();item.view.reset(view);
+    D3D11_TEXTURE2D_DESC desc={};texture->GetDesc(&desc);
+    item.maxMip=PWMip::Tail(desc.Width,desc.Height,desc.MipLevels);
+    item.generation=pwStage.generation;
+    try{pwAdaptive.push_back(std::move(item));}catch(...){}
+}
+static void PWAdaptiveQuery(ULONGLONG now){
+    if(pwAdaptiveLastQuery&&now-pwAdaptiveLastQuery<1000)return;
+    pwAdaptiveLastQuery=now;
+    IDXGIDevice* device=nullptr;IDXGIAdapter* adapter=nullptr;IDXGIAdapter3* adapter3=nullptr;
+    DXGI_QUERY_VIDEO_MEMORY_INFO local={};bool valid=false;
+    if(m_pD3D&&SUCCEEDED(m_pD3D->QueryInterface(__uuidof(IDXGIDevice),reinterpret_cast<void**>(&device)))&&device){
+        if(SUCCEEDED(device->GetAdapter(&adapter))&&adapter&&
+            SUCCEEDED(adapter->QueryInterface(__uuidof(IDXGIAdapter3),reinterpret_cast<void**>(&adapter3)))&&adapter3)
+            valid=SUCCEEDED(adapter3->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_LOCAL,&local))&&local.Budget!=0;
+    }
+    if(adapter3)adapter3->Release();if(adapter)adapter->Release();if(device)device->Release();
+    pwAdaptiveTelemetry=valid;pwAdaptiveUsage=local.CurrentUsage;pwAdaptiveBudget=local.Budget;
+    pwAdaptivePressure=PWResidency::Pressure(pwAdaptivePressure,valid,local.CurrentUsage,local.Budget);
+}
+static void PWAdaptiveTick(){
+    if(!pwAdaptiveEnabled||pwAdaptive.empty()||!PWAdaptiveDeviceOK())return;
+    const ULONGLONG now=GetTickCount64();PWAdaptiveQuery(now);
+    if(pwAdaptiveLastPolicy&&now-pwAdaptiveLastPolicy<100)return;
+    pwAdaptiveLastPolicy=now;
+    for(auto& item:pwAdaptive){
+        if(item.generation!=pwStage.generation||PWMipPendingResource(item.texture.get()))continue;
+        const bool recent=item.everObserved&&now-item.lastSeen<=PWResidency::UnseenDelay;
+        const unsigned target=item.protectedUse?0:PWResidency::Desired(item.policy.current,item.maxMip,item.nearest,recent,pwAdaptivePressure);
+        const unsigned before=item.policy.current;
+        if(PWResidency::Step(item.policy,target,now)){
+            m_pImmediateContext->SetResourceMinLOD(item.texture.get(),static_cast<FLOAT>(item.policy.current));
+            if(item.policy.current>before)++pwAdaptiveDown;else ++pwAdaptiveUp;
+        }
+        item.observed=false;
+    }
 }
 
-void image_preload_files_start ( void )
-{
-	// Initialize the critical section one time only.
-	if (g_bCriticalSectionCreated == false)
-	{
-		if (!InitializeCriticalSectionAndSpinCount(&CriticalSection, 0x00000400) ) 
-			return;
-
-		// we can use this to ensure only one thing done at once
-		g_bCriticalSectionCreated = true;
-	}
-
-	// ensure previous thread has ended
-	image_preload_files_strictwaittoend();
-
-	// get number of CPUs we can run threads on, in case we need it
-	unsigned int iCPUCores = std::thread::hardware_concurrency();
-	char CPUnium[32];
-	sprintf ( CPUnium, "%d", iCPUCores );
-
-	// load texture file into member well ahead of needing it (see below for getting the preloaded textures)
-	g_image_list.clear();
+static bool PWMipEnabled(){
+    char value[8]={};
+    return GetEnvironmentVariableA("GGCPW_TEXTURE_PROMOTE",value,sizeof(value))==1&&value[0]=='1';
+}
+static bool PWMipMarked(const std::string& path){
+    std::string lower=path;
+    for(auto& c:lower){if(c>='A'&&c<='Z')c=static_cast<char>(c-'A'+'a');}
+    const char suffix[]="_pwstream_d.dds";
+    return lower.find("\\entitybank\\user\\")!=std::string::npos&&lower.size()>=sizeof(suffix)-1&&
+        lower.compare(lower.size()-(sizeof(suffix)-1),sizeof(suffix)-1,suffix)==0;
+}
+static PWMip::Span PWMipSpan(const DirectX::ScratchImage& image,UINT mip){
+    const auto* src=image.GetImage(mip,0,0);
+    PWMip::Span span;
+    if(src&&src->rowPitch<=PWMip::FrameBytes&&src->slicePitch<=PWMip::FrameBytes){
+        span.pixels=src->pixels;span.row=static_cast<UINT>(src->rowPitch);span.bytes=static_cast<UINT>(src->slicePitch);
+    }
+    return span;
+}
+// M5B.2: independently owned tiled texture state. No pointer substitution;
+// original authored mip zero is retained in bounded CPU storage for restoration.
+struct PWTiledLive {
+    std::unique_ptr<PWTiled::Texture> texture;
+    std::unique_ptr<ID3D11ShaderResourceView,PWViewRelease> view;
+    ID3D11Texture2D* resource=nullptr; // owned by texture
+    std::vector<std::uint8_t> top;
+    UINT row=0;
+    PWResidency::State policy;
+    std::uint64_t generation=0;
+    ULONGLONG lastSeen=0;
+    float nearest=0;
+    bool observed=false,everObserved=false,pinned=false;
+};
+static std::vector<PWTiledLive> pwTiled;
+static bool pwTiledEnabled=false,pwTiledBroad=false;
+static unsigned pwTiledAttempts=0,pwTiledAdmitted=0,pwTiledDown=0,pwTiledUp=0,pwTiledFailures=0,pwTiledPins=0;
+static ULONGLONG pwTiledLastPolicy=0,pwTiledLastSample=0,pwTiledLastFrame=0,pwTiledMaxFrameMs=0,pwTiledMaxOpMs=0;
+static unsigned long long pwTiledReclaimed=0;
+static bool PWTiledRestore(PWTiledLive& item){
+    if(item.texture->Full())return true;
+    PWMip::Span span;span.pixels=item.top.data();span.row=item.row;span.bytes=static_cast<UINT>(item.top.size());
+    const ULONGLONG start=GetTickCount64();
+    const bool restored=item.texture->Promote(span);
+    pwTiledMaxOpMs=(std::max)(pwTiledMaxOpMs,GetTickCount64()-start);
+    if(restored){++pwTiledUp;item.policy=PWResidency::State{};}
+    else ++pwTiledFailures;
+    return restored;
+}
+static bool PWTiledPin(ID3D11Resource* resource){
+    for(auto& item:pwTiled){
+        if(item.resource!=resource)continue;
+        if(!item.pinned){item.pinned=true;++pwTiledPins;}
+        // A raw consumer must never get an incomplete resource.
+        return PWTiledRestore(item);
+    }
+    return true;
+}
+static void PWTiledFinish(){
+    for(auto it=pwTiled.begin();it!=pwTiled.end();){
+        // Mapped tile pools are reference counted by D3D. A fully restored
+        // texture can outlive this tracker safely through its existing views.
+        if(!PWAdaptiveDeviceOK()||PWTiledRestore(*it)){it=pwTiled.erase(it);continue;}
+        it->pinned=true; // retain recovery bytes after a failed restoration
+        ++it;
+    }
+}
+static bool PWTiledCandidate(const std::string& path,const GGIMAGE_INFO& info){
+    return pwTiledEnabled&&pwTiled.size()<PWMip::MaxPending&&pwTiledAttempts<16&&(PWMipMarked(path)||PWTextureBenchmark::ApprovedDiffusePath(path,pwTiledBroad))&&
+        PWMip::Eligible(info.Width,info.Height,info.MipLevels,info.Format);
+}
+static ID3D11Resource* PWTiledStart(const DirectX::ScratchImage& decoded){
+    if(!pwTiledEnabled||pwTiled.size()>=PWMip::MaxPending||pwTiledAttempts>=16)return nullptr;
+    ++pwTiledAttempts;
+    const auto& m=decoded.GetMetadata();
+    if(m.mipLevels>12||m.arraySize!=1||m.dimension!=DirectX::TEX_DIMENSION_TEXTURE2D||m.IsCubemap()||
+        !PWMip::Eligible(static_cast<UINT>(m.width),static_cast<UINT>(m.height),static_cast<UINT>(m.mipLevels),m.format))return nullptr;
+    PWMip::Span spans[12]={};
+    for(UINT i=0;i<static_cast<UINT>(m.mipLevels);++i)spans[i]=PWMipSpan(decoded,i);
+    try{
+        PWTiledLive item;item.texture.reset(new PWTiled::Texture);
+        if(!item.texture->Initialize(m_pD3D,m_pImmediateContext,static_cast<UINT>(m.width),static_cast<UINT>(m.height),
+            static_cast<UINT>(m.mipLevels),m.format,spans)){++pwTiledFailures;return nullptr;}
+        const auto* bytes=static_cast<const std::uint8_t*>(spans[0].pixels);
+        item.top.assign(bytes,bytes+spans[0].bytes);item.row=spans[0].row;
+        item.resource=item.texture->Resource();item.generation=pwStage.generation;
+        if(!item.resource)return nullptr;
+        pwTiled.push_back(std::move(item));
+        auto* resource=pwTiled.back().resource;resource->AddRef();
+        ++pwTiledAdmitted;return resource;
+    }catch(...){++pwTiledFailures;return nullptr;}
+}
+static ID3D11Resource* PWTiledLoadFile(const char* full,const GGIMAGE_INFO& info){
+    // Explicitly opted-in fixtures can exercise residency on the first visit,
+    // without depending on a background staging hit. Bounded transient decode.
+    if(!PWTiledCandidate(full,info))return nullptr;
+    try{
+        std::vector<std::uint8_t> bytes;BY_HANDLE_FILE_INFORMATION stamp={},now={};
+        if(!PWTextureStage::Read(full,PWTextureStage::FileLimit,pwStage.cancel,bytes,stamp))return nullptr;
+        PWTextureStage::File current(full);
+        if(!current.Info(now)||!PWTextureStage::SameFile(stamp,now))return nullptr;
+        DirectX::TexMetadata meta={};
+        if(FAILED(DirectX::GetMetadataFromDDSMemory(bytes.data(),bytes.size(),DirectX::DDS_FLAGS_NONE,meta))||
+            meta.width!=info.Width||meta.height!=info.Height||meta.mipLevels!=info.MipLevels||meta.format!=info.Format||
+            meta.arraySize!=1||meta.dimension!=DirectX::TEX_DIMENSION_TEXTURE2D||meta.IsCubemap())return nullptr;
+        DirectX::ScratchImage decoded;DirectX::TexMetadata actual={};
+        if(FAILED(DirectX::LoadFromDDSMemory(bytes.data(),bytes.size(),DirectX::DDS_FLAGS_NONE,&actual,decoded))||
+            decoded.GetPixelsSize()>PWMip::DecodeReserve||actual.width!=meta.width||actual.height!=meta.height||
+            actual.mipLevels!=meta.mipLevels||actual.format!=meta.format)return nullptr;
+        return PWTiledStart(decoded);
+    }catch(...){++pwTiledFailures;return nullptr;}
+}
+static void PWTiledRegister(ID3D11Resource* resource,ID3D11ShaderResourceView* view){
+    for(auto& item:pwTiled){
+        if(item.resource!=resource||!view)continue;
+        if(!item.view){view->AddRef();item.view.reset(view);}
+        else if(item.view.get()!=view)PWTiledPin(resource);
+        return;
+    }
+}
+static void PWTiledObserve(ID3D11ShaderResourceView* view,float distance,bool safe){
+    if(pwTiled.empty()||!view)return;
+    PWTiledLive* found=nullptr;
+    for(auto& item:pwTiled)if(item.view.get()==view){found=&item;break;}
+    if(!found){
+        // Unknown alias views are not treated as safe sampled diffuse uses.
+        ID3D11Resource* resource=nullptr;view->GetResource(&resource);
+        if(resource){PWTiledPin(resource);resource->Release();}
+        return;
+    }
+    auto& item=*found;
+    if(!safe||!std::isfinite(distance)||distance<0){PWTiledPin(item.resource);return;}
+    if(!item.observed||distance<item.nearest)item.nearest=distance;
+    item.observed=true;item.everObserved=true;item.lastSeen=GetTickCount64();
+}
+static void PWTiledSample(ULONGLONG now){
+    if(!pwTiledEnabled||pwTiled.empty()||(pwTiledLastSample&&now-pwTiledLastSample<1000))return;
+    pwTiledLastSample=now;
+    unsigned long long pool=0,cpu=0;
+    for(const auto& item:pwTiled){pool+=item.texture->PoolBytes();cpu+=item.top.size();}
+    PROCESS_MEMORY_COUNTERS_EX pm={};pm.cb=sizeof(pm);
+    const BOOL memoryOK=GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pm),sizeof(pm));
+    char temp[MAX_PATH]={},path[MAX_PATH+80]={},row[512]={};
+    const DWORD n=GetTempPathA(MAX_PATH,temp);
+    if(!n||n>=MAX_PATH||sprintf_s(path,sizeof(path),"%sGGCPW-texturetiled-%lu.csv",temp,(unsigned long)GetCurrentProcessId())<=0)return;
+    HANDLE file=CreateFileA(path,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(file==INVALID_HANDLE_VALUE)return;
+    LARGE_INTEGER size={};DWORD written=0;
+    if(GetFileSizeEx(file,&size)&&size.QuadPart==0){
+        const char header[]="generation,tick_ms,dxgi_valid,dxgi_usage,dxgi_budget,pool_bytes,cpu_backing_bytes,ram_valid,working_set,private_bytes,admitted,demotions,promotions,pins,failures,cumulative_pool_shrink_bytes,max_frame_interval_ms,max_transition_ms\r\n";
+        WriteFile(file,header,sizeof(header)-1,&written,nullptr);
+    }
+    const int len=sprintf_s(row,sizeof(row),"%llu,%llu,%d,%llu,%llu,%llu,%llu,%d,%llu,%llu,%u,%u,%u,%u,%u,%llu,%llu,%llu\r\n",
+        (unsigned long long)pwStage.generation,(unsigned long long)now,pwAdaptiveTelemetry?1:0,pwAdaptiveUsage,pwAdaptiveBudget,pool,cpu,
+        memoryOK?1:0,(unsigned long long)pm.WorkingSetSize,(unsigned long long)pm.PrivateUsage,pwTiledAdmitted,pwTiledDown,pwTiledUp,pwTiledPins,pwTiledFailures,
+        pwTiledReclaimed,(unsigned long long)pwTiledMaxFrameMs,(unsigned long long)pwTiledMaxOpMs);
+    if(len>0)WriteFile(file,row,(DWORD)len,&written,nullptr);
+    CloseHandle(file);pwTiledMaxFrameMs=pwTiledMaxOpMs=0;
+}
+// Independent A/B benchmark: captures the same gameplay loop with streaming
+// entirely disabled as with M5B active. No profiling work unless opted in.
+static bool pwBenchActive=false;
+static unsigned long long pwBenchGeneration=0;
+static ULONGLONG pwBenchLastWrite=0;
+static LARGE_INTEGER pwBenchPrevious={},pwBenchFrequency={};
+static PWTextureBenchmark::Window pwBenchWindow;
+static bool PWBenchOption(const char* name){
+    char value[8]={};
+    return GetEnvironmentVariableA(name,value,sizeof(value))==1&&value[0]=='1';
+}
+static void PWBenchWrite(ULONGLONG now){
+    if(!pwBenchActive||!pwBenchWindow.count)return;
+    PWAdaptiveQuery(now);
+    unsigned long long pool=0,backing=0;
+    for(const auto& item:pwTiled){pool+=item.texture->PoolBytes();backing+=item.top.size();}
+    PROCESS_MEMORY_COUNTERS_EX pm={};pm.cb=sizeof(pm);
+    const BOOL memoryOK=GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pm),sizeof(pm));
+    char temp[MAX_PATH]={},path[MAX_PATH+80]={},row[1024]={};
+    const DWORD n=GetTempPathA(MAX_PATH,temp);
+    if(!n||n>=MAX_PATH||sprintf_s(path,sizeof(path),"%sGGCPW-texturebench-%lu.csv",temp,(unsigned long)GetCurrentProcessId())<=0)return;
+    HANDLE file=CreateFileA(path,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(file==INVALID_HANDLE_VALUE)return;
+    LARGE_INTEGER size={};DWORD written=0;
+    if(GetFileSizeEx(file,&size)&&size.QuadPart==0){
+        const char header[]="generation,tick_ms,stage_on,tiled_on,broad_on,dxgi_valid,dxgi_usage,dxgi_budget,ram_valid,working_set,private_bytes,pool_bytes,cpu_backing_bytes,admitted,demotions,promotions,pins,failures,shrink_bytes,frame_count,frame_sum_ms,frame_max_ms,le5,le8,le10,le12,le16,le20,le25,le33,le50,le100,le250,gt250\r\n";
+        WriteFile(file,header,sizeof(header)-1,&written,nullptr);
+    }
+    int used=sprintf_s(row,sizeof(row),"%llu,%llu,%d,%d,%d,%d,%llu,%llu,%d,%llu,%llu,%llu,%llu,%u,%u,%u,%u,%u,%llu,%llu,%.6f,%.6f",
+        pwBenchGeneration,(unsigned long long)now,pwStage.active?1:0,pwTiledEnabled?1:0,pwTiledBroad?1:0,
+        pwAdaptiveTelemetry?1:0,pwAdaptiveUsage,pwAdaptiveBudget,memoryOK?1:0,
+        (unsigned long long)pm.WorkingSetSize,(unsigned long long)pm.PrivateUsage,pool,backing,
+        pwTiledAdmitted,pwTiledDown,pwTiledUp,pwTiledPins,pwTiledFailures,pwTiledReclaimed,
+        (unsigned long long)pwBenchWindow.count,pwBenchWindow.sum,pwBenchWindow.max);
+    if(used>0){
+        for(auto count:pwBenchWindow.bins){
+            const int len=sprintf_s(row+used,sizeof(row)-used,",%llu",(unsigned long long)count);
+            if(len<=0){used=0;break;}
+            used+=len;
+        }
+        if(used>0&&used+2<(int)sizeof(row)){
+            row[used++]='\r';row[used++]='\n';
+            WriteFile(file,row,(DWORD)used,&written,nullptr);
+        }
+    }
+    CloseHandle(file);
+    pwBenchWindow=PWTextureBenchmark::Window{};pwBenchLastWrite=now;
+}
+static void PWBenchBegin(){
+    pwBenchActive=PWBenchOption("GGCPW_TEXTURE_BENCHMARK");
+    pwBenchPrevious.QuadPart=0;pwBenchLastWrite=0;pwBenchWindow=PWTextureBenchmark::Window{};
+    if(!pwBenchActive)return;
+    if(!QueryPerformanceFrequency(&pwBenchFrequency)||!pwBenchFrequency.QuadPart){pwBenchActive=false;return;}
+    ++pwBenchGeneration;
+}
+static void PWBenchTick(){
+    if(!pwBenchActive)return;
+    LARGE_INTEGER now={};
+    if(!QueryPerformanceCounter(&now))return;
+    if(pwBenchPrevious.QuadPart&&now.QuadPart>=pwBenchPrevious.QuadPart)
+        pwBenchWindow.Add(1000.0*double(now.QuadPart-pwBenchPrevious.QuadPart)/double(pwBenchFrequency.QuadPart));
+    pwBenchPrevious=now;
+    const ULONGLONG tick=GetTickCount64();
+    if(!pwBenchLastWrite)pwBenchLastWrite=tick;
+    if(tick-pwBenchLastWrite>=1000)PWBenchWrite(tick);
+}
+static void PWTiledTick(){
+    if(pwTiled.empty()||!PWAdaptiveDeviceOK())return;
+    const ULONGLONG now=GetTickCount64();
+    if(pwTiledLastFrame)pwTiledMaxFrameMs=(std::max)(pwTiledMaxFrameMs,now-pwTiledLastFrame);
+    pwTiledLastFrame=now;PWAdaptiveQuery(now);
+    if(!pwTiledLastPolicy||now-pwTiledLastPolicy>=100){
+        pwTiledLastPolicy=now;bool transitioned=false;
+        // Restore pinned/near/stale textures first; only one scheduled
+        // transition per policy tick. Mandatory raw-access restores are separate.
+        for(auto& item:pwTiled){
+            const bool recent=item.everObserved&&now-item.lastSeen<=PWResidency::UnseenDelay;
+            const unsigned desired=PWTiled::Target(pwTiledEnabled,item.pinned,item.generation==pwStage.generation,
+                item.view!=nullptr,recent,item.nearest,pwAdaptivePressure,item.policy.current);
+            if(!transitioned&&!desired&&!item.texture->Full()){
+                PWTiledRestore(item);transitioned=true;
+            }
+            if(!desired&&item.texture->Full())item.policy=PWResidency::State{};
+        }
+        for(auto& item:pwTiled){
+            const bool recent=item.everObserved&&now-item.lastSeen<=PWResidency::UnseenDelay;
+            const unsigned target=PWTiled::Target(pwTiledEnabled,item.pinned,item.generation==pwStage.generation,
+                item.view!=nullptr,recent,item.nearest,pwAdaptivePressure,item.policy.current);
+            if(!transitioned&&target&&item.texture->Full()&&PWResidency::Step(item.policy,1,now)){
+                const UINT before=item.texture->PoolBytes();const ULONGLONG start=GetTickCount64();
+                const bool ok=item.texture->Demote();transitioned=true;
+                pwTiledMaxOpMs=(std::max)(pwTiledMaxOpMs,GetTickCount64()-start);
+                if(ok){++pwTiledDown;pwTiledReclaimed+=before-item.texture->PoolBytes();}
+                else{++pwTiledFailures;item.pinned=true;}
+            }
+            if(!target&&item.texture->Full())item.policy=PWResidency::State{};
+            item.observed=false;
+        }
+    }
+    PWTiledSample(now);
+}
+static bool PWMipStep(PWPendingMip& pending){
+    if(!m_pD3D||!m_pImmediateContext||FAILED(m_pD3D->GetDeviceRemovedReason())||
+        pending.generation!=pwStage.generation||!pending.first)return false;
+    if(!PWMip::Promote(m_pImmediateContext,pending.texture.get(),pending.first,PWMipSpan(*pending.decoded,pending.first-1)))return false;
+    ++pwMipSteps;
+    if(!pending.first)++pwMipFinished;
+    return true;
+}
+// Finish a specific borrowed CPU resource before returning it to legacy code.
+// For level transitions finish all, as editor assets may survive teardown.
+static void PWMipDrain(ID3D11Resource* only=nullptr){
+    for(auto it=pwMipPending.begin();it!=pwMipPending.end();){
+        if(only&&it->texture.get()!=only){++it;continue;}
+        while(it->first&&PWMipStep(*it)){}
+        it=pwMipPending.erase(it);
+    }
+}
+static ID3D11Resource* PWMipStart(PWStagedDDS& item){
+    if(!item.decoded||!PWMipEnabled()||pwMipPending.size()>=PWMip::MaxPending||
+        !m_pD3D||!m_pImmediateContext)return nullptr;
+    const auto& m=item.decoded->GetMetadata();
+    if(m.mipLevels>12)return nullptr;
+    PWMip::Span spans[12]={};
+    for(UINT i=0;i<static_cast<UINT>(m.mipLevels);++i)spans[i]=PWMipSpan(*item.decoded,i);
+    PWPendingMip p;
+    p.texture.reset(PWMip::Create(m_pD3D,m_pImmediateContext,static_cast<UINT>(m.width),static_cast<UINT>(m.height),
+        static_cast<UINT>(m.mipLevels),m.format,spans,p.first));
+    if(!p.texture)return nullptr;
+    p.generation=item.generation;p.decoded=std::move(item.decoded);
+    try{pwMipPending.push_back(std::move(p));}catch(...){return nullptr;}
+    ID3D11Texture2D* result=pwMipPending.back().texture.get();
+    result->AddRef(); // registry's original load reference; queue owns a separate ref
+    ++pwMipStarted;return result;
+}
+static bool PWStageEnabled(){
+    char enabled[8]={};
+    return GetEnvironmentVariableA("GGCPW_TEXTURE_STAGE",enabled,sizeof(enabled))==1&&enabled[0]=='1';
+}
+static void PWStageReport(){
+    if(!pwStage.active)return;
+    char temp[MAX_PATH]={},path[MAX_PATH+80]={};
+    const DWORD n=GetTempPathA(MAX_PATH,temp);
+    if(!n||n>=MAX_PATH||sprintf_s(path,sizeof(path),"%sGGCPW-texturestage-%lu.csv",temp,(unsigned long)GetCurrentProcessId())<=0)return;
+    HANDLE file=CreateFileA(path,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(file==INVALID_HANDLE_VALUE)return;
+    LARGE_INTEGER size={};DWORD written=0;
+    if(GetFileSizeEx(file,&size)&&size.QuadPart==0){
+        const char header[]="generation,prepared_files,prepared_bytes,uploaded,missed,invalid,hints_next,mip_started,mip_steps,mip_finished\r\n";
+        WriteFile(file,header,sizeof(header)-1,&written,nullptr);
+    }
+    char row[256]={};
+    const int count=sprintf_s(row,sizeof(row),"%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\r\n",
+        (unsigned long long)pwStage.generation,(unsigned long long)pwStage.prepared.load(),
+        (unsigned long long)pwStage.preparedBytes.load(),(unsigned long long)pwStage.uploaded,
+        (unsigned long long)pwStage.missed,(unsigned long long)pwStage.invalid,(unsigned long long)pwStage.hints.size(),
+        (unsigned long long)pwMipStarted,(unsigned long long)pwMipSteps,(unsigned long long)pwMipFinished);
+    if(count>0)WriteFile(file,row,(DWORD)count,&written,nullptr);
+    CloseHandle(file);
+    if(!pwAdaptiveEnabled)return;
+    if(sprintf_s(path,sizeof(path),"%sGGCPW-textureresidency-%lu.csv",temp,(unsigned long)GetCurrentProcessId())<=0)return;
+    file=CreateFileA(path,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(file==INVALID_HANDLE_VALUE)return;
+    if(GetFileSizeEx(file,&size)&&size.QuadPart==0){
+        const char columns[]="generation,dxgi_valid,last_usage_bytes,last_budget_bytes,last_pressure,detail_promotions,detail_demotions\r\n";
+        WriteFile(file,columns,sizeof(columns)-1,&written,nullptr);
+    }
+    const int adaptiveCount=sprintf_s(row,sizeof(row),"%llu,%d,%llu,%llu,%d,%llu,%llu\r\n",
+        (unsigned long long)pwStage.generation,pwAdaptiveTelemetry?1:0,pwAdaptiveUsage,pwAdaptiveBudget,
+        pwAdaptivePressure?1:0,(unsigned long long)pwAdaptiveUp,(unsigned long long)pwAdaptiveDown);
+    if(adaptiveCount>0)WriteFile(file,row,(DWORD)adaptiveCount,&written,nullptr);
+    CloseHandle(file);
+}
+static void PWStageObserve(const char* path){
+    if(pwStage.hints.size()>=PWTextureStage::HintLimit)return;
+    for(const auto& hint:pwStage.hints)if(_stricmp(hint.c_str(),path)==0)return;
+    try{pwStage.hints.emplace_back(path);}catch(...){/* optional optimisation */}
+}
+// Called only from the original texture-load thread, never from the worker.
+static ID3D11Resource* PWStageTake(const char* resolved,const GGIMAGE_INFO& info,bool allowPromotion){
+    if(!pwStage.active||info.MipLevels<=1)return nullptr;
+    char full[1024]={};
+    if(!PWPreloadPath(resolved,full))return nullptr;
+    PWStageObserve(full);
+    PWStagedDDS item;
+    {
+        std::lock_guard<std::mutex> lock(pwStage.mutex);
+        auto& ready=pwStage.ready;
+        auto found=std::find_if(ready.begin(),ready.end(),[&](const PWStagedDDS& x){
+            return x.generation==pwStage.generation&&_stricmp(x.path.c_str(),full)==0;
+        });
+        if(found==ready.end()){++pwStage.missed;}
+        else{item=std::move(*found);ready.erase(found);}
+    }
+    if(item.bytes.empty())return allowPromotion?PWTiledLoadFile(full,info):nullptr;
+    const auto& meta=item.metadata;
+    if(meta.width!=info.Width||meta.height!=info.Height||meta.mipLevels!=info.MipLevels||meta.format!=info.Format){
+        ++pwStage.invalid;return nullptr;
+    }
+    // Retain the same-file read handle through upload, preventing concurrent
+    // writes/replacement. A changed/locked file uses the ordinary loader.
+    PWTextureStage::File current(full);
+    BY_HANDLE_FILE_INFORMATION now={};
+    if(!current.Info(now)||!PWTextureStage::SameFile(item.stamp,now)){++pwStage.invalid;return nullptr;}
+    if(allowPromotion){
+        if(PWTiledCandidate(full,info)&&item.decoded){
+            if(auto* tiled=PWTiledStart(*item.decoded)){++pwStage.uploaded;return tiled;}
+        }
+        // Ordinary approved diffuse assets must fall back to full loading,
+        // not silently enter the marked-only progressive path.
+        if(PWMipMarked(full))if(auto* promoted=PWMipStart(item)){++pwStage.uploaded;return promoted;}
+    }
+    ID3D11Resource* resource=nullptr;
+    const HRESULT hr=DirectX::CreateDDSTextureFromMemory(m_pD3D,item.bytes.data(),item.bytes.size(),&resource,nullptr);
+    if(SUCCEEDED(hr)&&resource){
+        D3D11_RESOURCE_DIMENSION dimension=D3D11_RESOURCE_DIMENSION_UNKNOWN;
+        resource->GetType(&dimension);
+        if(dimension==D3D11_RESOURCE_DIMENSION_TEXTURE2D){
+            D3D11_TEXTURE2D_DESC desc={};
+            static_cast<ID3D11Texture2D*>(resource)->GetDesc(&desc);
+            if(desc.Width==info.Width&&desc.Height==info.Height&&desc.MipLevels==info.MipLevels&&
+                desc.Format==info.Format&&desc.ArraySize==1&&desc.SampleDesc.Count==1){
+                ++pwStage.uploaded;return resource;
+            }
+        }
+    }
+    if(resource)resource->Release();
+    ++pwStage.invalid;return nullptr;
+}
+}
+#endif
+void PWTextureStageEnd(){
+#ifdef DX11
+    PWBenchWrite(GetTickCount64());pwBenchActive=false;
+    pwStage.Stop();PWTiledSample(GetTickCount64());PWTiledFinish();PWMipDrain();PWAdaptiveForget();PWStageReport();pwStage.active=false;pwAdaptiveEnabled=false;pwTiledEnabled=false;pwTiledBroad=false;
+#endif
+}
+void PWTextureStageBegin(){
+#ifdef DX11
+    PWTextureStageEnd();
+    PWBenchBegin();
+    pwTiledAttempts=pwTiledAdmitted=pwTiledDown=pwTiledUp=pwTiledFailures=pwTiledPins=0;
+    pwTiledReclaimed=0;pwAdaptiveLastQuery=0;pwAdaptivePressure=false;pwAdaptiveTelemetry=false;pwAdaptiveUsage=pwAdaptiveBudget=0;
+    if(!PWStageEnabled()){pwStage.hints.clear();return;}
+    std::vector<std::string> hints;
+    hints.swap(pwStage.hints);
+    ++pwStage.generation;
+    pwStage.uploaded=pwStage.missed=pwStage.invalid=0;
+    pwMipStarted=pwMipSteps=pwMipFinished=0;
+    char adaptive[8]={};
+    pwAdaptiveEnabled=GetEnvironmentVariableA("GGCPW_TEXTURE_RESIDENCY",adaptive,sizeof(adaptive))==1&&adaptive[0]=='1';
+    char tiled[8]={};
+    pwTiledEnabled=pwAdaptiveEnabled&&PWMipEnabled()&&PWTiled::Supported(m_pD3D)&&
+        GetEnvironmentVariableA("GGCPW_TEXTURE_TILED",tiled,sizeof(tiled))==1&&tiled[0]=='1';
+    pwTiledBroad=pwTiledEnabled&&PWBenchOption("GGCPW_TEXTURE_TILED_BROAD");
+    pwTiledAttempts=pwTiledAdmitted=pwTiledDown=pwTiledUp=pwTiledFailures=pwTiledPins=0;
+    pwTiledLastPolicy=pwTiledLastSample=pwTiledLastFrame=pwTiledMaxFrameMs=pwTiledMaxOpMs=pwTiledReclaimed=0;
+    pwAdaptivePressure=false;pwAdaptiveTelemetry=false;pwAdaptiveUsage=pwAdaptiveBudget=0;
+    pwAdaptiveLastQuery=pwAdaptiveLastPolicy=0;pwAdaptiveUp=pwAdaptiveDown=0;
+    pwStage.prepared.store(0);pwStage.preparedBytes.store(0);
+    pwStage.cancel.store(false);pwStage.active=true;
+    if(hints.empty())return;
+    const auto generation=pwStage.generation;
+    const bool promote=PWMipEnabled(),broader=pwTiledBroad;
+    try{
+        pwStage.worker=std::thread([hints=std::move(hints),generation,promote,broader](){
+            std::size_t remaining=PWTextureStage::BatchLimit;
+            try{
+                for(const auto& path:hints){
+                    if(pwStage.cancel.load()||remaining<128)break;
+                    PWStagedDDS item;
+                    if(!PWTextureStage::Read(path.c_str(),remaining,pwStage.cancel,item.bytes,item.stamp))continue;
+                    // Parse headers on CPU. The native upload path consumes the
+                    // original DDS mip payload; do not expand BC data to RGBA.
+                    if(FAILED(DirectX::GetMetadataFromDDSMemory(item.bytes.data(),item.bytes.size(),DirectX::DDS_FLAGS_NONE,item.metadata)))continue;
+                    const auto& m=item.metadata;
+                    if(m.dimension!=DirectX::TEX_DIMENSION_TEXTURE2D||m.arraySize!=1||m.IsCubemap()||
+                        m.mipLevels<=1||!m.width||!m.height||DirectX::IsTypeless(m.format))continue;
+                    if(pwStage.cancel.load())break;
+                    item.path=path;item.generation=generation;
+                    std::size_t bytes=item.bytes.size();
+                    // Reserve worst-case 2048-square BC3 mip chain before decoding.
+                    // Both raw and decoded payload count against the same batch limit.
+                    if(promote&&remaining-bytes>=PWMip::DecodeReserve&&(PWMipMarked(path)||PWTextureBenchmark::ApprovedDiffusePath(path,broader))&&
+                        m.width<=PWMip::MaxDimension&&m.height<=PWMip::MaxDimension&&m.mipLevels<=12&&
+                        PWMip::Eligible(static_cast<UINT>(m.width),static_cast<UINT>(m.height),static_cast<UINT>(m.mipLevels),m.format)){
+                        std::unique_ptr<DirectX::ScratchImage> decoded(new DirectX::ScratchImage);
+                        DirectX::TexMetadata decodedMeta={};
+                        if(SUCCEEDED(DirectX::LoadFromDDSMemory(item.bytes.data(),item.bytes.size(),DirectX::DDS_FLAGS_NONE,&decodedMeta,*decoded))&&
+                            decodedMeta.width==m.width&&decodedMeta.height==m.height&&decodedMeta.format==m.format&&
+                            decodedMeta.mipLevels==m.mipLevels&&decoded->GetPixelsSize()<=PWMip::DecodeReserve){
+                            bytes+=decoded->GetPixelsSize();item.decoded=std::move(decoded);
+                        }
+                    }
+                    {
+                        std::lock_guard<std::mutex> lock(pwStage.mutex);
+                        if(pwStage.cancel.load())break;
+                        pwStage.ready.push_back(std::move(item));
+                    }
+                    // Charge for the entire batch, including entries already
+                    // handed off to the render thread, to bound in-flight data.
+                    remaining-=bytes;pwStage.prepared.fetch_add(1);pwStage.preparedBytes.fetch_add(bytes);
+                }
+            }catch(...){/* allocation/decoder failures are ordinary cache misses */}
+        });
+    }catch(...){/* no worker; retain synchronous fallback */}
+#endif
 }
 
-void image_preload_files_add ( LPSTR pFilename , int iMipMaps)
-{
-	//Moved here so we can check if its already in the list.
-	char *cUseFilename;
-	char cResolvePath[MAX_PATH];
-	//Resolve path , if some function later in code change current dir.
-	if (GetFullPathNameA(pFilename, MAX_PATH, &cResolvePath[0], NULL) > 0) {
-		cUseFilename = &cResolvePath[0];
-	}
-	else {
-		cUseFilename = pFilename;
-	}
-
-	// check to make sure we don't add something we already have in the list
-	for ( int n = 0; n < g_image_list.size(); n++ )
-		if ( stricmp ( g_image_list[n].pFilename, cUseFilename) == NULL )
-			return;
-
-	// add item to list of work
-	sPreLoadedTexture item;
-	item.pTexture = NULL;
-	item.iMipMaps = iMipMaps;
-	strcpy(item.pFilename, cUseFilename);
-	g_image_list.push_back(item);
+bool PWTextureResidencyObserving(){
+#ifdef DX11
+    return (pwAdaptiveEnabled&&!pwAdaptive.empty())||!pwTiled.empty();
+#else
+    return false;
+#endif
 }
-
-void image_preload_files_finish ( void )
-{
-	// before send list to thread, load up list with previous preloaded file 'data' still in memory
-	for ( int n = 0; n < g_image_list.size(); n++ )
-	{
-		if ( n < g_image_outputv.size() )
-		{
-			if ( stricmp ( g_image_list[n].pFilename, g_image_outputv[n].pFilename ) == NULL )
-			{
-				// this ensures we avoid reloading something we 'might need' that we have already preloaded previously
-				g_image_list[n].pTexture = g_image_outputv[n].pTexture;
-			}
-		}
-	}
-
-	// start preloading
-	g_bRequestCleanInteruptionT1 = false; //Start fresh.
-	g_pT1 = new std::thread(image_thread_function, std::ref(g_image_list));
+void PWTextureResidencyObserve(ID3D11ShaderResourceView* view,float distance,bool safeMainDiffuse,bool shadowCamera){
+#ifdef DX11
+    PWTiledObserve(view,distance,safeMainDiffuse&&!shadowCamera);
+    if(shadowCamera||!pwAdaptiveEnabled||!view)return;
+    for(auto& item:pwAdaptive){
+        if(item.view.get()!=view)continue;
+        if(!safeMainDiffuse||!std::isfinite(distance)||distance<0){item.protectedUse=true;return;}
+        if(!item.observed||distance<item.nearest)item.nearest=distance;
+        item.observed=true;item.everObserved=true;item.lastSeen=GetTickCount64();return;
+    }
+#else
+    (void)view;(void)distance;(void)safeMainDiffuse;(void)shadowCamera;
+#endif
 }
-
-void image_preload_files_strictwaittoend ( void )
-{
-	// wait for all work to finish
-	if ( g_pT1 )
-	{
-		g_pT1->join();
-		delete g_pT1;
-		g_pT1 = NULL;
-		g_bRequestCleanInteruptionT1 = false;
-	}
-}
-
-void image_preload_files_wait ( void )
-{
-	g_bRequestCleanInteruptionT1 = true;
-	image_preload_files_strictwaittoend();
-}
-
-bool image_preload_files_in_progress ( void )
-{
-	// wait for all work to finish
-	return g_bT1;
-}
-
-void image_preload_files_reset ( void )
-{
-	// clear finished list for next batch of work
-	for ( int n = 0; n < g_image_outputv.size(); n++ )
-	{
-		if ( g_image_outputv[n].pTexture ) 
-		{
-			g_image_outputv[n].pTexture->Release();
-			g_image_outputv[n].pTexture = NULL;
-		}
-	}
-	g_image_outputv.clear();
+void PWTextureStageTick(){
+#ifdef DX11
+    PWBenchTick();
+    if(!pwStage.active)return;
+    if(!pwMipPending.empty()){
+        auto& pending=pwMipPending.front();
+        if(!PWMipStep(pending)||!pending.first)pwMipPending.erase(pwMipPending.begin());
+    }
+    PWAdaptiveTick();PWTiledTick();
+#endif
 }
 
 namespace
@@ -231,6 +866,11 @@ namespace
         if (pImage != m_List.end())
         {
 			#ifdef DX11
+            if(pImage->second->lpTexture){
+                if(!pwMipPending.empty())PWMipDrain(pImage->second->lpTexture);
+                PWTiledPin(pImage->second->lpTexture);
+                PWAdaptiveForget(pImage->second->lpTexture);
+            }
             SAFE_RELEASE( pImage->second->lpTextureView );
 			#else
             SAFE_RELEASE( pImage->second->lpTexture );
@@ -322,11 +962,11 @@ DARKSDK void DumpImageList(void)
 		SAFE_RELEASE ( pTextureInterface );
 
 		//BC1: 5:6 : 5 color(5 bits red, 6 bits green, 5 bits blue).This is true even if the data also contains 1 - bit alpha.
-		//Assuming a 4×4 texture using the largest data format possible, the BC1 format reduces the memory required from 48 bytes(16 colors × 3 components / color × 1 byte / component) to 8 bytes of memory.
+		//Assuming a 4Ã—4 texture using the largest data format possible, the BC1 format reduces the memory required from 48 bytes(16 colors Ã— 3 components / color Ã— 1 byte / component) to 8 bytes of memory.
 		//So to calculate all 4 bits per pixels should be devided by 8.
-		//BC1: 48 bytes (16 colors × 3 components/color × 1 byte/component) to 8 bytes of memory.
-		//BC2: 64 bytes (16 colors × 4 components/color × 1 byte/component) to 16 bytes of memory.
-		//BC3: 64 bytes (16 colors × 4 components/color × 1 byte/component) to 16 bytes of memory.
+		//BC1: 48 bytes (16 colors Ã— 3 components/color Ã— 1 byte/component) to 8 bytes of memory.
+		//BC2: 64 bytes (16 colors Ã— 4 components/color Ã— 1 byte/component) to 16 bytes of memory.
+		//BC3: 64 bytes (16 colors Ã— 4 components/color Ã— 1 byte/component) to 16 bytes of memory.
 		//BC1 / 8.0 = * 0,125 (-alpha 4bit) (4 bits per pixel )
 		//BC2 / 4.0 = * 0.25 (8 bits per pixel )
 		//BC3 / 4.0 = * 0.25 (8 bits per pixel )
@@ -808,8 +1448,148 @@ int getBitsPerPixel(int fmt)
 
 
 
+// Opt-in read-only memory baseline from the actual image registry.
+// Sample only on the game thread at lifecycle boundaries or a slow cadence.
+// Never use GetImagePointer[View] here: those alter access counters/cache.
+void PWTextureMemorySample(const char* stage,bool periodic)
+{
+#ifdef DX11
+    char enabled[8]={};
+    const bool profile=GetEnvironmentVariableA("GGCPW_PROFILE_TEXTURES",enabled,sizeof(enabled))==1&&enabled[0]=='1';
+    char budgetSwitch[8]={};
+    const bool budgetOnly=GetEnvironmentVariableA("GGCPW_TEXTURE_BUDGET",budgetSwitch,sizeof(budgetSwitch))==1&&budgetSwitch[0]=='1';
+    if(!profile&&!budgetOnly)return;
+    const ULONGLONG now=GetTickCount64();
+    static ULONGLONG lastPeriodic=0,peakBytes=0;
+    if(periodic&&now-lastPeriodic<5000)return;
+    lastPeriodic=now;
+    unsigned long long total=0,staging=0,entries=0,unknown=0,aliases=0;
+    unsigned long long protectedRender=0,protectedOther=0,legacyPinned=0;
+    std::set<ID3D11Resource*> seen;
+    for(const auto& item:m_List){
+        const tagImgData* image=item.second;
+        if(!image||!image->lpTexture){++unknown;continue;}
+        ++entries;
+        ID3D11Resource* resource=image->lpTexture;
+        if(!seen.insert(resource).second){++aliases;continue;}
+        D3D11_RESOURCE_DIMENSION dimension=D3D11_RESOURCE_DIMENSION_UNKNOWN;
+        resource->GetType(&dimension);
+        UINT width=0,height=1,depth=1,levels=0,array=1,samples=1;
+        DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;
+        D3D11_USAGE usage=D3D11_USAGE_DEFAULT;
+        UINT bindFlags=0,miscFlags=0;
+        if(dimension==D3D11_RESOURCE_DIMENSION_TEXTURE2D){
+            D3D11_TEXTURE2D_DESC d={};
+            static_cast<ID3D11Texture2D*>(resource)->GetDesc(&d);
+            width=d.Width;height=d.Height;levels=d.MipLevels;array=d.ArraySize;
+            samples=d.SampleDesc.Count;format=d.Format;usage=d.Usage;bindFlags=d.BindFlags;miscFlags=d.MiscFlags;
+        }else if(dimension==D3D11_RESOURCE_DIMENSION_TEXTURE3D){
+            D3D11_TEXTURE3D_DESC d={};
+            static_cast<ID3D11Texture3D*>(resource)->GetDesc(&d);
+            width=d.Width;height=d.Height;depth=d.Depth;levels=d.MipLevels;format=d.Format;usage=d.Usage;bindFlags=d.BindFlags;miscFlags=d.MiscFlags;
+        }else if(dimension==D3D11_RESOURCE_DIMENSION_TEXTURE1D){
+            D3D11_TEXTURE1D_DESC d={};
+            static_cast<ID3D11Texture1D*>(resource)->GetDesc(&d);
+            width=d.Width;levels=d.MipLevels;array=d.ArraySize;format=d.Format;usage=d.Usage;bindFlags=d.BindFlags;miscFlags=d.MiscFlags;
+        }
+        if(!width||!levels||!array||!samples||!DirectX::BitsPerPixel(format)){++unknown;continue;}
+        unsigned long long bytes=0;
+        for(UINT mip=0;mip<levels;++mip){
+            size_t row=0,slice=0;
+            DirectX::ComputePitch(format,width,height,row,slice,DirectX::CP_FLAGS_NONE);
+            bytes+=static_cast<unsigned long long>(slice)*depth*array*samples;
+            if(width>1)width/=2;if(height>1)height/=2;if(depth>1)depth/=2;
+        }
+        total+=bytes;
+        if(usage==D3D11_USAGE_STAGING)staging+=bytes;
+        else if(bindFlags&(D3D11_BIND_RENDER_TARGET|D3D11_BIND_DEPTH_STENCIL|D3D11_BIND_UNORDERED_ACCESS))protectedRender+=bytes;
+        else if((usage!=D3D11_USAGE_DEFAULT&&usage!=D3D11_USAGE_IMMUTABLE)||miscFlags||array>1||samples>1||dimension!=D3D11_RESOURCE_DIMENSION_TEXTURE2D)protectedOther+=bytes;
+        else legacyPinned+=bytes; // legacy raw bindings may be borrowed; all stay pinned
+    }
+    if(total>peakBytes)peakBytes=total;
+    PROCESS_MEMORY_COUNTERS_EX process={};process.cb=sizeof(process);
+    const bool processOK=GetProcessMemoryInfo(GetCurrentProcess(),
+        reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&process),sizeof(process))!=FALSE;
+    // DXGI reports actual process usage/budget on the renderer's adapter,
+    // not the first enumerated GPU. Unavailable telemetry is flagged.
+    DXGI_QUERY_VIDEO_MEMORY_INFO local={},nonlocal={};
+    bool localOK=false,nonlocalOK=false;
+    unsigned long long dedicatedBytes=0;
+    IDXGIDevice* device=nullptr;IDXGIAdapter* adapter=nullptr;IDXGIAdapter3* adapter3=nullptr;
+    if(m_pD3D&&SUCCEEDED(m_pD3D->QueryInterface(__uuidof(IDXGIDevice),reinterpret_cast<void**>(&device)))){
+        if(SUCCEEDED(device->GetAdapter(&adapter))&&adapter){
+            DXGI_ADAPTER_DESC desc={};
+            if(SUCCEEDED(adapter->GetDesc(&desc)))dedicatedBytes=desc.DedicatedVideoMemory;
+            if(SUCCEEDED(adapter->QueryInterface(__uuidof(IDXGIAdapter3),reinterpret_cast<void**>(&adapter3)))){
+                localOK=SUCCEEDED(adapter3->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_LOCAL,&local));
+                nonlocalOK=SUCCEEDED(adapter3->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL,&nonlocal));
+            }
+        }
+    }
+    if(adapter3)adapter3->Release();if(adapter)adapter->Release();if(device)device->Release();
+    char temp[MAX_PATH]={},path[MAX_PATH+80]={};
+    const DWORD n=GetTempPathA(MAX_PATH,temp);
+    if(!n||n>=MAX_PATH)return;
+    // Preserve M1 CSV schema. Report advisory budget separately.
+    PWTextureBudget::Input input;
+    input.registeredGpu=total-staging;
+    input.localValid=localOK;input.localUsage=local.CurrentUsage;input.localBudget=local.Budget;
+    input.dedicated=dedicatedBytes;
+    char budgetMB[32]={};
+    const DWORD budgetLength=GetEnvironmentVariableA("GGCPW_TEXTURE_BUDGET_MB",budgetMB,sizeof(budgetMB));
+    const bool configOK=budgetLength<sizeof(budgetMB)&&PWTextureBudget::ParseMiB(budgetMB,input.configured);
+    if(!configOK)input.configured=0;
+    const auto budget=PWTextureBudget::Evaluate(input);
+    if(sprintf_s(path,sizeof(path),"%sGGCPW-texturebudget-%lu.csv",temp,(unsigned long)GetCurrentProcessId())>0){
+        HANDLE budgetFile=CreateFileA(path,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+        if(budgetFile!=INVALID_HANDLE_VALUE){
+            LARGE_INTEGER budgetSize={};DWORD budgetWritten=0;
+            if(GetFileSizeEx(budgetFile,&budgetSize)&&budgetSize.QuadPart==0){
+                const char columns[]="tick_ms,pid,stage,config_valid,configured_bytes,target_known,target_bytes,registered_gpu_bytes,pinned_render_bytes,pinned_special_bytes,pinned_legacy_bytes,unknown_entries,logical_excess_bytes,dxgi_local_valid,dxgi_local_usage_bytes,dxgi_local_budget_bytes,dedicated_capacity_bytes,adapter_pressure,adapter_excess_bytes,eligible_bytes\r\n";
+                WriteFile(budgetFile,columns,sizeof(columns)-1,&budgetWritten,nullptr);
+            }
+            char budgetRow[1024]={};
+            const int budgetCount=sprintf_s(budgetRow,sizeof(budgetRow),"%llu,%lu,%s,%d,%llu,%d,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%d,%llu,%llu,%llu,%d,%llu,0\r\n",
+                (unsigned long long)now,(unsigned long)GetCurrentProcessId(),stage,configOK?1:0,
+                (unsigned long long)input.configured,budget.targetKnown?1:0,(unsigned long long)budget.target,
+                (unsigned long long)input.registeredGpu,protectedRender,protectedOther,legacyPinned,unknown,
+                (unsigned long long)budget.logicalExcess,localOK?1:0,(unsigned long long)local.CurrentUsage,
+                (unsigned long long)local.Budget,dedicatedBytes,budget.adapterPressure?1:0,(unsigned long long)budget.adapterExcess);
+            if(budgetCount>0)WriteFile(budgetFile,budgetRow,(DWORD)budgetCount,&budgetWritten,nullptr);
+            CloseHandle(budgetFile);
+        }
+    }
+    if(!profile)return;
+    if(sprintf_s(path,sizeof(path),"%sGGCPW-texturetrace-%lu.csv",temp,(unsigned long)GetCurrentProcessId())<=0)return;
+    HANDLE file=CreateFileA(path,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(file==INVALID_HANDLE_VALUE)return;
+    LARGE_INTEGER length={};DWORD written=0;
+    if(GetFileSizeEx(file,&length)&&length.QuadPart==0){
+        const char header[]="tick_ms,pid,stage,image_entries,unique_resources,aliases,unknown_entries,estimated_bytes,estimated_staging_bytes,observed_peak_bytes,process_valid,working_set_bytes,private_bytes,peak_working_set_bytes,dxgi_local_valid,dxgi_local_usage_bytes,dxgi_local_budget_bytes,dxgi_nonlocal_valid,dxgi_nonlocal_usage_bytes,dxgi_nonlocal_budget_bytes\r\n";
+        WriteFile(file,header,sizeof(header)-1,&written,nullptr);
+    }
+    char row[1024]={};
+    const int count=sprintf_s(row,sizeof(row),"%llu,%lu,%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%d,%llu,%llu,%llu,%d,%llu,%llu,%d,%llu,%llu\r\n",
+        (unsigned long long)now,(unsigned long)GetCurrentProcessId(),stage,
+        entries,(unsigned long long)seen.size(),aliases,unknown,total,staging,(unsigned long long)peakBytes,
+        processOK?1:0,(unsigned long long)process.WorkingSetSize,(unsigned long long)process.PrivateUsage,(unsigned long long)process.PeakWorkingSetSize,
+        localOK?1:0,(unsigned long long)local.CurrentUsage,(unsigned long long)local.Budget,
+        nonlocalOK?1:0,(unsigned long long)nonlocal.CurrentUsage,(unsigned long long)nonlocal.Budget);
+    if(count>0)WriteFile(file,row,(DWORD)count,&written,nullptr);
+    CloseHandle(file);
+#else
+    (void)stage;(void)periodic;
+#endif
+}
+
 DARKSDK void ImageDestructorD3D ( void )
 {
+    // No preloader may retain allocations or use the device during teardown.
+    image_preload_files_reset();
+    PWTextureStageEnd();
+#ifdef DX11
+    pwStage.hints.clear();
+#endif
     m_CurrentId = 0;
     m_imgptr = NULL;
 
@@ -835,6 +1615,10 @@ DARKSDK void ImageDestructorD3D ( void )
 
     // Now clear the list
     m_List.clear();
+#ifdef DX11
+    // Device teardown: no subsequent draw may use recovery trackers.
+    pwTiled.clear();
+#endif
 
 }
 
@@ -873,6 +1657,8 @@ DARKSDK void CreateShaderResourceViewFor ( tagImgData* pImgPtr, int iTextureFlag
 		Error1 ( "Failed to create resource view for image" );
 		return;
 	}
+    PWTiledRegister(pImgPtr->lpTexture,pImgPtr->lpTextureView);
+    PWAdaptiveRegister(pImgPtr->lpTexture,pImgPtr->lpTextureView);
 }
 #endif
 
@@ -1369,30 +2155,16 @@ DARKSDK LPGGTEXTURE GetTextureCore ( char* szFilename, GGIMAGE_INFO* info, int i
 
 		// just as about to load texture file, check if we already have done in preload thread
 
-		ID3D11Resource* pPreCreatedTexture = NULL;
-		for ( int n = 0; n < g_image_outputv.size(); n++ )
-		{
-			int iSearchStrLen = strlen(szFilename);
-			if (!(iSearchStrLen > strlen(g_image_outputv[n].pFilename))) { //PE: Got exception iSearchStrLen > strlen(g_image_outputv[n].pFilename)
-				if (strnicmp(g_image_outputv[n].pFilename + strlen(g_image_outputv[n].pFilename) - iSearchStrLen, szFilename, iSearchStrLen) == NULL)
-				{
-					if (g_image_outputv[n].pTexture == NULL) {
-						char mdebug[512];
-						sprintf(mdebug, "image_preload_files_wait(): %s ", szFilename);
-						#ifndef NOSTEAMORVIDEO
-						timestampactivity(0, mdebug);
-						#endif
-						image_preload_files_wait();
-					}
-					if (g_image_outputv[n].pTexture)
-					{
-						pPreCreatedTexture = g_image_outputv[n].pTexture;
-						g_image_outputv[n].pTexture = NULL;
-						break;
-					}
-				}
-			}
-		}
+		ID3D11Resource* pPreCreatedTexture = nullptr;
+        if(!(g_iImageBlockMode==1&&pFileInMemoryData)){
+            pPreCreatedTexture=PWTakePreloadedTexture(szFilename,m_iMipMapNum,iDivideTextureSize,*info);
+            // A legacy preload would otherwise bypass the opt-in live path.
+            // Release only the transferred preload reference, not the registry.
+            if(pPreCreatedTexture&&pwTiledEnabled&&m_iMipMapNum==-1&&iDivideTextureSize<=1&&iOneToOnePixels==0&&iFullTexturePlateMode==0){
+                char full[MAX_PATH]={};
+                if(PWPreloadPath(szFilename,full)&&PWTiledCandidate(full,*info)){pPreCreatedTexture->Release();pPreCreatedTexture=nullptr;}
+            }
+        }
 
 		// not unknown, use file format
 		GGFORMAT newImageFormat = (*info).Format;
@@ -1407,7 +2179,7 @@ DARKSDK LPGGTEXTURE GetTextureCore ( char* szFilename, GGIMAGE_INFO* info, int i
 		else
 		{
 			bool bIsDDS = false;
-			if (strnicmp(szFilename + strlen(szFilename) - 4, ".dds", 4) == NULL) bIsDDS = true;
+			if (strlen(szFilename)>=4 && strnicmp(szFilename + strlen(szFilename) - 4, ".dds", 4) == NULL) bIsDDS = true;
 
 			bool bFormatDDSLoadFriendly = true;
 
@@ -1462,7 +2234,12 @@ DARKSDK LPGGTEXTURE GetTextureCore ( char* szFilename, GGIMAGE_INFO* info, int i
 
 						DARKSDK int Timer(void);
 						int t = Timer();
-						hRes = DirectX::CreateDDSTextureFromFile(m_pD3D, m_pImmediateContext, wcstringTextureFilename, &lpTexture, NULL);
+						// M4: optional ready CPU data, original full-resolution upload on this thread.
+                        if(m_iMipMapNum==-1&&!g_bImageBlockActive)
+                            lpTexture=PWStageTake(szRealFilename,*info,iOneToOnePixels==0&&iFullTexturePlateMode==0);
+                        if(!lpTexture)
+                            hRes = DirectX::CreateDDSTextureFromFile(m_pD3D, m_pImmediateContext, wcstringTextureFilename, &lpTexture, NULL);
+                        else hRes=S_OK;
 						direct_load_time += Timer() - t;
 						if (lpTexture != NULL)
 						{
@@ -1484,8 +2261,8 @@ DARKSDK LPGGTEXTURE GetTextureCore ( char* szFilename, GGIMAGE_INFO* info, int i
 							{
 
 								//PE: some files fails ?
-								//PE: PATH not found ...s\für hub level\schild level 1\junksign3_d.dds
-								//PE: Some unicode chars like 'für' cant be found by CreateDDSTextureFromFile ?. D3DX11CreateTextureFromFile works :)
+								//PE: PATH not found ...s\fÃ¼r hub level\schild level 1\junksign3_d.dds
+								//PE: Some unicode chars like 'fÃ¼r' cant be found by CreateDDSTextureFromFile ?. D3DX11CreateTextureFromFile works :)
 								D3DX11_IMAGE_LOAD_INFO loadinfo;
 								loadinfo.Format = (*info).Format;
 								loadinfo.MipLevels = (*info).MipLevels;
@@ -1553,7 +2330,7 @@ DARKSDK LPGGTEXTURE GetTextureCore ( char* szFilename, GGIMAGE_INFO* info, int i
 			else
 			{
 				//PE: Make sure we keep current compression, if we just need to generate mipmaps.
-				if ( m_iMipMapNum == -1 && (*info).MipLevels == 1 && strnicmp(szFilename + strlen(szFilename) - 4, ".dds", 4) == NULL ) 
+				if ( m_iMipMapNum == -1 && (*info).MipLevels == 1 && strlen(szFilename)>=4 && strnicmp(szFilename + strlen(szFilename) - 4, ".dds", 4) == NULL ) 
 				{
 
 					//Only need to generate mipmaps so keep original compression.
@@ -1630,6 +2407,9 @@ DARKSDK LPGGTEXTURE GetTextureCore ( char* szFilename, GGIMAGE_INFO* info, int i
 			}
 		}
 
+		// A detached preload which was not consumed by the chosen decode path
+        // still owns its original COM reference.
+        if(pPreCreatedTexture){pPreCreatedTexture->Release();pPreCreatedTexture=nullptr;}
 		// 010205 - default mem can run out
 		if (lpTexture == NULL) {
 			return NULL;
@@ -1831,6 +2611,7 @@ DARKSDK ID3D11Resource* PreloadThreadSafeImage(LPSTR szFilename, int iMipMaps)
 
 	// Load in image info from file (thread safe)
 	HRESULT hRes = D3DX11GetImageInfoFromFile(szRealFilename, NULL, &info, NULL);
+    if(FAILED(hRes))return nullptr;
 
 	// can we call a DX11 create texture function from a thread (DX11 supposed to be threadsafe and thread pump undocumented!!)
 	ID3D11Resource* pPreCreatedTexture = NULL;
@@ -1844,10 +2625,9 @@ DARKSDK ID3D11Resource* PreloadThreadSafeImage(LPSTR szFilename, int iMipMaps)
 	hRes = D3DX11CreateTextureFromFile(m_pD3D, szRealFilename, &loadinfo, NULL, &pPreCreatedTexture, NULL);
 
 	// return
-	if (hRes == 0)
-		return pPreCreatedTexture;
-	else
-		return NULL;
+	if(SUCCEEDED(hRes))return pPreCreatedTexture;
+    if(pPreCreatedTexture)pPreCreatedTexture->Release();
+    return nullptr;
 }
 
 DARKSDK void SetImageAutoMipMap ( int iGenerateMipMaps )
@@ -2085,7 +2865,7 @@ DARKSDK int LoadImageCoreInternal ( char* szFilename, int iDivideTextureSize )
 		//PE: Check if we have it in the internal list.
 		#ifndef NOSTEAMORVIDEO
 		int tmpid = findinternaltexture(szFilename);
-		if (tmpid > 0) {
+		if (tmpid > 0 && ImageExist(tmpid)) {
 			//char mdebug[2048];
 			//sprintf(mdebug, "findinternaltexture: %s, return: %d ", szFilename, tmpid );
 			//timestampactivity(0, mdebug);
@@ -2162,6 +2942,11 @@ DARKSDK LPGGTEXTURE GetImagePointer ( int iID )
 		return NULL;
 
 	if (m_imgptr->lpTexture) {
+#ifdef DX11
+        if(!pwMipPending.empty())PWMipDrain(m_imgptr->lpTexture);
+        if(!PWTiledPin(m_imgptr->lpTexture))return NULL;
+        PWAdaptiveForget(m_imgptr->lpTexture);
+#endif
 
 #ifdef PETESTIMAGEUSAGE
 		m_imgptr->AccessCountCPU++;
@@ -3242,6 +4027,13 @@ DARKSDK void CreateReplaceImage ( int iID, int iTexSize, ID3D11Texture2D* pTex, 
 	}
 
 	// valid image can be be overridden with new image details
+#ifdef DX11
+    if(m_imgptr->lpTexture){
+        if(!pwMipPending.empty())PWMipDrain(m_imgptr->lpTexture);
+        PWTiledPin(m_imgptr->lpTexture);
+        PWAdaptiveForget(m_imgptr->lpTexture);
+    }
+#endif
 	m_imgptr->lpTexture = pTex;
 	m_imgptr->lpTextureView = pView;
 	m_imgptr->iWidth = iTexSize;

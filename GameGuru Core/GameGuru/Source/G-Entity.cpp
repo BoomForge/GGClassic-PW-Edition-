@@ -5,10 +5,13 @@
 #include "stdafx.h"
 #include "gameguru.h"
 #include "CObjectsC.h"
+#include "PW-ThirdPersonGameplay.h"
 
 
 // 
 //  ENTITY GAME CODE
+// Reserved recycled attachment ID, reset with the level attachment bank.
+static int pwThirdPersonSpareAttachment=0;
 // 
 
 void entity_init ( void )
@@ -24,6 +27,7 @@ void entity_init ( void )
 	//  activate all entities and perform any pre-test game setup
 	timestampactivity(0,"Configure entity attachments and AI obstacles");
 	g.entityattachmentindex=0;
+    pwThirdPersonSpareAttachment=0;
 
 	//PE: Could we use collisionmode == 0 and only create it as a box ? and not all faces.
 	//PE: t.tobstype=t.entityprofile[t.entid].forcesimpleobstacle = true;
@@ -2019,6 +2023,112 @@ void entity_gettrueplayerpos(void)
 	}
 }
 
+namespace PWThirdPerson {
+bool PlayerOrigin(Vec& origin,int& ignoredObject) {
+    ignoredObject=0;
+    if(t.playercontrol.thirdperson.enabled==1) {
+        const int body=t.aisystem.objectstartindex;
+        const int e=t.playercontrol.thirdperson.charactere;
+        if(body<=0||!ObjectExist(body)||e<=0||e>g.entityelementlist)return false;
+        ignoredObject=t.entityelement[e].obj;
+        if(ignoredObject<=0||!ObjectExist(ignoredObject))return false;
+        origin={ObjectPositionX(body),ObjectPositionY(body),ObjectPositionZ(body)};
+    } else {
+        origin={CameraPositionX(t.terrain.gameplaycamera),CameraPositionY(t.terrain.gameplaycamera),CameraPositionZ(t.terrain.gameplaycamera)};
+    }
+    return std::isfinite(origin.x)&&std::isfinite(origin.y)&&std::isfinite(origin.z);
+}
+bool EntityTarget(int e,Vec& target,int& object) {
+    if(e<=0||e>g.entityelementlist)return false;
+    const auto& ent=t.entityelement[e];
+    if(ent.bankindex<=0||ent.obj<=0||!ObjectExist(ent.obj))return false;
+    object=ent.obj;
+    // Aim at actual live object bounds, not stale editor placement.
+    const float height=ObjectSizeY(object,1);
+    target={ObjectPositionX(object),ObjectPositionY(object)+Clamp(Finite(height*0.5f,20.f),8.f,100.f),ObjectPositionZ(object)};
+    return std::isfinite(target.x)&&std::isfinite(target.y)&&std::isfinite(target.z);
+}
+bool LineClear(Vec from,Vec to,int ignoredObject,int targetObject) {
+    if(!InReach(from,to,1000000.f))return false;
+    if(Length(Sub(to,from))<0.001f)return true;
+    // Terrain blocks interactions/strikes just as it blocks ordinary bullets.
+    if(ODERayTerrain(from.x,from.y,from.z,to.x,to.y,to.z)==1)return false;
+    // Populate the same secondary range used by Classic's bullet queries.
+    if(g.lightmappedobjectoffset>=g.lightmappedobjectoffsetfinish)
+        IntersectAll(87000,87000+g.merged_new_objects-1,0,0,0,0,0,0,-123);
+    else IntersectAll(g.lightmappedobjectoffset,g.lightmappedobjectoffsetfinish,0,0,0,0,0,0,-123);
+    const int hit=IntersectAll(g.entityviewstartobj,g.entityviewendobj,from.x,from.y,from.z,to.x,to.y,to.z,ignoredObject);
+    return hit<=0||(targetObject>0&&hit==targetObject);
+}
+// Resolve the visible aim point, then build the physical trajectory from
+// the weapon. Camera geometry is never used directly as a damage ray.
+bool BuildPlayerAim(float range,Aim& aim) {
+    if(t.playercontrol.thirdperson.enabled!=1||t.player[1].health<=0)return false;
+    range=Clamp(Finite(range,3000.f),1.f,100000.f);
+    Vec body={};int avatar=0;
+    if(!PlayerOrigin(body,avatar))return false;
+    const int e=t.playercontrol.thirdperson.charactere;
+    const auto& player=t.entityelement[e];
+    Vec muzzle=body;
+    // Prefer the VWEAP firespot, then the actual hand socket. Do not use
+    // the hidden first-person HUD model or its limb transforms.
+    const int attachment=player.attachmentobj,fire=player.attachmentobjfirespotlimb;
+    if(attachment>0&&ObjectExist(attachment)&&fire>=0&&LimbExist(attachment,fire)) {
+        muzzle={LimbPositionX(attachment,fire),LimbPositionY(attachment,fire),LimbPositionZ(attachment,fire)};
+    } else {
+        const int bank=player.bankindex;
+        if(bank>0) {
+            const int hand=t.entityprofile[bank].firespotlimb;
+            if(hand>=0&&LimbExist(avatar,hand))
+                muzzle={LimbPositionX(avatar,hand),LimbPositionY(avatar,hand),LimbPositionZ(avatar,hand)};
+        }
+    }
+    // Prevent a weapon poking through cover from bypassing the body-side wall.
+    // Invalid/stale attachment transforms fail closed.
+    if(!InReach(body,muzzle,250.f)||!LineClear(body,muzzle,avatar,0))return false;
+    Vec from={},direction={};
+    if(t.playercontrol.thirdperson.cameralocked==1) {
+        // Locked/isometric mode uses character-forward targeting.
+        from=muzzle;direction=ForwardVector(ObjectAngleY(avatar),0.f);
+    } else {
+        from={CameraPositionX(0),CameraPositionY(0),CameraPositionZ(0)};
+        // Match the existing Classic third-person reticle (50%,25%).
+        PickScreen2D23D(GetDisplayWidth()*0.5f,GetDisplayHeight()*0.25f,range);
+        if(!Direction({GetPickVectorX(),GetPickVectorY(),GetPickVectorZ()},direction))return false;
+    }
+    if(!InReach(body,from,10000.f))return false;
+    const Vec end=Add(from,Scale(direction,range+Length(Sub(from,muzzle))));
+    Vec target=end;
+    float nearest=1.f;
+    if(ODERayTerrain(from.x,from.y,from.z,end.x,end.y,end.z)==1) {
+        const Vec hit={ODEGetRayCollisionX(),ODEGetRayCollisionY(),ODEGetRayCollisionZ()};
+        nearest=ContactFraction(from,end,hit,0.f);
+        target=Add(from,Scale(Sub(end,from),nearest));
+    }
+    if(g.lightmappedobjectoffset>=g.lightmappedobjectoffsetfinish)
+        IntersectAll(87000,87000+g.merged_new_objects-1,0,0,0,0,0,0,-123);
+    else IntersectAll(g.lightmappedobjectoffset,g.lightmappedobjectoffsetfinish,0,0,0,0,0,0,-123);
+    // Camera ray only chooses a target. The actual damage ray starts
+    // at the muzzle and can still hit intervening cover.
+    if(IntersectAll(g.entityviewstartobj,g.entityviewendobj,from.x,from.y,from.z,end.x,end.y,end.z,avatar)>0) {
+        const Vec hit={ChecklistFValueA(6),ChecklistFValueB(6),ChecklistFValueC(6)};
+        const float f=ContactFraction(from,end,hit,0.f);
+        if(f<nearest)target=Add(from,Scale(Sub(end,from),f));
+    }
+    // A wall behind the protagonist may be closer to the orbit camera than
+    // the muzzle. Do not turn the weapon backwards to meet that target.
+    if(Dot(Sub(target,muzzle),direction)<=0.01f)return false;
+    return ResolveAim(muzzle,target,range,aim);
+}
+bool CanInteract(int e,float range) {
+    Vec from={},to={};int ignore=0,target=0;
+    if(t.player[t.plrid].health<=0||t.game.runasmultiplayer!=0||t.game.gameloop!=1||
+        !PlayerOrigin(from,ignore)||!EntityTarget(e,to,target)||target==ignore||
+        t.entityelement[e].active==0||!GetVisible(target))return false;
+    return InReach(from,to,range)&&LineClear(from,to,ignore,target);
+}
+}
+
 void entity_hasbulletrayhit(void)
 {
 	// bulletray is x1#,y1#,z1#,x2#,y2#,z2#,bulletrayhit,gunrange#
@@ -2441,7 +2551,7 @@ void entity_triggerdecalatimpact ( float fX, float fY, float fZ )
 	}
 }
 
-void entity_createattachment ( void )
+static void entity_createattachment_core(int weaponOverride,int reuseObject)
 {
 	// Single player character must HOLD the weapon before attaching it
 	t.tischaracterholdingweapon=0;
@@ -2462,18 +2572,24 @@ void entity_createattachment ( void )
 				// all vweaps (that are active)
 				for ( t.tgindex = 1 ; t.tgindex <= g.gunmax; t.tgindex++ )
 				{
-					if ( t.gun[t.tgindex].activeingame == 1 ) 
+					if ( t.gun[t.tgindex].activeingame == 1 || t.tgindex==weaponOverride ) 
 					{
 						t.tweaponname_s=t.gun[t.tgindex].name_s;
 						if ( t.tweaponname_s != "" ) 
 						{
 							// entity has this gun in their hands
 							t.tthasweapon_s = Lower(t.entityprofile[t.entid].hasweapon_s.Get());
-							if ( t.tthasweapon_s == t.tweaponname_s.Lower() ) 
+                            if (weaponOverride>=0?t.tgindex==weaponOverride:(t.tthasweapon_s == t.tweaponname_s.Lower())) 
 							{
 								// go and load this gun (attached to calling entity instance)
-								++g.entityattachmentindex;
-								t.ttobj=g.entityattachmentsoffset+g.entityattachmentindex;
+                                if(weaponOverride>=0&&reuseObject>g.entityattachmentsoffset)
+                                    t.ttobj=reuseObject;
+                                else {
+                                    // 5998/5999 are reserved video/prompt objects.
+                                    if(weaponOverride>=0&&g.entityattachmentsoffset+g.entityattachmentindex+1>=5998)return;
+                                    ++g.entityattachmentindex;
+                                    t.ttobj=g.entityattachmentsoffset+g.entityattachmentindex;
+                                }
 								if (  ObjectExist(t.ttobj) == 1  )  DeleteObject (  t.ttobj );
 
 								// replaced X file load with optional DBO convert/load
@@ -2489,6 +2605,7 @@ void entity_createattachment ( void )
 										t.tdbofile_s="";
 									}
 									LoadObject ( t.tfile_s.Get(), t.ttobj );
+                                    if(weaponOverride>=0&&!ObjectExist(t.ttobj))return;
 									SetObjectFilter (  t.ttobj,2 );
 									if ( Len(t.tdbofile_s.Get()) > 1 ) 
 									{
@@ -2508,8 +2625,10 @@ void entity_createattachment ( void )
 								}
 								else
 								{
+                                    if(weaponOverride>=0)return; // no invisible placeholder for a player weapon
 									MakeObjectTriangle (  t.ttobj,0,0,0,0,0,0,0,0,0 );
 								}
+                                if(weaponOverride>=0&&!ObjectExist(t.ttobj))return;
 								t.entityelement[t.e].attachmentobj=t.ttobj;
 
 								//  Apply object settings
@@ -2596,6 +2715,80 @@ void entity_createattachment ( void )
 			}
 		}
 	}
+}
+
+void entity_createattachment ( void )
+{
+    entity_createattachment_core(-1,0);
+}
+
+namespace PWThirdPerson {
+bool PrepareEquip(int weapon,EquipStage& stage) {
+    const int e=t.playercontrol.thirdperson.charactere;
+    if(e<=0||e>g.entityelementlist)return false;
+    auto& player=t.entityelement[e];
+    const int bank=player.bankindex;
+    if(bank<=0||player.obj<=0||!ObjectExist(player.obj))return false;
+    stage.entity=e;stage.weapon=weapon;stage.oldObject=player.attachmentobj;
+    stage.oldLimb=player.attachmentobjfirespotlimb;
+    if(weapon==0)return true; // holster does not require a hand socket
+    if(weapon>g.gunmax||weapon<0||t.entityprofile[bank].ischaracter!=1)return false;
+    const int hand=t.entityprofile[bank].firespotlimb;
+    if(hand<0||!LimbExist(player.obj,hand))return false;
+    // Check actual third-person world model before discarding any old weapon.
+    cstr model="gamecore\\guns\\";model+=t.gun[weapon].name_s;
+    cstr x=model+"\\vweap.x",dbo=model+"\\vweap.dbo";
+    if(!FileExist(x.Get())&&!FileExist(dbo.Get()))return false;
+    if(player.eleprof.hasweapon==weapon&&stage.oldObject>0&&ObjectExist(stage.oldObject)) {
+        stage.unchanged=true;stage.newObject=stage.oldObject;stage.newLimb=stage.oldLimb;return true;
+    }
+    const int savedE=t.e,savedBank=t.entid,savedWeapon=player.eleprof.hasweapon;
+    const int oldIndex=g.entityattachmentindex;
+    int spare=pwThirdPersonSpareAttachment;
+    if(spare==stage.oldObject)spare=0;
+    // Load into an unused slot while keeping the old visible attachment.
+    t.e=e;t.entid=bank;player.eleprof.hasweapon=weapon;player.attachmentobj=0;
+    player.attachmentobjfirespotlimb=0;
+    entity_createattachment_core(weapon,spare);
+    stage.newObject=player.attachmentobj;stage.newLimb=player.attachmentobjfirespotlimb;
+    player.attachmentobj=stage.oldObject;player.attachmentobjfirespotlimb=stage.oldLimb;
+    player.eleprof.hasweapon=savedWeapon;t.e=savedE;t.entid=savedBank;
+    if(stage.newObject<=0||!ObjectExist(stage.newObject)) {
+        const int failed=spare>0?spare:(g.entityattachmentindex>oldIndex?g.entityattachmentsoffset+g.entityattachmentindex:0);
+        if(failed>0){if(ObjectExist(failed))DeleteObject(failed);pwThirdPersonSpareAttachment=failed;}
+        return false;
+    }
+    HideObject(stage.newObject);
+    pwThirdPersonSpareAttachment=0;
+    return true;
+}
+void FinishEquip(const EquipStage& stage,bool commit) {
+    if(stage.entity<=0||stage.entity>g.entityelementlist)return;
+    if(!commit) {
+        if(!stage.unchanged&&stage.newObject>0){if(ObjectExist(stage.newObject))DeleteObject(stage.newObject);pwThirdPersonSpareAttachment=stage.newObject;}
+        return;
+    }
+    auto& player=t.entityelement[stage.entity];
+    if(!stage.unchanged&&stage.oldObject>0&&stage.oldObject!=stage.newObject) {
+        if(ObjectExist(stage.oldObject))DeleteObject(stage.oldObject);
+        // Both IDs belong to this level's existing attachment range.
+        if(stage.oldObject>g.entityattachmentsoffset&&stage.oldObject<=g.entityattachmentsoffset+g.entityattachmentindex)
+            pwThirdPersonSpareAttachment=stage.oldObject;
+    }
+    player.eleprof.hasweapon=stage.weapon;
+    player.attachmentobj=stage.newObject;
+    player.attachmentobjfirespotlimb=stage.newLimb;
+    if(stage.newObject>0&&ObjectExist(stage.newObject)) {
+        if(g.thirdpersonentityeffect>0){
+            SetObjectEffect(stage.newObject,g.thirdpersonentityeffect);
+            SetEffectConstantF(g.thirdpersonentityeffect,"DepthWriteMode",0.f);
+        }
+        // Immediately place in hand, so no frame is rendered at the origin.
+        ShowObject(stage.newObject);
+        const int oldE=t.e,oldBank=t.entid;t.e=stage.entity;
+        entity_controlattachments();t.e=oldE;t.entid=oldBank;
+    }
+}
 }
 
 void entity_freeattachment ( void )

@@ -5,6 +5,15 @@
 // Includes
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-ImportPaths.h" // PW Edition: safe Blender/Mixamo texture path handling
+#include "PW-AssetManifest.h" // Shared Model Importer 2 / Character Creator 2 preflight
+#include "PW-MaterialRelink.h" // Model Importer 2 M2: validated slot selection and texture relinking
+#include "PW-GLBBridge.h" // GLB 2.0 import via Blender -> existing FBX pipeline
+#include "PW-ThumbnailCheck.h" // Ensure saved BMP contains visible scene content
+#include "PW-EnvironmentImport.h" // Save previewed models as native sky/grass
+#include "PW-ImportedGeometry.h" // Ensure FBX/GLB export has real mesh/vertex data
+#include "PW-SkeletalAudit.h" // Non-destructive GameGuru skeleton/clip inspection
+#include "PW-SkeletalIntegrity.h" // Native skin weight/bind-pose/keyframe consistency verification
 
 #if defined(_WIN64) && !defined(ENABLEIMGUI)
 //PE: for 64 bits file dialogs.
@@ -44,6 +53,12 @@ enum MaterialComponentTEXTURESLOT
 };
 
 // Globals
+// When importing from Terrain Tools, reuse the working model preview but
+// export a native sky/grass style rather than an entity profile.
+int g_pwEnvironmentImportTarget = 0; // 0 entity, 1 sky, 2 grass
+float g_pwEnvironmentScalePct = 100.0f;
+float g_pwEnvironmentYawDeg = 0.0f;
+char g_pwEnvironmentName[128] = "";
 bool g_bLoadedFBXModel = false;
 int g_iFirstTimeFBXImport = 0;
 int g_iPreferPBR = 0;
@@ -99,6 +114,45 @@ extern preferences pref; //cyb
 
 // Prototypes
 void LoadFBX ( LPSTR pFilename, int iObjectNumber );
+
+// The GLB converter emits images into a unique folder under importer/temp.
+// Keep that folder for texture relinking; searching only importer/temp misses
+// its subfolders and silently leaves stale embedded texture names behind.
+static std::string pwGLBTextureDirectory;
+
+// Convert GLB using an installed Blender, then load its real FBX geometry,
+// materials and armature through the legacy GameGuru importer. Conversion is
+// isolated under Files\importer\temp and never overwrites the source GLB.
+static bool PW_LoadGLBIntoImporter(const char* input, int objectNumber)
+{
+    const std::string source = input ? input : "";
+    const char* filesRoot = g.rootdir_s.Get();
+    const std::string files = filesRoot ? filesRoot : "";
+    std::string converted, problem;
+    if (!PWGLB::Convert(source, files, converted, problem))
+    {
+        OutputDebugStringA(("PW GLB import failed: " + problem + "\n").c_str());
+        popup_text((LPSTR)problem.c_str());
+        return false;
+    }
+    pwGLBTextureDirectory = PWImport::DirectoryOf(converted);
+    // LoadFBX takes a mutable legacy LPSTR; do not cast away const from
+    // the std::string's internal storage.
+    std::vector<char> path(converted.begin(), converted.end());
+    path.push_back(0);
+    extern bool g_bOverrideXCacheWhenUsingImporter;
+    g_bOverrideXCacheWhenUsingImporter = true;
+    LoadFBX(path.data(), objectNumber);
+    g_bOverrideXCacheWhenUsingImporter = false;
+    if (ObjectExist(objectNumber) != 1)
+    {
+        pwGLBTextureDirectory.clear();
+        popup_text("Converted GLB could not be loaded by GameGuru's FBX importer.");
+        return false;
+    }
+    return true;
+}
+
 
 
 void importer_init ( void )
@@ -941,8 +995,9 @@ cstr importer_getfilenameonly ( LPSTR pFileAndPossiblePath )
 			return pFileAndPossiblePath;
 	}
 
+	if (!pFileAndPossiblePath) return "";
 	cstr pFileNameOnly = pFileAndPossiblePath;
-	for ( int n = strlen(pFileAndPossiblePath); n > 0; n-- )
+	for ( int n = (int)strlen(pFileAndPossiblePath) - 1; n >= 0; n-- )
 	{
 		if ( pFileAndPossiblePath[n] == '\\' || pFileAndPossiblePath[n] == '/' )
 		{
@@ -1025,7 +1080,7 @@ int importer_addtexturefiletolist ( cstr fileName, cstr sourceName, int* tCount 
 			}
 		}
 	}
-	return t.tfound;
+	return (t.tfound > 0 && t.tfound < IMPORTERTEXTURESMAX) ? t.tfound : 0;
 }
 
 void importer_addtoimagelistandloadifexist ( LPSTR pImgFilename, int iOptionalStage, int iOptionalBaseImageSlotIndex )
@@ -1036,6 +1091,8 @@ void importer_addtoimagelistandloadifexist ( LPSTR pImgFilename, int iOptionalSt
 		// assign image to new slot in image list
 		int iInsertedAtSlot = importer_addtexturefiletolist ( pImgFilename, pImgFilename, &tCount );
 
+		// Full texture list: do not write to slot zero or corrupt importer state.
+		if (iInsertedAtSlot <= 0) return;
 		// assign any special texture 'stage' value
 		t.importerTextures[iInsertedAtSlot].iOptionalStage = iOptionalStage;
 		t.importerTextures[iInsertedAtSlot].iAssociatedBaseImage = iOptionalBaseImageSlotIndex;
@@ -1053,14 +1110,10 @@ void importer_findimagetypesfromlist ( cstr fileName, int iBaseImageSlotIndex, i
 {
 	// get base filename extension (deduct image format ext)
 	LPSTR pExt = NULL;
-	for ( int iImgFormat = 0; iImgFormat < 4; iImgFormat++ )
+	const char* pwKnownExt[] = { ".png", ".dds", ".tga", ".jpg", ".jpeg" };
+	for ( const char* candidate : pwKnownExt )
 	{
-		if ( iImgFormat == 0 ) pExt = ".png";
-		if ( iImgFormat == 1 ) pExt = ".dds";
-		if ( iImgFormat == 2 ) pExt = ".tga";
-		if ( iImgFormat == 3 ) pExt = ".jpg";
-		if ( strnicmp ( fileName.Get()+strlen(fileName.Get())-strlen(pExt), pExt, strlen(pExt) ) == NULL ) 
-			break;
+		if (PWImport::EndsWithI(fileName.Get(), candidate)) { pExt = const_cast<char*>(candidate); break; }
 	}
 	if ( pExt == NULL ) return;
 
@@ -1081,7 +1134,7 @@ void importer_findimagetypesfromlist ( cstr fileName, int iBaseImageSlotIndex, i
 		if ( iImgType == 4) pImgType = "_diff";
 		if ( iImgType == 5) pImgType = "_dif";
 		
-		if ( strnicmp ( pBaseNoFileExt.Get()+strlen(pBaseNoFileExt.Get())-strlen(pImgType), pImgType, strlen(pImgType) ) == NULL )
+		if (PWImport::EndsWithI(pBaseNoFileExt.Get(), pImgType))
 		{
 			// get base filename (minus image type)
 			cstr pBaseFile = cstr(Left(pBaseNoFileExt.Get(),Len(pBaseNoFileExt.Get())-Len(pImgType)));
@@ -1149,7 +1202,9 @@ void importer_findandremoveentry ( cstr sFileToRemove )
 {
 	for ( int tCount = 1 ; tCount <= IMPORTERTEXTURESMAX; tCount++ )
 	{
-		if ( strnicmp ( t.importerTextures[tCount].fileName.Get(), sFileToRemove.Get(), strlen(sFileToRemove.Get())-4 ) == NULL ) 
+		if (Len(sFileToRemove.Get()) >= 4 &&
+			PWImport::EndsWithI(t.importerTextures[tCount].fileName.Get(),
+				PWImport::BaseName(sFileToRemove.Get()).c_str())) 
 		{
 			if ( ImageExist ( t.importerTextures[tCount].imageID ) == 1 ) DeleteImage ( t.importerTextures[tCount].imageID );
 			t.importerTextures[tCount].imageID = 0;
@@ -1165,14 +1220,10 @@ void importer_removeentryandassociatesof ( int tCount )
 
 	// get base filename extension (deduct image format ext)
 	LPSTR pExt = NULL;
-	for ( int iImgFormat = 0; iImgFormat < 4; iImgFormat++ )
+	const char* pwKnownExt[] = { ".png", ".dds", ".tga", ".jpg", ".jpeg" };
+	for ( const char* candidate : pwKnownExt )
 	{
-		if ( iImgFormat == 0 ) pExt = ".png";
-		if ( iImgFormat == 1 ) pExt = ".dds";
-		if ( iImgFormat == 2 ) pExt = ".tga";
-		if ( iImgFormat == 3 ) pExt = ".jpg";
-		if ( strnicmp ( pRemoveTextureFile+strlen(pRemoveTextureFile)-strlen(pExt), pExt, strlen(pExt) ) == NULL ) 
-			break;
+		if (PWImport::EndsWithI(pRemoveTextureFile, candidate)) { pExt = const_cast<char*>(candidate); break; }
 	}
 	if ( pExt == NULL ) return;
 
@@ -1186,7 +1237,7 @@ void importer_removeentryandassociatesof ( int tCount )
 		if ( iImgType == 1 ) pImgType = "_color";
 		if ( iImgType == 2 ) pImgType = "_d";
 		if ( iImgType == 3 ) pImgType = "_albedo";
-		if ( strnicmp ( pBaseNoFileExt.Get()+strlen(pBaseNoFileExt.Get())-strlen(pImgType), pImgType, strlen(pImgType) ) == NULL ) 
+		if (PWImport::EndsWithI(pBaseNoFileExt.Get(), pImgType)) 
 		{
 			// get base filename (minus image type)
 			cstr pBaseFile = cstr(Left(pBaseNoFileExt.Get(),Len(pBaseNoFileExt.Get())-Len(pImgType)));
@@ -1304,7 +1355,9 @@ void importer_applyimagelisttextures ( bool bCubeMapOnly, int iOptionalOnlyUpdat
 				for ( int tCount = 1; tCount <= t.tcounttextures; tCount++ )
 				{
 					LPSTR pThisImageItem = t.importerTextures[tCount].fileName.Get();
-					if ( strnicmp ( pThisImageItem + strlen(pThisImageItem) - strlen(pSearch), pSearch, strlen(pSearch)-4 ) == NULL )
+					if (strlen(pSearch) >= 4 && strlen(pThisImageItem) >= strlen(pSearch) &&
+						strnicmp(pThisImageItem + strlen(pThisImageItem) - strlen(pSearch),
+							pSearch, strlen(pSearch)-4) == NULL)
 					{
 						iFindImageSlotIndex = tCount;
 					}
@@ -1406,7 +1459,17 @@ void importer_applyimagelisttextures ( bool bCubeMapOnly, int iOptionalOnlyUpdat
 						if ( t.importerTextures[iImageListIndex].imageID > 0 )
 						{
 							// diffuse/albedo
-							TextureLimbStage ( t.importer.objectnumber, tLimbIndex, iColorStage, t.importerTextures[iImageListIndex].imageID );
+                            // TextureLimbStage alone changes the runtime image but
+                            // leaves the original FBX (often .dds) stage name in
+                            // the DBO. TextureLimbStageEx also records the real
+                            // PNG/DDS filename, as verified by the Serine case.
+                            if (strlen(pLimbTextureName.Get()) < MAX_STRING)
+                                TextureLimbStageEx(t.importer.objectnumber, tLimbIndex,
+                                    iColorStage, t.importerTextures[iImageListIndex].imageID,
+                                    pLimbTextureName.Get());
+                            else
+                                TextureLimbStage(t.importer.objectnumber, tLimbIndex,
+                                    iColorStage, t.importerTextures[iImageListIndex].imageID);
 
 							// find and load any associated PBR textures for this color texture choice
 							if ( bExpandOutPBRTextureSet == true )
@@ -1651,6 +1714,13 @@ void importer_changeshader ( LPSTR pNewShaderFilename )
 
 void importer_loadmodel ( void )
 {
+    // Keep the experimental GLB bridge in source, but reject GLB before
+    // importer_init() or any engine state is touched. FBX remains enabled.
+    if (PWImport::EndsWithI(t.timporterfile_s.Get(), ".glb"))
+    {
+        popup_text("GLB importing is temporarily disabled in PW Edition. Use FBX.");
+        return;
+    }
 	// user prompt when loading model in
 	popup_text("importing and converting model");
 
@@ -1686,7 +1756,8 @@ void importer_loadmodel ( void )
 
 	// check if importing an FBX for first time
 	bool bHasFBXExtension = false;
-	if ( strnicmp ( t.importer.objectFilename.Get() + strlen(t.importer.objectFilename.Get()) - 4, ".fbx", 4 ) == NULL ) bHasFBXExtension = true;
+	if ( PWImport::EndsWithI(t.importer.objectFilename.Get(), ".fbx") ||
+         PWImport::EndsWithI(t.importer.objectFilename.Get(), ".glb") ) bHasFBXExtension = true;
 	if ( bHasFBXExtension == true && g_iFirstTimeFBXImport == 0 )
 	{
 		// set-up importer for FBX friendly import settings
@@ -1698,20 +1769,35 @@ void importer_loadmodel ( void )
 
 	//  load model specified by timporterfile$
 	g_bLoadedFBXModel = false;
+    pwGLBTextureDirectory.clear();
 	t.importer.objectnumber=g.importermenuobjectoffset+1;
 
 	t.importer.objectnumberpreeffectcopy=g.importermenuobjectoffset+3;
 	t.strwork = ""; t.strwork = t.strwork + t.importer.objectFileOriginalPath + t.importer.objectFilename;
 	if ( FileExist ( t.strwork.Get() ) ) 
 	{
-		if ( strnicmp ( t.strwork.Get() + strlen(t.strwork.Get()) - 4, ".fbx", 4 )==NULL )
+        if ( PWGLB::IsGLB(t.strwork.Get()) )
+        {
+            if (!PW_LoadGLBIntoImporter(t.strwork.Get(), t.importer.objectnumber))
+            {
+                // Do not silently substitute a cube for a failed GLB import.
+                importer_free();
+                t.importer.importerActive = 0;
+                #if defined(ENABLEIMGUI) && !defined(USEOLDIDE)
+                bImporter_Window = false;
+                #endif
+                return;
+            }
+            g_bLoadedFBXModel = true;
+        }
+		else if ( PWImport::EndsWithI(t.strwork.Get(), ".fbx") )
 		{
 			extern bool g_bOverrideXCacheWhenUsingImporter;
 			g_bOverrideXCacheWhenUsingImporter = true;
 			LoadFBX ( t.strwork.Get(), t.importer.objectnumber );
 			g_bOverrideXCacheWhenUsingImporter = false;
 			//SetObjectRenderMatrixMode ( t.importer.objectnumber, 1 );
-			g_bLoadedFBXModel = true;
+			g_bLoadedFBXModel = ObjectExist(t.importer.objectnumber) == 1;
 		}
 		else
 		{
@@ -1724,11 +1810,27 @@ void importer_loadmodel ( void )
 		t.strwork = ""; t.strwork = t.strwork + g.fpscrootdir_s + "\\Files\\"+t.importer.objectFilename;
 		if (  FileExist( t.strwork.Get() ) ) 
 		{
-			if ( strnicmp ( t.strwork.Get() + strlen(t.strwork.Get()) - 4, ".fbx", 4 )==NULL )
+            if ( PWGLB::IsGLB(t.strwork.Get()) )
+            {
+                if (!PW_LoadGLBIntoImporter(t.strwork.Get(), t.importer.objectnumber))
+                {
+                    importer_free();
+                    t.importer.importerActive = 0;
+                    #if defined(ENABLEIMGUI) && !defined(USEOLDIDE)
+                    bImporter_Window = false;
+                    #endif
+                    return;
+                }
+                g_bLoadedFBXModel = true;
+            }
+			else if ( PWImport::EndsWithI(t.strwork.Get(), ".fbx") )
 			{
+                extern bool g_bOverrideXCacheWhenUsingImporter;
+                g_bOverrideXCacheWhenUsingImporter = true;
 				LoadFBX ( t.strwork.Get(), t.importer.objectnumber );
+                g_bOverrideXCacheWhenUsingImporter = false;
 				//SetObjectRenderMatrixMode ( t.importer.objectnumber, 1 );
-				g_bLoadedFBXModel = true;
+				g_bLoadedFBXModel = ObjectExist(t.importer.objectnumber) == 1;
 			}
 			else
 			{
@@ -1738,11 +1840,46 @@ void importer_loadmodel ( void )
 		}
 		else
 		{
+            if (PWGLB::IsGLB(t.importer.objectFilename.Get()) ||
+                PWImport::EndsWithI(t.importer.objectFilename.Get(), ".fbx"))
+            {
+                popup_text("FBX/GLB source file is missing; no model was imported.");
+                importer_free();
+                t.importer.importerActive = 0;
+                #if defined(ENABLEIMGUI) && !defined(USEOLDIDE)
+                bImporter_Window = false;
+                #endif
+                return;
+            }
 			MakeObjectCube (  t.importer.objectnumber,100 );
 		}
 	}
 
-	// 111118 - if import fails for any reason, ensure no crash
+	// PW Edition: the old FBX importer could fail while leaving a registered
+    // object (or the old importer would substitute a cube). That produces a
+    // thumbnail and an FPE for a NON-EXISTENT character. Reject it before the
+    // size calculation: a zero-sized object leads to infinite camera scale.
+    const bool pwModernImport = PWImport::EndsWithI(t.importer.objectFilename.Get(), ".fbx")
+                            || PWImport::EndsWithI(t.importer.objectFilename.Get(), ".glb");
+    if (pwModernImport)
+    {
+        const PWImportedGeometry::Report pwGeometry =
+            PWImportedGeometry::Inspect(ObjectExist(t.importer.objectnumber)
+                ? GetObjectData(t.importer.objectnumber) : nullptr);
+        if (!pwGeometry.usable)
+        {
+            OutputDebugStringA(("PW IMPORT FAILURE: " + pwGeometry.error + "\n").c_str());
+            popup_text("FBX/GLB import failed: no mesh geometry. No entity was saved.");
+            importer_free();
+            t.importer.importerActive = 0;
+            #if defined(ENABLEIMGUI) && !defined(USEOLDIDE)
+            bImporter_Window = false;
+            #endif
+            return;
+        }
+    }
+
+    // 111118 - if import fails for any reason, ensure no crash
 	if ( ObjectExist ( t.importer.objectnumber ) == 0 )
 	{
 		MakeObjectCube (  t.importer.objectnumber,100 );
@@ -1802,6 +1939,22 @@ void importer_loadmodel ( void )
 	if (  ObjectSizeZ (t.importer.objectnumber,2) > t.tObjectSize_f  ) t.tObjectSize_f = ObjectSizeZ (t.importer.objectnumber,2);
 	t.importer.originalObjectSize = t.tObjectSize_f;
 
+	// PW Edition: never divide by a zero / nonfinite FBX bound and then
+    // manufacture a green thumbnail for an invisible entity.
+    const float pwSizeX = ObjectSizeX(t.importer.objectnumber, 2);
+    const float pwSizeY = ObjectSizeY(t.importer.objectnumber, 2);
+    const float pwSizeZ = ObjectSizeZ(t.importer.objectnumber, 2);
+    if (pwModernImport && !PWImportedGeometry::SensibleExtent(pwSizeX, pwSizeY, pwSizeZ))
+    {
+        OutputDebugStringA("PW IMPORT FAILURE: loaded model has zero or invalid bounds.\n");
+        popup_text("FBX/GLB model has invalid size/bounds; cannot create a placeable entity.");
+        importer_free();
+        t.importer.importerActive = 0;
+        #if defined(ENABLEIMGUI) && !defined(USEOLDIDE)
+        bImporter_Window = false;
+        #endif
+        return;
+    }
 	//  Check the size and adjust scale to fit in view
 	t.tScale = ( 300.00 / t.tObjectSize_f ) * 100.0;
 	t.tScale = t.tScale * t.importer.scaleMulti;
@@ -1927,80 +2080,86 @@ void importer_loadmodel ( void )
 			t.importerTextures[tCount].iAssociatedBaseImage = 0;
 		}
 
-		// first check if importer has textures from FBX conversion
+		// Resolve converted FBX materials without depending on Blender/Mixamo
+		// absolute texture paths. DDS and PNG remain supported side-by-side.
 		cstr sOldDir = GetDir();
 		SetDir(cstr(g.rootdir_s+"importer\\temp").Get());
-		bool bUseTexturesFromConversion = false;
 		sObject* pObject = GetObjectData ( t.importer.objectnumber );
-		if ( pObject )
+		if ( pObject && pObject->ppMeshList )
 		{
 			tCount = 0;
+			const auto fileExists = [](const std::string& path) -> bool
+			{
+				const DWORD attrs = GetFileAttributesA(path.c_str());
+				return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
+			};
 			for ( int iMesh = 0; iMesh < pObject->iMeshCount; iMesh++ )
 			{
 				sMesh* pMesh = pObject->ppMeshList[iMesh];
+				if (!pMesh || !pMesh->pTextures) continue; // FBX can contain empty meshes
 				int iStoreImageSlotIndexForBase = -1;
 				for ( int iTextureStage = 0; iTextureStage < pMesh->dwTextureCount; iTextureStage++ )
 				{
-					int iSlotUsed = -1;
-					cstr pTextureFile = pMesh->pTextures[iTextureStage].pName;
-					if ( FileExist ( pTextureFile.Get() ) == 0 )
+					int iSlotUsed = 0;
+					const char* referencedName = pMesh->pTextures[iTextureStage].pName;
+					const std::string reference = referencedName ? referencedName : "";
+                    // GLB conversion uses importer/temp/pw_glb_<pid>_<tick>/,
+                    // not importer/temp directly. Search it first; then the
+                    // original FBX/GLB folder; finally Classic's temp folder.
+                    std::string found;
+                    if (!pwGLBTextureDirectory.empty())
+                        found = PWImport::FindTexture(pwGLBTextureDirectory, reference, fileExists);
+                    if (found.empty())
+                        found = PWImport::FindTexture(t.importer.objectFileOriginalPath.Get(), reference, fileExists);
+                    if (found.empty())
+                        found = PWImport::FindTexture(
+                            std::string(g.rootdir_s.Get()) + "importer\\temp\\", reference, fileExists);
+					if (!found.empty())
 					{
-						pTextureFile = Left ( pTextureFile.Get(), strlen(pTextureFile.Get())-4 );
-						pTextureFile = pTextureFile + ".dds";
+						cstr resolvedTexture;
+						resolvedTexture = found.c_str();
+						iSlotUsed = importer_addtexturefiletolist(resolvedTexture, resolvedTexture, &tCount);
 					}
-					if ( FileExist ( pTextureFile.Get() ) == 1 )
+					else if (!reference.empty())
 					{
-						cstr pAbsoluteFile = g.rootdir_s + "importer\\temp\\" + pTextureFile;
-						iSlotUsed = importer_addtexturefiletolist ( pAbsoluteFile.Get(), pAbsoluteFile.Get(), &tCount );
-						bUseTexturesFromConversion = true;
+						// Keep a visible missing reference in the importer instead of
+						// silently dropping material stages during FBX import.
+						const std::string expected = PWImport::Folder(t.importer.objectFileOriginalPath.Get())
+							+ PWImport::BaseName(reference);
+						cstr resolvedTexture;
+						resolvedTexture = expected.c_str();
+						iSlotUsed = importer_addtexturefiletolist(resolvedTexture, resolvedTexture, &tCount);
 					}
+					#ifdef ENABLEIMGUI
 					else
 					{
-						// FBX conversion had no textures produced, so add texture filename directly to importer image list
-						// which we can then use later to find associate texture files
-						if ( strlen ( pMesh->pTextures[iTextureStage].pName ) > 0 )
-						{
-							cstr pAbsoluteFile = t.importer.objectFileOriginalPath + pMesh->pTextures[iTextureStage].pName;
-							iSlotUsed = importer_addtexturefiletolist ( pAbsoluteFile.Get(), pAbsoluteFile.Get(), &tCount );
-						}
-						#ifdef ENABLEIMGUI
-						else 
-						{
-							//PE:Some models have empty texture field, just add blank.
-							//PE:We should always have one , so user can change the texture. (even if not found).
-							cstr pAbsoluteFile = t.importer.objectFileOriginalPath + "blank";
-							iSlotUsed = importer_addtexturefiletolist(pAbsoluteFile.Get(), pAbsoluteFile.Get(), &tCount);
-						}
-						#endif
+						const std::string placeholder = PWImport::Folder(t.importer.objectFileOriginalPath.Get()) + "blank";
+						cstr resolvedTexture;
+						resolvedTexture = placeholder.c_str();
+						iSlotUsed = importer_addtexturefiletolist(resolvedTexture, resolvedTexture, &tCount);
 					}
-					if ( iSlotUsed > -1 )
+					#endif
+					if (iSlotUsed > 0)
 					{
-						if ( iTextureStage == 0 ) 
-						{
-							// base texture (color)
+						if (iTextureStage == 0)
 							iStoreImageSlotIndexForBase = iSlotUsed;
-						}
 						else
 						{
-							// associate other stages to above base stage
 							t.importerTextures[iSlotUsed].iOptionalStage = iTextureStage;
 							t.importerTextures[iSlotUsed].iAssociatedBaseImage = iStoreImageSlotIndexForBase;
 						}
 					}
 				}
 			}
-			SetDir(sOldDir.Get());
 		}
-		if ( bUseTexturesFromConversion == true )
-		{
-			// if model did not have its own textures, texture with external ones next to FBX model
-			importer_load_textures_finish ( tCount, true ); // add cube mapping texture stage only
-		}
-		else
-		{
-			// if model did not have its own textures, texture with external ones next to FBX model
-			importer_load_textures_finish ( tCount, false ); // texture object from import image texture list
-		}
+		// Always restore the working folder, including when the model is invalid.
+		SetDir(sOldDir.Get());
+        // Relink and APPLY the resolved albedo/normal textures. The old
+        // cube-map-only path did not replace the stale base texture stage
+        // (SerineAlbidoIdle.dds) even when SerineAlbidoIdle.png existed.
+        // This also updates native stage names via TextureLimbStageEx above,
+        // so saved DBO references match the files copied beside the FPE.
+        importer_load_textures_finish(tCount, false);
 	}
 	else
 	{
@@ -2255,6 +2414,72 @@ void imgui_importer_loop(void)
 			}
 			break;
 		}
+        case 5: // Model Importer 2 M2: safe texture replacement for a chosen legacy material slot
+        {
+            iDelayedExecute = 0;
+            const int slot = iDelayedExecuteSelection;
+            if (!PWMaterialRelink::ValidSlot(slot, t.tcounttextures, IMPORTERTEXTURESMAX))
+            {
+                popup_text("Select a valid material slot before replacing its texture.");
+                break;
+            }
+            // Use the existing GameGuru file picker. Unlike the original
+            // replace operation, stage a new image without deleting the old
+            // image or changing the material until the load succeeds.
+            #ifdef _WIN64
+            t.tFileName_s = openFileBox("All Files\0*.*\0DDS\0*.dds\0PNG\0*.png\0JPEG\0*.jpg\0TGA\0*.tga\0BMP\0*.bmp\0", "", "Replace Material Texture", "*.*", IMPORTEROPENFILE);
+            #else
+            t.tFileName_s = openFileBox("All Files|*.*|DDS|*.dds|PNG|*.png|JPEG|*.jpg|TGA|*.tga|BMP|*.bmp|", "", "Replace Material Texture", ".dds", IMPORTEROPENFILE);
+            #endif
+            if (t.tFileName_s == "Error") break;
+            const std::string chosen = t.tFileName_s.Get();
+            if (!PWMaterialRelink::SupportedTexture(chosen) || FileExist(t.tFileName_s.Get()) != 1)
+            {
+                popup_text("Choose an existing DDS, PNG, JPG, TGA or BMP texture.");
+                break;
+            }
+            int stagedImage = g.importermenuimageoffset + 15;
+            int attempts = 0;
+            while (attempts < 50000 && ImageExist(stagedImage) == 1)
+            {
+                ++stagedImage;
+                ++attempts;
+            }
+            if (attempts == 50000)
+            {
+                popup_text("No free image ID for replacement texture.");
+                break;
+            }
+            LoadImage(t.tFileName_s.Get(), stagedImage);
+            if (ImageExist(stagedImage) != 1)
+            {
+                popup_text("Texture could not be loaded; original material retained.");
+                break;
+            }
+            const int originalImage = t.importerTextures[slot].imageID;
+            t.importerTextures[slot].fileName = t.tFileName_s;
+            t.importerTextures[slot].imageID = stagedImage;
+            int populatedSlots = 0;
+            for (int i = 1; i < IMPORTERTEXTURESMAX; ++i)
+                if (strlen(t.importerTextures[i].fileName.Get()) > 0) ++populatedSlots;
+            if (populatedSlots == 1)
+                t.importer.objectFPE.textured = t.tFileName_s;
+            // Keep iOptionalStage / iAssociatedBaseImage and source skeleton
+            // untouched. The existing importer owns preview/DBO/FPE output.
+            importer_applyimagelisttextures(false, slot, false);
+            importer_recreate_texturesprites();
+            // An image can be shared by several Classic importer slots.
+            // Do not destroy it while any other slot still references it.
+            bool oldImageIsShared = false;
+            for (int i = 1; i < IMPORTERTEXTURESMAX; ++i)
+                if (i != slot && t.importerTextures[i].imageID == originalImage)
+                    oldImageIsShared = true;
+            if (!oldImageIsShared && originalImage > 0
+                && originalImage != stagedImage && ImageExist(originalImage) == 1)
+                DeleteImage(originalImage);
+            iImporterGenerateThumb = 0;
+            break;
+        }
 		case 3: //Save entity
 		{
 			iDelayedExecute = 0;
@@ -2394,6 +2619,254 @@ void imgui_importer_loop(void)
 
 			ImGui::Indent(-10);
 		}
+
+        // Model Importer 2 (M1): explicit, read-only preflight. No legacy
+        // importer save path, material slot or bone data is changed by this UI.
+        if (ImGui::CollapsingHeader("Model Importer 2 - Preflight"))
+        {
+            static PWAssetManifest::Manifest pwAssetReport;
+            static bool pwAssetReportReady = false;
+            static int pwAssetReportObject = -1;
+            static std::string pwAssetReportSource;
+            const int currentObject = t.importer.objectnumber;
+            // The original folder and filename are stored separately by Classic.
+            // Preserve both in the M1 report and snapshot identity so loading a
+            // different model from the same folder does not reuse a stale report.
+            const char* pwOriginalDirectory = t.importer.objectFileOriginalPath.Get();
+            const char* pwObjectFilename = t.importer.objectFilename.Get();
+            const std::string currentSource =
+                std::string(pwOriginalDirectory ? pwOriginalDirectory : "") +
+                (pwObjectFilename ? pwObjectFilename : "");
+            ImGui::TextWrapped("Inspect meshes, frame hierarchy, material paths and clips before export.");
+            if (ImGui::Button("Inspect loaded model##PWImporter2"))
+            {
+                const auto fileExists = [](const std::string& filename) -> bool {
+                    const DWORD attr = GetFileAttributesA(filename.c_str());
+                    return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) == 0;
+                };
+                pwAssetReport = PWAssetManifest::Inspect(
+                    GetObjectData(currentObject), currentSource,
+                    std::string(g.rootdir_s.Get()) + "importer\\temp\\", fileExists);
+                pwAssetReportObject = currentObject;
+                pwAssetReportSource = currentSource;
+                pwAssetReportReady = true;
+            }
+            if (pwAssetReportReady &&
+                pwAssetReportObject == currentObject &&
+                pwAssetReportSource == currentSource)
+            {
+                const PWAssetManifest::Manifest& report = pwAssetReport;
+                ImGui::Text("Meshes: %d | Frames: %d | Clips: %d",
+                    (int)report.meshes.size(), (int)report.frames.size(), (int)report.clips.size());
+                ImGui::Text("Material references: %d | Unresolved: %u",
+                    (int)report.textures.size(), report.unresolvedTextures);
+                ImGui::Text("Skin bone refs: %u", report.skinBoneReferences);
+                if (report.truncated)
+                    ImGui::TextWrapped("WARNING: Inspection was truncated by safety limits.");
+                if (ImGui::Button("Copy preflight manifest (JSON)"))
+                {
+                    const std::string json = PWAssetManifest::Json(report);
+                    ImGui::SetClipboardText(json.c_str());
+                }
+                if (ImGui::TreeNode("Meshes##PWImporter2"))
+                {
+                    int shown = 0;
+                    for (const auto& mesh : report.meshes)
+                    {
+                        if (shown++ >= 200) break;
+                        ImGui::BulletText("Mesh %d | vertices %u | bones %u | material stages %u",
+                            mesh.index, mesh.vertices, mesh.bones, mesh.materialStages);
+                    }
+                    if (report.meshes.size() > 200)
+                        ImGui::TextDisabled("Showing first 200 meshes; copy JSON for the complete snapshot.");
+                    ImGui::TreePop();
+                }
+                if (ImGui::TreeNode("Frame hierarchy##PWImporter2"))
+                {
+                    int shown = 0;
+                    for (const auto& frame : report.frames)
+                    {
+                        if (shown++ >= 200) break;
+                        ImGui::BulletText("%s (parent: %s)", frame.name.c_str(),
+                            frame.parent.empty() ? "root" : frame.parent.c_str());
+                    }
+                    if (report.frames.size() > 200)
+                        ImGui::TextDisabled("Showing first 200 frames; copy JSON for the complete snapshot.");
+                    ImGui::TreePop();
+                }
+                if (ImGui::TreeNode("Material references##PWImporter2"))
+                {
+                    int shown = 0;
+                    for (const auto& texture : report.textures)
+                    {
+                        if (shown++ >= 200) break;
+                        ImGui::BulletText("Mesh %d / stage %d: %s",
+                            texture.mesh, texture.stage,
+                            texture.reference.empty() ? "(unnamed)" : texture.reference.c_str());
+                        if (!texture.reference.empty())
+                            ImGui::TextWrapped("   %s",
+                                texture.found ? texture.resolved.c_str() : "Unresolved in source/converter folder");
+                    }
+                    if (report.textures.size() > 200)
+                        ImGui::TextDisabled("Showing first 200 texture stages; copy JSON for the complete snapshot.");
+                    ImGui::TreePop();
+                }
+                if (ImGui::TreeNode("Animation clips##PWImporter2"))
+                {
+                    int shown = 0;
+                    for (const auto& clip : report.clips)
+                    {
+                        if (shown++ >= 200) break;
+                        ImGui::BulletText("%s | %llu ticks | %u tracks",
+                            clip.name.c_str(), clip.durationTicks, clip.tracks);
+                    }
+                    if (report.clips.size() > 200)
+                        ImGui::TextDisabled("Showing first 200 clips; copy JSON for the complete snapshot.");
+                    ImGui::TreePop();
+                }
+                if (!report.warnings.empty() && ImGui::TreeNode("Preflight warnings##PWImporter2"))
+                {
+                    for (const auto& warning : report.warnings)
+                        ImGui::BulletText("%s", warning.c_str());
+                    ImGui::TreePop();
+                }
+                ImGui::TextWrapped("Read-only snapshot. Inspect again after edits/reload. UVs, units, axes, native playback and export are not yet validated.");
+            }
+            else
+                ImGui::TextDisabled("Click Inspect loaded model to collect a snapshot.");
+        }
+
+        // Model Importer 2 M2: expose Classic's real texture slot assignments
+        // and allow a safely staged replacement. This is a manual opt-in path;
+        // it does not rewrite the underlying mesh/skeleton or source FBX.
+        if (ImGui::CollapsingHeader("Model Importer 2 - Materials & Relinking"))
+        {
+            static int pwSelectedMaterialSlot = 1;
+            const int maxSlot = t.tcounttextures < (IMPORTERTEXTURESMAX - 1)
+                ? t.tcounttextures : (IMPORTERTEXTURESMAX - 1);
+            if (maxSlot < 1)
+            {
+                ImGui::TextDisabled("No importer texture slots available for this model.");
+            }
+            else
+            {
+                if (pwSelectedMaterialSlot < 1 || pwSelectedMaterialSlot > maxSlot)
+                    pwSelectedMaterialSlot = 1;
+                ImGui::SliderInt("Texture slot##PWImporter2", &pwSelectedMaterialSlot, 1, maxSlot);
+                const char* stored = t.importerTextures[pwSelectedMaterialSlot].fileName.Get();
+                const std::string reference = stored ? stored : "";
+                ImGui::TextWrapped("Slot %d / %d | native texture stage %d",
+                    pwSelectedMaterialSlot, maxSlot,
+                    t.importerTextures[pwSelectedMaterialSlot].iOptionalStage);
+                ImGui::TextWrapped("Assigned file: %s", reference.empty() ? "(none)" : reference.c_str());
+                const bool exists = !reference.empty() && FileExist((LPSTR)reference.c_str()) == 1;
+                ImGui::TextUnformatted(exists ? "Texture file found." : "Texture file missing or unassigned.");
+                const char* originalDirectoryName = t.importer.objectFileOriginalPath.Get();
+                const std::string originalDirectory = originalDirectoryName ? originalDirectoryName : "";
+                const auto fileExists = [](const std::string& filename) -> bool {
+                    const DWORD attr = GetFileAttributesA(filename.c_str());
+                    return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) == 0;
+                };
+                const std::string suggestion = PWMaterialRelink::Suggest(
+                    reference, originalDirectory,
+                    std::string(g.rootdir_s.Get()) + "importer\\temp\\", fileExists);
+                if (!suggestion.empty())
+                {
+                    ImGui::TextWrapped("Existing candidate: %s", suggestion.c_str());
+                    if (ImGui::Button("Copy candidate path##PWImporter2"))
+                        ImGui::SetClipboardText(suggestion.c_str());
+                }
+                if (PWMaterialRelink::ValidSlot(
+                        pwSelectedMaterialSlot, t.tcounttextures, IMPORTERTEXTURESMAX)
+                    && ImGui::Button("Browse and replace selected slot##PWImporter2"))
+                {
+                    iDelayedExecuteSelection = pwSelectedMaterialSlot;
+                    iDelayedExecute = 5; // deferred: avoid file dialogs during an ImGui draw
+                }
+                ImGui::TextWrapped("Replacement preserves the original material if loading fails. The existing Classic importer still applies preview and export textures.");
+                ImGui::TextDisabled("Stage-level editing, UV inspection and material reassignment remain under development.");
+            }
+        }
+
+        // PW Edition: inspect native skeletons without overwriting bone names,
+        // bind poses or source animation clips.
+        if (ImGui::CollapsingHeader("Skeleton & Animation"))
+        {
+            const PWSkeletalAudit::Snapshot rig=PWSkeletalAudit::Inspect(GetObjectData(t.importer.objectnumber));
+            ImGui::Text("Meshes: %d  Skinned: %d",rig.meshes,rig.skinnedMeshes);
+            ImGui::Text("Frames: %d  Skin bone refs: %d",rig.frames,rig.boneRefs);
+            ImGui::Text("Animation sets: %d  Bone tracks: %d",rig.animSets,rig.animTracks);
+            ImGui::Text("Animation keys: %llu",rig.animKeys);
+            if (rig.hasMixamo)
+            {
+                ImGui::Text("Mixamo -> Bip01 preview: %d mapped",rig.mappedMixamo);
+                if (!rig.collisions.empty())
+                    ImGui::TextWrapped("Warning: multiple source names map to the same Bip01 target.");
+                if (!rig.unmapped.empty())
+                    ImGui::TextWrapped("Some bones have no Bip01 mapping. Original animation is left intact.");
+            }
+            else if (rig.hasBip01)
+                ImGui::TextUnformatted("Rig naming: GameGuru Bip01");
+            else
+                ImGui::TextUnformatted("Rig naming: static or custom");
+            if (ImGui::TreeNode("Skin bones"))
+            {
+                for (size_t n=0;n<rig.boneNames.size();++n)
+                {
+                    const char* mapped=PWSkeletalAudit::MapMixamo(rig.boneNames[n].c_str());
+                    if (mapped) ImGui::BulletText("%s -> %s",rig.boneNames[n].c_str(),mapped);
+                    else ImGui::BulletText("%s",rig.boneNames[n].c_str());
+                }
+                ImGui::TreePop();
+            }
+            if (!rig.unmapped.empty() && ImGui::TreeNode("Unmapped source bones"))
+            {
+                for (size_t n=0;n<rig.unmapped.size();++n)
+                    ImGui::BulletText("%s",rig.unmapped[n].c_str());
+                ImGui::TreePop();
+            }
+            // Deeper scans are explicit: rehashing all skin weights and
+            // animation keys every ImGui frame would stall large imports.
+            static int pwLastAuditObject=-1;
+            static PWSkeletalIntegrity::Audit pwLastAudit;
+            static bool pwHaveAudit=false;
+            if (ImGui::Button("Scan skin weights and animation clips"))
+            {
+                pwLastAudit=PWSkeletalIntegrity::Inspect(GetObjectData(t.importer.objectnumber));
+                pwLastAuditObject=t.importer.objectnumber;
+                pwHaveAudit=true;
+            }
+            if (pwHaveAudit && pwLastAuditObject==t.importer.objectnumber)
+            {
+                ImGui::Text("Skin influences: %llu",pwLastAudit.influences);
+                ImGui::Text("Animation clips: %d",(int)pwLastAudit.clips.size());
+                if (pwLastAudit.HasProblems())
+                    ImGui::TextWrapped("Skin/clip scan found invalid indices, weights, incomplete buffers, or normalization issues.");
+                if (pwLastAudit.invalidVertexIndices)
+                    ImGui::Text("Invalid vertex indices: %u",pwLastAudit.invalidVertexIndices);
+                if (pwLastAudit.invalidWeights)
+                    ImGui::Text("Invalid bone weights: %u",pwLastAudit.invalidWeights);
+                if (pwLastAudit.unnormalizedVertices)
+                    ImGui::Text("Non-normalized influenced vertices: %u",pwLastAudit.unnormalizedVertices);
+                if (pwLastAudit.missingBuffers)
+                    ImGui::Text("Missing animation/skin buffers: %u",pwLastAudit.missingBuffers);
+                if (pwLastAudit.excessiveData)
+                    ImGui::Text("Oversized buffers skipped: %u",pwLastAudit.excessiveData);
+                if (ImGui::TreeNode("Source animation clips"))
+                {
+                    for (size_t n=0;n<pwLastAudit.clips.size();++n)
+                    {
+                        const PWSkeletalIntegrity::Clip& clip=pwLastAudit.clips[n];
+                        ImGui::BulletText("%s | duration: %llu ticks | tracks: %u | keys: %llu",
+                            clip.name.c_str(),clip.duration,clip.tracks,clip.keys);
+                    }
+                    ImGui::TreePop();
+                }
+                ImGui::TextWrapped("Scan is a snapshot. Click again after changing or reloading the model.");
+            }
+            ImGui::TextWrapped("The old 'Use Uber Animations' option replaces source animation keys; it is not general retargeting.");
+            ImGui::TextWrapped("Optional DBO verification: set GGCPW_VERIFY_SKELETON_SAVE=1 before starting the editor.");
+        }
 
 		if (ImGui::StyleCollapsingHeader("Materials", ImGuiTreeNodeFlags_DefaultOpen))
 		{
@@ -5026,31 +5499,16 @@ void importer_load_textures ( void )
 			//  found texture specified in imported model
 			t.tSourceName_s = t.tthisfile_s;
 
-			//  check if texture file exists alonside model file
-			char pFindFile[512];
-			t.tFileName_s = t.importer.objectFileOriginalPath + t.tSourceName_s;
-			strcpy ( pFindFile, t.tFileName_s.Get() );
-			if ( FileExist(pFindFile)  ==  0 ) 
+			// PW Edition: avoid unsafe fixed-size strcpy/strcat on Blender's
+			// embedded absolute texture paths. Keep DDS/PNG companions available.
+			const auto imageFileExists = [](const std::string& path) -> bool
 			{
-				// if not, try just the filename itself (no path)
-				int iFoundFilename = -1;
-				for ( int n = strlen(pFindFile)-1; n > 0; n-- )
-				{
-					if ( pFindFile[n] == '\\' || pFindFile[n] == '/' )
-					{
-						iFoundFilename = n;
-						break;
-					}
-				}
-				if ( iFoundFilename != -1 )
-				{
-					char pFilenameOnly[512];
-					strcpy ( pFilenameOnly, pFindFile+iFoundFilename+1 );
-					strcpy ( pFindFile, t.importer.objectFileOriginalPath.Get() );
-					strcat ( pFindFile, pFilenameOnly );
-				}
-			}
-			t.tFileName_s = pFindFile;
+				DWORD attrs = GetFileAttributesA(path.c_str());
+				return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
+			};
+			const std::string pwTexture = PWImport::FindTexture(
+				t.importer.objectFileOriginalPath.Get(), t.tSourceName_s.Get(), imageFileExists);
+			t.tFileName_s = pwTexture.empty() ? "" : pwTexture.c_str();
 
 			//  ensure file is not a path or contains invalid characters
 			if ( strcmp ( Right(t.tFileName_s.Get(),1) , "/" ) == 0 || strcmp ( Right(t.tFileName_s.Get(),1) , "\\" ) == 0  )  t.tFileName_s = "";
@@ -5131,13 +5589,15 @@ void importer_load_textures ( void )
 			}
 			if (  t.tlimbname_s != "" ) 
 			{
-				t.tSourceName_s=t.tlimbname_s;
-				t.tFileName_s=t.importer.objectFileOriginalPath+t.tSourceName_s;
-				if (  FileExist(t.tFileName_s.Get()) == 0 ) 
+				const auto imageFileExists = [](const std::string& path) -> bool
 				{
-					t.tSourceName_s = ""; t.tSourceName_s=t.tSourceName_s+Left(t.tlimbname_s.Get(),Len(t.tlimbname_s.Get())-4)+".dds";
-					t.tFileName_s=t.importer.objectFileOriginalPath+t.tSourceName_s;
-				}
+					DWORD attrs = GetFileAttributesA(path.c_str());
+					return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
+				};
+				const std::string pwTexture = PWImport::FindTexture(
+					t.importer.objectFileOriginalPath.Get(), t.tlimbname_s.Get(), imageFileExists);
+				t.tSourceName_s = PWImport::BaseName(pwTexture).c_str();
+				t.tFileName_s = pwTexture.c_str();
 				if (  FileExist(t.tFileName_s.Get()) == 1 ) 
 				{
 					importer_addtexturefiletolist ( t.tFileName_s, t.tSourceName_s, &tCount );
@@ -6001,6 +6461,10 @@ void importer_quit_for_reload (LPSTR pOptionalCopyModelFile)
 void importer_quit (void)
 {
 	importer_quit_for_reload(NULL);
+    g_pwEnvironmentImportTarget = 0;
+    g_pwEnvironmentScalePct = 100.0f;
+    g_pwEnvironmentYawDeg = 0.0f;
+    g_pwEnvironmentName[0] = 0;
 }
 
 void ConvertWorldToRelative ( sFrame* pFrame, GGMATRIX* pStoreNewPoseFrames, GGMATRIX* pTraverseMatrix )
@@ -6033,9 +6497,92 @@ void ConvertWorldToRelative ( sFrame* pFrame, GGMATRIX* pStoreNewPoseFrames, GGM
 	}
 }
 
+// PW Edition: verify the normal DBO save/reload path only when explicitly
+// enabled, using an isolated scratch object that is immediately removed.
+static void PW_VerifySavedSkeleton(const char* path,
+    const PWSkeletalAudit::Snapshot& before,
+    const PWSkeletalIntegrity::Audit& deepBefore)
+{
+    if (!PWSkeletalAudit::VerifyEnabled() || !before.HasSkinOrAnimation()) return;
+    if (!path || !*path) return;
+    if (FileExist((LPSTR)path)==0)
+    {
+        OutputDebugStringA("PW Skeletal DBO WARNING: export file missing; validation not possible.\n");
+        popup_text("Skeletal DBO export missing - integrity not verified");
+        return;
+    }
+    const int scratch=findFreeObject();
+    LoadObject((LPSTR)path,scratch);
+    std::string problem;
+    if (ObjectExist(scratch)==1)
+    {
+        sObject* reloaded=GetObjectData(scratch);
+        const PWSkeletalAudit::Snapshot after=PWSkeletalAudit::Inspect(reloaded);
+        const PWSkeletalIntegrity::Audit deepAfter=PWSkeletalIntegrity::Inspect(reloaded);
+        problem=PWSkeletalAudit::Compare(before,after);
+        if (problem.empty())
+            problem=PWSkeletalIntegrity::Compare(deepBefore,deepAfter);
+        DeleteObject(scratch);
+    }
+    else problem="Could not reload saved DBO for skeletal verification";
+    if (!problem.empty())
+    {
+        const std::string output="PW Skeletal DBO WARNING: "+problem+" ("+path+")\n";
+        OutputDebugStringA(output.c_str());
+        popup_text("Skeletal DBO verification warning - see debug output");
+    }
+    else OutputDebugStringA("PW Skeletal DBO PASS: skin weights, bind transforms and animation payloads retained.\n");
+}
+
 #ifdef ENABLEIMGUI
 void importer_save_entity ( char *filename )
 {
+    if (g_pwEnvironmentImportTarget != PWEnvironment::Entity)
+    {
+        // Classic importer already displays the textured source mesh and
+        // has its scale/material/rotation tools. Export that SAME object to
+        // skybank or vegbank, not an ordinary entitybank FPE.
+        std::vector<std::string> importedTextures;
+        for (int n = 1; n < IMPORTERTEXTURESMAX; ++n)
+            if (t.importerTextures[n].imageID > 0 &&
+                t.importerTextures[n].fileName.Len() > 0)
+                importedTextures.push_back(t.importerTextures[n].fileName.Get());
+
+        std::string styleName = g_pwEnvironmentName;
+#if defined(ENABLEIMGUI) && !defined(USEOLDIDE)
+        if (styleName.empty() && cImportName[0]) styleName = cImportName;
+#endif
+        if (styleName.empty())
+        {
+            styleName = PWImport::BaseName(t.importer.objectFilename.Get());
+            const size_t dot = styleName.find_last_of('.');
+            if (dot != std::string::npos) styleName.resize(dot);
+        }
+        std::string error;
+        const int mode = g_pwEnvironmentImportTarget;
+        const std::string filesRoot = std::string(g.fpscrootdir_s.Get()) + "\\Files";
+        const bool saved = PWEnvironment::Save(
+            mode, styleName.c_str(), t.importer.objectnumber, importedTextures,
+            t.importer.objectFileOriginalPath.Get(), filesRoot,
+            g_pwEnvironmentScalePct, g_pwEnvironmentYawDeg, error);
+        if (!saved)
+        {
+            t.tSaveFile_s = "Error";
+            t.timportersaveon = 0;
+            popup_text((LPSTR)error.c_str());
+            return;
+        }
+        t.tSaveFile_s = styleName.c_str();
+        t.timportersaveon = 0;
+        extern void PWActivateImportedEnvironmentStyleFromImporter(int type, const char* style);
+        PWActivateImportedEnvironmentStyleFromImporter(mode, styleName.c_str());
+        g_pwEnvironmentImportTarget = 0;
+        t.importer.cancel = 1;
+        popup_text(mode == PWEnvironment::Sky
+            ? "Sky imported and added to the sky list."
+            : "Grass imported and added to vegetation styles.");
+        return;
+    }
 	//  Check if user folder exists, if not create it
 	t.strwork = ""; t.strwork = t.strwork + t.importer.startDir + "\\entitybank\\user";
 	if (  PathExist( t.strwork.Get() )  ==  0 ) 
@@ -6180,6 +6727,19 @@ void importer_save_entity ( char *filename )
 		t.importer.tFPESaveName = t.tArray[t.tArrayMarker-1] + ".fpe";
 		t.importer.objectFPE.model = t.tSaveFile_s;
 	}
+
+    // PW Edition: no FPE or thumbnail for a failed model with no vertices.
+    const PWImportedGeometry::Report pwSaveModel = PWImportedGeometry::Inspect(
+        ObjectExist(t.importer.objectnumber) ? GetObjectData(t.importer.objectnumber) : nullptr);
+    if (!pwSaveModel.usable)
+    {
+        OutputDebugStringA(("PW IMPORT SAVE BLOCKED: " + pwSaveModel.error + "\n").c_str());
+        popup_text("Import not saved: model contains no renderable geometry.");
+        t.tSaveFile_s = "Error";
+        t.timportersaveon = 0;
+        if (filename) SetDir(tOldDir.Get());
+        return;
+    }
 
 	// Just before save object, ensure all texture references don't include root path
 	sObject* pObject = GetObjectData ( t.importer.objectnumber );
@@ -6643,9 +7203,52 @@ void importer_save_entity ( char *filename )
 	// Save Object
 	if ( strcmp ( Lower(Right(t.tSaveFile_s.Get(),4)) , ".dbo" ) == 0 ) 
 	{
-		if ( FileExist (t.tSaveFile_s.Get()) == 1 ) DeleteAFile ( t.tSaveFile_s.Get() ) ;
+        const std::string pwTargetDBO = t.tSaveFile_s.Get();
+        const std::string pwBackupDBO = pwTargetDBO + ".pw-save-backup";
+        bool pwHaveBackup = false;
+        if (FileExist(t.tSaveFile_s.Get()) == 1)
+        {
+            if (!CopyFileA(pwTargetDBO.c_str(), pwBackupDBO.c_str(), TRUE))
+            {
+                popup_text("Import not saved: could not back up existing DBO.");
+                t.tSaveFile_s = "Error";
+                t.timportersaveon = 0;
+                if (filename) SetDir(tOldDir.Get());
+                return;
+            }
+            pwHaveBackup = true;
+            DeleteAFile(t.tSaveFile_s.Get());
+        }
 		ScaleObject (  t.importer.objectnumber,100,100,100 );
+		PWSkeletalAudit::Snapshot pwSkeletonBefore;
+		PWSkeletalIntegrity::Audit pwDeepBefore;
+		if (PWSkeletalAudit::VerifyEnabled())
+		{
+			sObject* pwObjectBefore=GetObjectData(t.importer.objectnumber);
+			pwSkeletonBefore=PWSkeletalAudit::Inspect(pwObjectBefore);
+			if (pwSkeletonBefore.HasSkinOrAnimation())
+				pwDeepBefore=PWSkeletalIntegrity::Inspect(pwObjectBefore);
+		}
 		SaveObject (  t.tSaveFile_s.Get(),t.importer.objectnumber );
+        WIN32_FILE_ATTRIBUTE_DATA pwSavedFileAttributes = {};
+        const bool pwValidOutput = GetFileAttributesExA(t.tSaveFile_s.Get(), GetFileExInfoStandard,
+            &pwSavedFileAttributes) != 0 && pwSavedFileAttributes.nFileSizeHigh == 0
+            && pwSavedFileAttributes.nFileSizeLow > 128;
+        if (!pwValidOutput)
+        {
+            OutputDebugStringA("PW IMPORT SAVE FAILED: DBO missing or empty after SaveObject.\n");
+            if (FileExist(t.tSaveFile_s.Get()) == 1) DeleteAFile(t.tSaveFile_s.Get());
+            if (pwHaveBackup) CopyFileA(pwBackupDBO.c_str(), pwTargetDBO.c_str(), FALSE);
+            popup_text("Import not saved: generated DBO missing or empty. Existing file restored if available.");
+            ScaleObject(t.importer.objectnumber, t.importer.objectScaleForEditing,
+                t.importer.objectScaleForEditing, t.importer.objectScaleForEditing);
+            t.tSaveFile_s = "Error";
+            t.timportersaveon = 0;
+            if (filename) SetDir(tOldDir.Get());
+            return;
+        }
+        if (pwHaveBackup) DeleteFileA(pwBackupDBO.c_str());
+		PW_VerifySavedSkeleton(t.tSaveFile_s.Get(),pwSkeletonBefore,pwDeepBefore);
 		ScaleObject (  t.importer.objectnumber,t.importer.objectScaleForEditing,t.importer.objectScaleForEditing,t.importer.objectScaleForEditing );
 	}
 	else
@@ -6951,26 +7554,39 @@ void importer_save_entity ( char *filename )
 	GG_GetRealPath(pRealSavethumb, 1);
 	t.strwork = ""; t.strwork = t.strwork + t.importer.objectFileOriginalPath + t.importer.objectFilename;
 	cstr pSourceBMP = cstr ( cstr(Left ( t.strwork.Get(), strlen(t.strwork.Get())-4)) + ".bmp" );
-	if ( FileExist ( pSourceBMP.Get() ) ) 
+    if (FileExist(pSourceBMP.Get()) && PWThumbnail::HasContent(pSourceBMP.Get()))
 	{
-		// if BMP already existed in source area, use that one
+        // Skip preexisting blank/green BMPs; they cannot be used as previews.
 		if ( FileExist ( pRealSavethumb ) == 1 ) DeleteAFile ( pRealSavethumb );
 		CopyFileA ( pSourceBMP.Get(), pRealSavethumb, FALSE );
 	}
 	else
 	{
-		if (GetImageExistEx(g.importermenuimageoffset + 50)) 
-		{
-			//Already generated so.
-			SaveImage(pRealSavethumb, g.importermenuimageoffset + 50);
-		}
-		else 
-		{
-			if (FileExist(pRealSavethumb) == 1) DeleteAFile(pRealSavethumb);
-			import_generate_thumb();
-			SaveImage(pRealSavethumb, g.importermenuimageoffset + 50);
-		}
-		DeleteImage(g.importermenuimageoffset + 50);
+        // PW Edition: the earlier cached thumbnail can contain terrain or a
+        // half-initialised green importer frame. Always render a fresh model
+        // preview after the native DBO has been verified and before the FPE
+        // appears in the asset browser.
+        if (GetImageExistEx(g.importermenuimageoffset + 50))
+            DeleteImage(g.importermenuimageoffset + 50);
+        import_generate_thumb();
+        if (GetImageExistEx(g.importermenuimageoffset + 50))
+        {
+            if (FileExist(pRealSavethumb) == 1) DeleteAFile(pRealSavethumb);
+            SaveImage(pRealSavethumb, g.importermenuimageoffset + 50);
+            DeleteImage(g.importermenuimageoffset + 50);
+            // A BMP can exist while containing only the green clear colour.
+            if (!PWThumbnail::HasContent(pRealSavethumb))
+            {
+                OutputDebugStringA("PW IMPORT THUMBNAIL: blank/solid-colour capture rejected.\n");
+                DeleteFileA(pRealSavethumb);
+                popup_text("Model saved, but thumbnail capture was blank. No invalid preview was retained.");
+            }
+        }
+        else
+        {
+            OutputDebugStringA("PW IMPORT THUMBNAIL: fresh preview generation failed; no fake image saved.\n");
+            popup_text("Model was saved, but thumbnail rendering failed; check the model importer preview.");
+        }
 	}
 
 	t.aspect_f=GetDesktopWidth() ; t.aspect_f=t.aspect_f/GetDesktopHeight();
@@ -6990,10 +7606,18 @@ void importer_save_entity ( char *filename )
 
 void import_generate_thumb(void)
 {
-	// generate new BMP thumb from scratch
-	CreateBitmap(32, 64, 64);
-	SetCurrentBitmap(32);
-	SetCameraAspect(1.0);
+    // The legacy editor rendered into a 64x64 offscreen bitmap. In the
+    // docked DX11 editor that switches the render target away from the scene
+    // camera: the subsequent 128px camera-surface capture can be empty/green.
+    // Capture from the existing camera target instead; keep Classic's 64px
+    // route unchanged for non-ImGui configurations.
+#if defined(ENABLEIMGUI) && !defined(USEOLDIDE)
+    SetCurrentBitmap(0);
+#else
+    CreateBitmap(32, 64, 64);
+    SetCurrentBitmap(32);
+#endif
+    SetCameraAspect(1.0);
 
 	//  Make a white background Box (  )
 	t.twhiteobj = 1;
@@ -7044,7 +7668,25 @@ void import_generate_thumb(void)
 	}
 	bool b6002 = false; if (ObjectExist(6002) == 1) { b6002 = GetVisible(6002); HideObject(6002); }
 	bool b6003 = false; if (ObjectExist(6003) == 1) { b6003 = GetVisible(6003); HideObject(6003); }
+    // The model must be included in this isolated capture even if the
+    // previous importer panel had hidden it for collision editing.
+    const bool pwWasModelVisible = ObjectExist(t.importer.objectnumber)
+        && GetVisible(t.importer.objectnumber);
+    if (ObjectExist(t.importer.objectnumber))
+        ShowObject(t.importer.objectnumber);
+#if defined(ENABLEIMGUI) && !defined(USEOLDIDE)
+    // Match the established PW scene-thumbnail routine (M-GridEdit.cpp):
+    // render camera 0 without ImGui overlays before grabbing its surface.
+    extern bool bImGuiInTestGame;
+    const bool pwWasImGuiSuspended = bImGuiInTestGame;
+    bImGuiInTestGame = true;
+    FastSync();
+    bImGuiInTestGame = pwWasImGuiSuspended;
+#else
 	Sync();
+#endif
+    if (!pwWasModelVisible && ObjectExist(t.importer.objectnumber))
+        HideObject(t.importer.objectnumber);
 	if (b6002 == true) ShowObject(6002);
 	if (b6003 == true) ShowObject(6003);
 	RotateObject(t.importerGridObject[8], 0, 0, 0);
@@ -7058,21 +7700,25 @@ void import_generate_thumb(void)
 	extern DBPRO_GLOBAL CCameraManager m_CameraManager;
 	DBPRO_GLOBAL tagCameraData* m_mycam;
 	m_mycam = m_CameraManager.GetData(0);
-	float thumbnail_dimenions = 128;
-	if (m_mycam)
-	{
-		//extern ImVec2 OldrenderTargetSize; //OldrenderTargetSize.x
-
-		float dw = GetDisplayWidth(); //GetChildWindowWidth(-1);
-		float dh = GetDisplayHeight(); //GetChildWindowHeight(-1);
-		float gi_rectw = (dw*0.5) -(thumbnail_dimenions*0.5);
-		float gi_recth = (dh*0.5) -(thumbnail_dimenions*0.5);
-		extern GlobStruct* g_pGlob;
-		LPGGSURFACE	pTmpSurface = g_pGlob->pCurrentBitmapSurface;
-		g_pGlob->pCurrentBitmapSurface = m_mycam->pCameraToImageSurface;
-		GrabImage(g.importermenuimageoffset + 50, gi_rectw, gi_recth, gi_rectw + thumbnail_dimenions, gi_recth + thumbnail_dimenions, 0);
-		g_pGlob->pCurrentBitmapSurface = pTmpSurface;
-	}
+    const float thumbnail_dimensions = 128.0f;
+    if (m_mycam && m_mycam->pCameraToImageSurface &&
+        m_mycam->viewPort3D.Width >= thumbnail_dimensions &&
+        m_mycam->viewPort3D.Height >= thumbnail_dimensions)
+    {
+        // Use the actual camera render-target viewport, just like the
+        // existing scene thumbnail capture in M-GridEdit.cpp. Child window
+        // or desktop sizes can point into the solid green clear region.
+        const float grabX = m_mycam->viewPort3D.Width * 0.5f - thumbnail_dimensions * 0.5f;
+        const float grabY = m_mycam->viewPort3D.Height * 0.5f - thumbnail_dimensions * 0.5f;
+        extern GlobStruct* g_pGlob;
+        LPGGSURFACE previous = g_pGlob->pCurrentBitmapSurface;
+        g_pGlob->pCurrentBitmapSurface = m_mycam->pCameraToImageSurface;
+        GrabImage(g.importermenuimageoffset + 50, grabX, grabY,
+            grabX + thumbnail_dimensions, grabY + thumbnail_dimensions, 0);
+        g_pGlob->pCurrentBitmapSurface = previous;
+    }
+    else
+        OutputDebugStringA("PW IMPORT THUMBNAIL: camera viewport/surface missing or smaller than 128px.\\n");
 #else
 	GrabImage(g.importermenuimageoffset + 50, 0, 0, 64, 64, 3);
 #endif
@@ -7754,7 +8400,17 @@ void importer_save_entity ( char *filename )
 	{
 		if ( FileExist (t.tSaveFile_s.Get()) == 1 ) DeleteAFile ( t.tSaveFile_s.Get() ) ;
 		ScaleObject (  t.importer.objectnumber,100,100,100 );
+		PWSkeletalAudit::Snapshot pwSkeletonBefore;
+		PWSkeletalIntegrity::Audit pwDeepBefore;
+		if (PWSkeletalAudit::VerifyEnabled())
+		{
+			sObject* pwObjectBefore=GetObjectData(t.importer.objectnumber);
+			pwSkeletonBefore=PWSkeletalAudit::Inspect(pwObjectBefore);
+			if (pwSkeletonBefore.HasSkinOrAnimation())
+				pwDeepBefore=PWSkeletalIntegrity::Inspect(pwObjectBefore);
+		}
 		SaveObject (  t.tSaveFile_s.Get(),t.importer.objectnumber );
+		PW_VerifySavedSkeleton(t.tSaveFile_s.Get(),pwSkeletonBefore,pwDeepBefore);
 		ScaleObject (  t.importer.objectnumber,t.importer.objectScaleForEditing,t.importer.objectScaleForEditing,t.importer.objectScaleForEditing );
 	}
 	else
@@ -8022,9 +8678,9 @@ void importer_save_entity ( char *filename )
 	// Save/Generate Thumbnail BMP
 	t.strwork = ""; t.strwork = t.strwork + t.importer.objectFileOriginalPath + t.importer.objectFilename;
 	cstr pSourceBMP = cstr ( cstr(Left ( t.strwork.Get(), strlen(t.strwork.Get())-4)) + ".bmp" );
-	if ( FileExist ( pSourceBMP.Get() ) ) 
+    if (FileExist(pSourceBMP.Get()) && PWThumbnail::HasContent(pSourceBMP.Get()))
 	{
-		// if BMP already existed in source area, use that one
+        // Skip preexisting blank/green BMPs; they cannot be used as previews.
 		if ( FileExist ( t.tSaveThumb_s.Get()) == 1 ) DeleteAFile ( t.tSaveThumb_s.Get() );
 		CopyFile ( pSourceBMP.Get(), t.tSaveThumb_s.Get(), FALSE );
 	}

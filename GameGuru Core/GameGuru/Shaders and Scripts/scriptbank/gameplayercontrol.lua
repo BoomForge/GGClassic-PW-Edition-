@@ -636,7 +636,9 @@ function gameplayercontrol.lookmove()
 	if ( GetGamePlayerStateCamAngleX()<-80 ) then SetGamePlayerStateCamAngleX(-80) end
 	if ( GetGamePlayerStateCamAngleX()>85 ) then SetGamePlayerStateCamAngleX(85) end
 
-	-- Handle player ducking
+	-- Native third person uses Bullet's actual crouch/stand state and validates clips.
+	-- FPS and older engines keep the original control path.
+	if not (PWNativeThirdPersonCrouch and PWNativeThirdPersonCrouch()) then
 	if ( g_PlrKeyC == 1 ) then 
 		SetGamePlayerStatePlayerDucking(1)
 	else
@@ -646,13 +648,16 @@ function gameplayercontrol.lookmove()
 		end
 	end
 
+	end -- legacy ducking fallback
+
 	--  third person can freeze player controls if MID-anim (such as jump) then
 	g_suspendplayercontrols=0
 	if ( GetGamePlayerControlThirdpersonEnabled() == 1 ) then 
 		-- if in middle of playcsi event, suspend controls until finished
 		SetGamePlayerStateCharAnimIndex(GetGamePlayerControlThirdpersonCharacterIndex())
 		if ( GetCharAnimStatePlayCsi(GetGamePlayerStateCharAnimIndex()) > 0 ) then 
-			if ( GetCharSeqTrigger(GetCharAnimStatePlayCsi(GetGamePlayerStateCharAnimIndex())) == 0 ) then 
+			if ( GetCharSeqTrigger(GetCharAnimStatePlayCsi(GetGamePlayerStateCharAnimIndex())) == 0 and
+			 not (PWNativeThirdPersonCrouchMoving and PWNativeThirdPersonCrouchMoving()) ) then 
 				g_suspendplayercontrols=1
 			end
 		end
@@ -669,6 +674,12 @@ function gameplayercontrol.lookmove()
 		end
 		-- when camera overridden, do not allow movement
 		if ( GetCameraOverride() ~= 1 and GetCameraOverride() ~= 3 ) then
+			local nativeMove, nativeSpeed = false, 1
+			if PWNativeThirdPersonMove then nativeMove, nativeSpeed = PWNativeThirdPersonMove(g_MouseClickControl, true) end
+			if nativeMove then
+				SetGamePlayerControlBasespeed(nativeSpeed)
+				SetGamePlayerControlMaxspeed(GetGamePlayerControlTopspeed()*GetGamePlayerControlBasespeed())
+			else
 			if ( GetGamePlayerStateEditModeActive() ~= 0 ) then 
 				if ( GetGamePlayerStatePlrKeyShift() == 1 or GetGamePlayerStatePlrKeyShift2() == 1 ) then 
 					SetGamePlayerControlBasespeed(4.0)
@@ -735,12 +746,15 @@ function gameplayercontrol.lookmove()
 					end
 				end
 			end
+			end -- legacy movement fallback
 		else
 			-- camera overridden players cannot move themselves
+			if PWNativeThirdPersonMove then PWNativeThirdPersonMove(0,false) end
 			SetGamePlayerControlMovement(0)
 		end
 	else
-		--  dead players cannot move themselves
+		--  dead or animation-locked players cannot move themselves
+		if PWNativeThirdPersonMove then PWNativeThirdPersonMove(0,false) end
 		SetGamePlayerControlMovement(0)
 	end
 
@@ -818,7 +832,8 @@ function gameplayercontrol.control()
 		if ( GetGamePlayerControlThirdpersonEnabled() == 1 ) then 
 			ttcharacterindex=GetGamePlayerControlThirdpersonCharacterIndex()
 			entid = GetEntityElementBankIndex(GetCharAnimStateOriginalE(ttcharacterindex))
-			if ( g_PlrKeySPACE == 1 and GetGamePlayerControlJumpMode() == 0 and GetEntityProfileJumpModifier(entid) > 0.0 ) then 
+			if ( g_PlrKeySPACE == 1 and GetGamePlayerControlJumpMode() == 0 and GetEntityProfileJumpModifier(entid) > 0.0 and
+				 (not PWNativeThirdPersonCanJump or PWNativeThirdPersonCanJump()) ) then 
 				ttplaycsi=GetCharAnimStatePlayCsi(ttcharacterindex)
 				if ( ttplaycsi >= GetCsiStoodVault(1) and ttplaycsi <= GetCsiStoodVault(1)+2 ) then 
 					--  still in jump animation action
@@ -1183,6 +1198,8 @@ function gameplayercontrol.control()
 			return
 		end
 		
+		-- Native locomotion animation coordinator uses the existing C++ char_loop.
+		if not (PWNativeThirdPersonAnimate and PWNativeThirdPersonAnimate()) then
 		-- control animation of third person character
 		SetGamePlayerStateCharAnimIndex(GetGamePlayerControlThirdpersonCharacterIndex())
 		CopyCharAnimState(GetGamePlayerStateCharAnimIndex(),0)
@@ -1275,6 +1292,11 @@ function gameplayercontrol.control()
 		SetCharAnimStateE(0,0)
 		CopyCharAnimState(0,GetGamePlayerStateCharAnimIndex())
 
+		end -- legacy animation fallback
+
+		-- Native camera/facing replaces the legacy Lua camera on supported builds.
+		-- Keep the old path for old engine binaries and explicit compatibility mode.
+		if not (PWNativeThirdPersonUpdate and PWNativeThirdPersonUpdate()) then
 		-- transfer first person camera awareness to character
 		tttargetx=GetPlrObjectPositionX()
 		tttargety=GetPlrObjectPositionY()-35.0
@@ -1532,6 +1554,8 @@ function gameplayercontrol.control()
 		if ( GetCameraOverride() ~= 2 and GetCameraOverride() ~= 3 ) then
 			SetCameraAngle ( 0,ttcapverticalangle,GetGamePlayerControlFinalCameraAngley(),GetGamePlayerControlFinalCameraAnglez() )
 		end
+		
+		end -- legacy third-person fallback
 		
 	else
 		-- update camera position

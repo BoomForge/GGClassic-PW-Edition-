@@ -333,3 +333,16 @@ GameGuru Core/.vs/GameGuru/v17/DocumentLayout.backup.json
 GameGuru Core/.vs/GameGuru/v17/DocumentLayout.json
 GameGuru Core/SDK/OGG/.vs/ogg_vorbis_static/v17/DocumentLayout.backup.json
 GameGuru Core/SDK/OGG/.vs/ogg_vorbis_static/v17/DocumentLayout.json
+
+# PW local builds and owned Steam assets: NEVER check these into the public fork.
+/PW-TestInstall/
+/.pw-local-deps/
+/GameGuru Core/SDK/DirectX/Lib/x64/*.lib
+
+# Compiled/test outputs are local only; never publish game-maker binaries.
+/PW-Build/
+/GameGuru Core/SDK/OGG/lib64/
+/GameGuru Core/SDK/DirectX/Effect11/Bin/Desktop_2022/x64/Release/
+/GameGuru Core/SDK/DirectXTex/DirectXTex/Bin/Desktop_2022/x64/Release/
+
+/GameGuru Core/SDK/Steamworks SDK/redistributable_bin/win64/*.lib

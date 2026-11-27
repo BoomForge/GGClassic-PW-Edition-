@@ -30,3 +30,6 @@ void SetTerrainMask(int iMask);
  void ShowVegetationGrid(void);
  int GetFirstGrassObject(void);
  int GetLastGrassObject(void);
+// Pixelwolf: native weighted species batches (source meshes/images owned by M-Grass).
+void SetPWVegetationMix(int count, const int* meshes, const int* images, const float* weights);
+int GetPWVegetationClumpCount(int slot);

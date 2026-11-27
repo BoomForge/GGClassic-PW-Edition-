@@ -5,6 +5,7 @@
 // Includes
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-ThirdPersonGameplay.h"
 #include <vector>
 
 // Externs
@@ -137,6 +138,16 @@ void entity_lua_collisionoff ( void )
 
 void entity_lua_getentityplrvisible ( void )
 {
+    // In TPP the character, not the detached camera, is the interaction origin.
+    // Ignore the protagonist explicitly rather than changing render visibility.
+    if(t.playercontrol.thirdperson.enabled==1) {
+        if(t.e<=0||t.e>g.entityelementlist)return;
+        PWThirdPerson::Vec from={},to={};int ignore=0,target=0;
+        const bool visible=PWThirdPerson::PlayerOrigin(from,ignore)&&PWThirdPerson::EntityTarget(t.e,to,target)&&target!=ignore&&PWThirdPerson::LineClear(from,to,ignore,target);
+        t.entityelement[t.e].plrvisible=visible?1:0;
+        t.entityelement[t.e].lua.flagschanged=1;
+        return;
+    }
 	t.tobj=t.entityelement[t.e].obj;
 	if (  t.tobj>0 ) 
 	{
@@ -161,27 +172,6 @@ void entity_lua_getentityplrvisible ( void )
 				t.ttt=IntersectAll(g.lightmappedobjectoffset,g.lightmappedobjectoffsetfinish,t.tx1_f,t.ty1_f,t.tz1_f,0,0,0,-123);
 
 
-			//PE: door.lua , we are hitting t.entityelement[t.playercontrol.thirdperson.charactere].obj
-			//PE: Disable t.entityelement[t.playercontrol.thirdperson.charactere].obj from check.
-			//https://github.com/TheGameCreators/GameGuruRepo/issues/619
-
-			bool reneableThirdperson = false;
-			sObject* pObjectThirdperson = NULL;
-			if (t.playercontrol.thirdperson.enabled == 1)
-			{
-				//Hide TPP or we will hit it.
-				int thirdpersonObj = t.entityelement[t.playercontrol.thirdperson.charactere].obj;
-				if (thirdpersonObj > 0)
-				{
-					pObjectThirdperson = g_ObjectList[thirdpersonObj];
-					if (pObjectThirdperson->bVisible)
-					{
-						pObjectThirdperson->bVisible = false;
-						reneableThirdperson = true;
-					}
-				}
-			}
-
 			if ( IntersectAll(g.entityviewstartobj,g.entityviewendobj,t.tx1_f,t.ty1_f,t.tz1_f,t.tx2_f,t.ty2_f,t.tz2_f,t.tobj) > 0 )
 			{
  					t.entityelement[t.e].plrvisible=0;
@@ -189,10 +179,6 @@ void entity_lua_getentityplrvisible ( void )
 			else
 			{
 				t.entityelement[t.e].plrvisible=1;
-			}
-
-			if (reneableThirdperson && pObjectThirdperson) {
-				pObjectThirdperson->bVisible = true;
 			}
 
 			t.entityelement[t.e].lua.flagschanged=1;
@@ -727,10 +713,12 @@ void entity_lua_checkpoint ( void )
 	waypoint_hide ( );
 	//  record player position
 	t.playercheckpoint.stored=1;
-	t.playercheckpoint.x=CameraPositionX(0);
+	if(!PWThirdPerson::CaptureBodyCheckpoint(t.entityelement[t.e].ry)){
+    t.playercheckpoint.x=CameraPositionX(0);
 	t.playercheckpoint.y=CameraPositionY(0);
 	t.playercheckpoint.z=CameraPositionZ(0);
 	t.playercheckpoint.a=t.entityelement[t.e].ry;
+    }
 	//  record all soundloops at the time
 	#ifdef VRTECH
 	//t.playercheckpoint.soundloopcheckpointcountdown=5;
@@ -2133,8 +2121,9 @@ void entity_lua_lookatplayer ( void )
 		t.charanimstates[t.tcharanimindex] = t.charanimstate;
 		#else
 		//  Simply look in direction of player
-		t.tdx_f=CameraPositionX(0)-t.entityelement[t.e].x;
-		t.tdz_f=CameraPositionZ(0)-t.entityelement[t.e].z;
+		entity_gettrueplayerpos();
+		t.tdx_f=t.tcamerapositionx_f-t.entityelement[t.e].x;
+		t.tdz_f=t.tcamerapositionz_f-t.entityelement[t.e].z;
 		AISetEntityAngleY (  t.charanimstate.obj,atan2deg(t.tdx_f,t.tdz_f) );
 
 		//  If angle beyond 'look angle range', perform full rotation
@@ -2260,10 +2249,8 @@ void entity_lua_rotatetocore(float fAngleOffset)
 
 void entity_lua_rotatetoplayer ( void )
 {
-	//  third person moves camera to player position
-	t.tcamerapositionx_f=CameraPositionX(t.terrain.gameplaycamera);
-	t.tcamerapositiony_f=CameraPositionY(t.terrain.gameplaycamera);
-	t.tcamerapositionz_f=CameraPositionZ(t.terrain.gameplaycamera);
+	// Resolve the actual player even when the camera is overridden.
+	entity_gettrueplayerpos();
 	entity_lua_rotatetocore ( 0.0f );
 }
 
@@ -2276,9 +2263,7 @@ void entity_lua_rotatetocamera ( void )
 
 void entity_lua_rotatetoplayerwithoffset ( void )
 {
-	t.tcamerapositionx_f=CameraPositionX(t.terrain.gameplaycamera);
-	t.tcamerapositiony_f=CameraPositionY(t.terrain.gameplaycamera);
-	t.tcamerapositionz_f=CameraPositionZ(t.terrain.gameplaycamera);
+	entity_gettrueplayerpos();
 	entity_lua_rotatetocore ( t.v );
 }
 

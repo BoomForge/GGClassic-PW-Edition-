@@ -176,6 +176,11 @@ DARKSDK void				image_preload_files_strictwaittoend(void);
 DARKSDK void				image_preload_files_wait	( void );
 DARKSDK void				image_preload_files_reset	( void );
 DARKSDK bool				image_preload_files_in_progress	(void);
+void PWTextureStageBegin();
+void PWTextureStageEnd();
+void PWTextureStageTick();
+bool PWTextureResidencyObserving();
+void PWTextureResidencyObserve(ID3D11ShaderResourceView* view,float distance,bool safeMainDiffuse,bool shadowCamera=false);
 
 DARKSDK unsigned char*		DecompressImage ( LPGGSURFACE pTexSurface );
 

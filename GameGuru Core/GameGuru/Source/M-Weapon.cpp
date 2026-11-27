@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-ProjectileContact.h"
 
 #ifdef VRTECH
 //Windows Mixed Reality Support
@@ -450,14 +451,50 @@ void weapon_projectile_loop ( void )
 				t.tdy_f=CameraPositionY(0)-t.tYNewPos_f;
 				t.tdz_f=CameraPositionZ(0)-t.tZNewPos_f;
 				t.tdd_f=t.tdx_f*t.tdx_f + t.tdy_f*t.tdy_f + t.tdz_f*t.tdz_f;
-				if (  t.tdd_f<50.0*50.0 && t.playercontrol.thirdperson.enabled == 0 ) 
+
+                // Direct hits must sweep the frame segment rather than only
+                // testing the endpoint. Fast arrows can cross the player
+                // between frames. Keep the legacy explosion path unchanged.
+                const bool pwDirect = t.WeaponProjectileBase[t.tProjType].resultBounce == WEAPON_PROJECTILERESULT_DAMAGE;
+                bool pwPlayerHit = t.tdd_f<50.0f*50.0f;
+                float pwContact=1.f;
+                if(pwDirect) {
+                    pwPlayerHit=false;
+                    const int source=t.WeaponProjectile[t.tNewProj].sourceEntity;
+                    if(source>0 && source<=g.entityelementlist && t.playercontrol.thirdperson.enabled==0 &&
+                        PWProjectile::FirstContact(t.tXOldPos_f,t.tYOldPos_f,t.tZOldPos_f,
+                            t.tXNewPos_f,t.tYNewPos_f,t.tZNewPos_f,
+                            CameraPositionX(0),CameraPositionY(0),CameraPositionZ(0),50.f,pwContact)) {
+                        const float x=t.tXOldPos_f+(t.tXNewPos_f-t.tXOldPos_f)*pwContact;
+                        const float y=t.tYOldPos_f+(t.tYNewPos_f-t.tYOldPos_f)*pwContact;
+                        const float z=t.tZOldPos_f+(t.tZNewPos_f-t.tZOldPos_f)*pwContact;
+                        const int ignore=t.entityelement[source].obj;
+                        // Do not award a swept player hit through terrain or a
+                        // nearer object. Reuse Classic's collision query.
+                        if(!ODERayTerrain(t.tXOldPos_f,t.tYOldPos_f,t.tZOldPos_f,x,y,z)) {
+                            if(g.lightmappedobjectoffset>=g.lightmappedobjectoffsetfinish)
+                                IntersectAll(87000,87000+g.merged_new_objects-1,0,0,0,0,0,0,-123);
+                            else
+                                IntersectAll(g.lightmappedobjectoffset,g.lightmappedobjectoffsetfinish,0,0,0,0,0,0,-123);
+                            pwPlayerHit=IntersectAll(g.entityviewstartobj,g.entityviewendobj,
+                                t.tXOldPos_f,t.tYOldPos_f,t.tZOldPos_f,x,y,z,ignore)<=0;
+                        }
+                    }
+                }
+                if (pwPlayerHit && t.playercontrol.thirdperson.enabled == 0) 
 				{
 					//  if close enough to player, and not fired by player, explode!
 					if (  t.WeaponProjectile[t.tNewProj].sourceEntity>0 ) 
 					{
 						t.tHitX_f = t.tXOldPos_f;
 						t.tHitY_f = t.tYOldPos_f;
-						t.tHitZ_f = t.tZOldPos_f;
+
+                        t.tHitZ_f = t.tZOldPos_f;
+                        if(pwDirect) {
+                            t.tHitX_f += (t.tXNewPos_f-t.tXOldPos_f)*pwContact;
+                            t.tHitY_f += (t.tYNewPos_f-t.tYOldPos_f)*pwContact;
+                            t.tHitZ_f += (t.tZNewPos_f-t.tZOldPos_f)*pwContact;
+                        }
 						if ( t.WeaponProjectileBase[t.tProjType].projectileEventType > 0 ) 
 							t.tProjectileName_s = t.WeaponProjectileBase[t.tProjType].name_s;
 						else
@@ -574,15 +611,23 @@ void weapon_projectile_loop ( void )
 							t.ttdy_f=t.tYNewPos_f-t.tYOldPos_f;
 							t.ttdz_f=t.tZNewPos_f-t.tZOldPos_f;
 							t.ttdd_f=Sqrt(abs(t.ttdx_f*t.ttdx_f)+abs(t.ttdy_f*t.ttdy_f)+abs(t.ttdz_f*t.ttdz_f));
-							t.ttdx_f=t.ttdx_f/t.ttdd_f;
-							t.ttdy_f=t.ttdy_f/t.ttdd_f;
-							t.ttdz_f=t.ttdz_f/t.ttdd_f;
-							t.tXOldPos_f=t.tXOldPos_f-(t.ttdx_f*60.0f);
-							t.tYOldPos_f=t.tYOldPos_f-(t.ttdy_f*60.0f);
-							t.tZOldPos_f=t.tZOldPos_f-(t.ttdz_f*60.0f);
+
+                            // Zero motion is common on physics contact; do not
+                            // feed NaNs into IntersectAll. A direct hit uses the
+                            // actual travelled segment, not a 60-unit ray behind it.
+                            if(t.ttdd_f>0.0001f && !pwDirect) {
+                                t.ttdx_f/=t.ttdd_f; t.ttdy_f/=t.ttdd_f; t.ttdz_f/=t.ttdd_f;
+                                t.tXOldPos_f-=t.ttdx_f*60.0f;
+                                t.tYOldPos_f-=t.ttdy_f*60.0f;
+                                t.tZOldPos_f-=t.ttdz_f*60.0f;
+                            }
 							//  ignore the entity object which fires it
 							t.tIgnoreObject = 0;
-							if (  t.WeaponProjectile[t.tProj].sourceEntity>0  )  t.tIgnoreObject  =  t.entityelement[t.WeaponProjectile[t.tProj].sourceEntity].obj;
+							if ( t.WeaponProjectile[t.tProj].sourceEntity>0 && t.WeaponProjectile[t.tProj].sourceEntity<=g.entityelementlist ) t.tIgnoreObject = t.entityelement[t.WeaponProjectile[t.tProj].sourceEntity].obj;
+                            else if(t.WeaponProjectile[t.tProj].sourceEntity==0&&t.playercontrol.thirdperson.enabled==1) {
+                                const int e=t.playercontrol.thirdperson.charactere;
+                                if(e>0&&e<=g.entityelementlist)t.tIgnoreObject=t.entityelement[e].obj;
+                            }
 							t.tEndEntity = g.entityviewstartobj+g.entityelementlist;
 							//Dave - don't need to do raycasts for the nade hitting anything as it is controlled by physics
 							if ( t.WeaponProjectileBase[t.tProjType].resultBounce>0 ) 
@@ -598,14 +643,18 @@ void weapon_projectile_loop ( void )
 
 							// 291015 - in addition, use a distance check to explode projectiles when they are close to enemies
 							int iIgnoreThirdPersonEntityCharacter = -1;
-							if (  t.playercontrol.thirdperson.enabled == 1 ) 
-								iIgnoreThirdPersonEntityCharacter = t.playercontrol.thirdperson.charactere;
+							if (t.playercontrol.thirdperson.enabled == 1 && (!pwDirect || t.WeaponProjectile[t.tProj].sourceEntity==0))
+                                iIgnoreThirdPersonEntityCharacter = t.playercontrol.thirdperson.charactere;
 
 							bool bDirectHitOnObjectItself = false;
+                            // For direct damage, do not let a proximity heuristic
+                            // override a real ray hit on a wall or another entity.
+                            // A direct projectile must hit actual collision geometry.
+                            if(!pwDirect)
 							for ( t.ttte = 1; t.ttte <= g.entityelementlist; t.ttte++ )
 							{
 								t.tentid=t.entityelement[t.ttte].bankindex;
-								if (  t.entityprofile[t.tentid].ischaracter == 1 ) 
+								if ( t.tentid>0 && t.entityprofile[t.tentid].ischaracter == 1 ) 
 								{
 									if (  t.tentid > 0 && t.entityelement[t.ttte].health > 0 && t.ttte != iIgnoreThirdPersonEntityCharacter ) 
 									{
@@ -668,8 +717,7 @@ void weapon_projectile_loop ( void )
 										float fDX = CameraPositionX() - t.tHitX_f;
 										float fDZ = CameraPositionZ() - t.tHitZ_f;
 										float fDist = sqrt( (fDX*fDX) + (fDZ*fDZ) );
-										fDX /= fDist;
-										fDZ /= fDist;
+										if(fDist>0.0001f){ fDX /= fDist; fDZ /= fDist; } else { fDX=0; fDZ=0; }
 										t.tHitX_f += (fDX*10.0f);
 										t.tHitZ_f += (fDZ*10.0f);
 									}
@@ -1146,9 +1194,10 @@ void weapon_projectile_make ( bool bUsingVRForAngle )
 	//    tStartX#, tStartY#, tStartZ#, tAngX#, tAngY#, tAngZ#
 	//    gunid,firemode
 
+    const bool pwPlayerMuzzle=t.playercontrol.thirdperson.enabled==1&&t.tSourceEntity==0;
 	//  if third person, scan for character targets and adjust X angle (removed targetting for now)
 	t.tlocktargetonobject=0;
-	if (  t.playercontrol.thirdperson.enabled == 1 && t.playercontrol.thirdperson.cameralocked == 1 ) 
+	if ( !pwPlayerMuzzle && t.playercontrol.thirdperson.enabled == 1 && t.playercontrol.thirdperson.cameralocked == 1 ) 
 	{
 		t.tttbesta_f=500.0;
 		for ( t.ttte = 1 ; t.ttte<=  g.entityelementlist; t.ttte++ )
@@ -1221,7 +1270,7 @@ void weapon_projectile_make ( bool bUsingVRForAngle )
 	//  adjustment to start position to avoid penetrating
 	t.tobj = t.WeaponProjectile[t.tNewProj].tracerObj;
 	t.tweaponlimb=t.WeaponProjectileBase[t.tProjectileType].attachToWeaponLimb;
-	if (  t.tweaponlimb >= 0 ) 
+	if ( !pwPlayerMuzzle && t.tweaponlimb >= 0 ) 
 	{
 		//  use start position described by weapon limb
 		if (  LimbExist(t.currentgunobj,t.tweaponlimb) == 1 ) 
@@ -1241,38 +1290,11 @@ void weapon_projectile_make ( bool bUsingVRForAngle )
 	//  adjustment to start position to avoid penetrating
 	PositionObject (  t.tobj,t.tStartX_f,t.tStartY_f,t.tStartZ_f );
 
-	//  auto targetting removed in favour of camera based targetting (if camera in locked mode)
-	if (  t.playercontrol.thirdperson.enabled == 1 && t.tSourceEntity == 0 ) 
-	{
-		if (  t.playercontrol.thirdperson.cameralocked == 1 ) 
-		{
-			if (  t.tlocktargetonobject>0 ) 
-			{
-				//  camera fixed, targetting help
-				t.tcenterobjy_f=ObjectPositionY(t.tlocktargetonobject)+(35.0f);
-				PointObject (  t.tobj,ObjectPositionX(t.tlocktargetonobject),t.tcenterobjy_f,ObjectPositionZ(t.tlocktargetonobject) );
-				t.tAngX_f=ObjectAngleX(t.tobj);
-				t.tAngZ_f=ObjectAngleZ(t.tobj);
-			}
-			else
-			{
-				//  camera fixed, no target
-				t.tAngX_f=0;
-				t.tAngY_f=CameraAngleY(t.terrain.gameplaycamera) ;
-				t.tAngZ_f=0;
-			}
-		}
-		else
-		{
-			//  nonfixed camera, use users camera view
-			t.tAngX_f=CameraAngleX(t.terrain.gameplaycamera) ;
-			t.tAngY_f=CameraAngleY(t.terrain.gameplaycamera) ;
-			t.tAngZ_f=CameraAngleZ(t.terrain.gameplaycamera) ;
-			t.tAngX_f=t.tAngX_f-13.0f;
-		}
-	}
+    // Player TPP aim is resolved before launch; preserve those exact angles.
 	RotateObject (  t.tobj, t.tAngX_f , t.tAngY_f , t.tAngZ_f );
-	MoveObject (  t.tobj,t.WeaponProjectileBase[t.tProjectileType].avoidPlayerPenetration_f );
+    // Third-person muzzle already lies outside the body; do not skip untested
+    // world space by advancing the projectile through a nearby wall.
+	if(!pwPlayerMuzzle)MoveObject ( t.tobj,t.WeaponProjectileBase[t.tProjectileType].avoidPlayerPenetration_f );
 	t.tStartX_f = ObjectPositionX(t.tobj);
 	t.tStartY_f = ObjectPositionY(t.tobj);
 	t.tStartZ_f = ObjectPositionZ(t.tobj);
@@ -1569,10 +1591,13 @@ void weapon_projectileresult_make ( void )
 						{
 							t.tdamage=(int)t.tDamage_f;
 							t.tdamageforce=(int)t.tDamage_f;
-							t.tdamagesource=2;
-							t.brayx1_f=CameraPositionX(t.terrain.gameplaycamera);
-							t.brayy1_f=CameraPositionY(t.terrain.gameplaycamera);
-							t.brayz1_f=CameraPositionZ(t.terrain.gameplaycamera);
+							// Direct projectiles use bullet damage semantics, not explosion power scaling.
+                            t.tdamagesource=1;
+                            t.bulletraylimbhit=-1;
+                            t.tDrownDamageFlag=0;
+							t.brayx1_f=t.tXOldPos_f;
+                            t.brayy1_f=t.tYOldPos_f;
+                            t.brayz1_f=t.tZOldPos_f;
 							t.brayx2_f=t.tx_f ; t.brayy2_f=t.ty_f ; t.brayz2_f=t.tz_f;
 							entity_applydamage ( );
 							break;
@@ -1695,8 +1720,15 @@ void weapon_projectileresult_make_hitplayer (void)
 	{
 		case WEAPON_PROJECTILERESULT_DAMAGE:
 		{
-			t.tdamage = (int)t.tDamage_f; t.te = 0; t.tDrownDamageFlag = 0;
-			physics_player_takedamage ();
+			t.tdamage = (int)t.tDamage_f;
+            // Damage HUD expects a valid attacking entity, or -1 for none.
+            const int oldEntity=t.te;
+            const int source=t.tSourceEntity;
+            t.te=(source>0 && source<=g.entityelementlist && t.entityelement[source].obj>0 &&
+                ObjectExist(t.entityelement[source].obj))?source:-1;
+            t.tDrownDamageFlag = 0;
+            physics_player_takedamage ();
+            t.te=oldEntity;
 		}
 		break;
 	}

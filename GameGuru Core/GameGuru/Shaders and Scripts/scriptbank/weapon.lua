@@ -8,6 +8,33 @@ function weapon_init_name(e,name)
 end
 
 function weapon_main(e)
+ if g_PWInteractionMode == 1 then
+  if g_PWInteractionTarget ~= e then return end
+  local id = GetEntityWeaponID(e)
+  if not id or id <= 0 then return end
+  local owned = false
+  for i=1,10 do
+   if GetWeaponSlot(i) == id then owned = true end
+  end
+  if not owned and g_PlayerGunCount >= 9 then
+   Prompt("Cannot collect any more weapons")
+   return
+  end
+  local name = weapon_name[e] or "weapon"
+  if g_PlayerController == 1 then
+   Prompt("Press Y button to pick up "..name)
+  else
+   Prompt("Press interact to pick up "..name)
+  end
+  if g_PWInteractionPressed == e then
+   Prompt("Collected "..name)
+   PlaySound(e,0)
+   AddPlayerWeapon(e)
+   Destroy(e)
+   ActivateIfUsed(e)
+  end
+  return
+ end
  if weapon_therecanbeonlyone==-1 then
 	if g_KeyPressE == 0 and g_InKey == ""  then
 		weapon_therecanbeonlyone = 0

@@ -26,6 +26,9 @@
 
 // DarkLUA needs access to the T global (but could be in two locations)
 #include "..\..\..\..\GameGuru\Include\gameguru.h"
+#include "..\..\..\..\GameGuru\Include\PW-PlayerProfile.h"
+#include "..\..\..\..\GameGuru\Include\PW-ThirdPerson.h"
+#include "..\..\..\..\GameGuru\Include\PW-ThirdPersonGameplay.h"
 
 
 // Prototypes
@@ -6981,8 +6984,425 @@ int Include(lua_State *L)
 	return 0;
 }
 
+// Native single-player restore preflight. Return nil for the unchanged
+// legacy path, -1 for invalid inventory, or a safe selected weapon ID.
+static int PWNativeRestoreWeaponPlan(lua_State* L) {
+    using namespace PWThirdPerson;
+    if(!NativeLifecycleEnabled()){lua_pushnil(L);return 1;}
+    if(lua_gettop(L)!=11){lua_pushinteger(L,-1);return 1;}
+    int slots[10]={};
+    const int maxWeapon=g.gunmax<ArrayCount(t.gun)?g.gunmax:ArrayCount(t.gun);
+    for(int i=0;i<11;++i){
+        const double v=lua_tonumber(L,i+1);
+        if(!lua_isnumber(L,i+1)||!std::isfinite(v)||v<0||v>2147483647.0||std::floor(v)!=v){
+            lua_pushinteger(L,-1);return 1;
+        }
+        if(i>0)slots[i-1]=static_cast<int>(v);
+    }
+    if(!ValidInventoryIds(slots,maxWeapon)){lua_pushinteger(L,-1);return 1;}
+    for(int id:slots)if(id>0&&Len(t.gun[id].name_s.Get())==0){lua_pushinteger(L,-1);return 1;}
+    const int requested=static_cast<int>(lua_tonumber(L,1));
+    const bool ready=requested>0&&requested<=maxWeapon&&t.gun[requested].obj>0&&ObjectExist(t.gun[requested].obj);
+    lua_pushinteger(L,RestoredWeapon(requested,slots,maxWeapon,ready));return 1;
+}
+static int PWNativeRestoreWeaponApply(lua_State* L) {
+    using namespace PWThirdPerson;
+    if(!NativeLifecycleEnabled()||lua_gettop(L)!=1){lua_pushboolean(L,0);return 1;}
+    const double v=lua_tonumber(L,1);
+    if(!lua_isnumber(L,1)||!std::isfinite(v)||v<0||v>2147483647.0||std::floor(v)!=v){lua_pushboolean(L,0);return 1;}
+    const int requested=static_cast<int>(v);
+    int slots[10]={};for(int i=0;i<10;++i)slots[i]=t.weaponslot[i+1].got;
+    const int maxWeapon=g.gunmax<ArrayCount(t.gun)?g.gunmax:ArrayCount(t.gun);
+    const bool ready=requested>0&&requested<=maxWeapon&&t.gun[requested].obj>0&&ObjectExist(t.gun[requested].obj);
+    const int selected=RestoredWeapon(requested,slots,maxWeapon,ready);
+    // Do not let the default slot-one selection overwrite a restored holster.
+    t.triggerweapononeifexists=0;g.autoloadgun=selected;gun_change();
+    const int e=t.playercontrol.thirdperson.charactere;
+    const bool attachmentReady=selected==0||(e>0&&e<=g.entityelementlist&&
+        t.entityelement[e].eleprof.hasweapon==selected&&
+        t.entityelement[e].attachmentobj>0&&ObjectExist(t.entityelement[e].attachmentobj));
+    if(t.gunid!=selected||!attachmentReady){
+        // The world attachment may be unavailable even when the HUD exists.
+        g.autoloadgun=0;gun_change();
+        timestampactivity(0,"PW restore: equipped weapon unavailable; holstered");
+    }
+    t.gunmustreleasefirst=1;
+    lua_pushboolean(L,t.gunid==requested);return 1;
+}
+// Profile save payloads bypass the 256-byte SendMessageS channel.
+static int PWProfileWriteRaw(lua_State* L) {
+    size_t len=0;
+    const char* name=lua_tostring(L,1);
+    const char* payload=lua_tolstring(L,2,&len);
+    PWLevelFlow::Destination level;
+    bool ok=false;
+    if(name&&payload&&len<=PWProfile::MaxPayload&&PWProfile::Name(name)&&
+        t.game.gameisexe==1&&t.game.runasmultiplayer==0&&t.game.gameloop==1&&t.game.levelendingcycle==0&&
+        (!PWThirdPerson::NativeLifecycleEnabled()||t.player[t.plrid].health>0)&&
+        PWProfile::CurrentLevel(g.mysystem.mapbankAbs_s.Get(),g.projectfilename_s.Get(),level)){
+        PWProfile::Snapshot snapshot;
+        snapshot.level=level.relative;snapshot.payload.assign(payload,len);
+        ok=PWProfile::Save(PWProfile::Root(std::string(g.fpscrootdir_s.Get())+"\\Files",true),name,snapshot);
+    }
+    lua_pushboolean(L,ok?1:0);return 1;
+}
+static int PWProfileListRaw(lua_State* L) {
+    lua_newtable(L);
+    if(t.game.gameisexe!=1||t.game.runasmultiplayer!=0)return 1;
+    const auto names=PWProfile::List(PWProfile::Root(std::string(g.fpscrootdir_s.Get())+"\\Files",false));
+    int index=1;for(const auto& n:names){lua_pushstring(L,n.c_str());lua_rawseti(L,-2,index++);}
+    return 1;
+}
+// Native third-person camera and character facing. The shared player
+// controller still owns animation, input, physics and weapon policy.
+static bool PWNativeThirdPersonReady(int& e,int& avatar) {
+    const auto& tp=t.playercontrol.thirdperson;
+    const int body=t.aisystem.objectstartindex;
+    char legacy[4]={};
+    e=tp.charactere;avatar=0;
+    if((GetEnvironmentVariableA("GGCPW_LEGACY_THIRDPERSON",legacy,sizeof(legacy))==1&&legacy[0]=='1')||
+        tp.enabled!=1||e<=0||e>g.entityelementlist||body<=0||!ObjectExist(body)||
+        t.game.runasmultiplayer!=0||g.gvrmode!=0||g.globals.riftmode!=0||t.conkit.editmodeactive!=0)return false;
+    avatar=t.entityelement[e].obj;
+    return avatar>0&&ObjectExist(avatar)&&t.entityelement[e].ragdollified==0;
+}
+// Check all normal crouch locomotion clips for the current Classic weapon
+// style. Do not shrink the player for a rig with missing/out-of-bounds clips.
+static bool PWThirdPersonCrouchSupported(int e,int index) {
+    using namespace PWThirdPerson;
+    if(index<=0||index>g.charanimindexmax)return false;
+    const int bank=t.entityelement[e].bankindex;
+    if(bank<=0||bank>g.entidmaster||t.entityprofile[bank].animstyle!=0)return false;
+    const int style=t.charanimstates[index].weapstyle;
+    if(style<1||style>5)return false;
+    const int obj=g.entitybankoffset+bank;
+    if(!ObjectExist(obj))return false;
+    const sObject* data=GetObjectData(obj);
+    if(!data||!data->pAnimationSet||!data->pAnimationSet->pAnimation)return false;
+    const float extent=static_cast<float>(data->pAnimationSet->ulLength);
+    const int offset=t.entityprofile[bank].startofaianim;
+    const bool rocket=t.charanimstates[index].rocketstyle==1;
+    const int slots[]={
+        rocket?t.csi_crouchdownrocketANIM[style]:t.csi_crouchdownANIM[style],
+        rocket?t.csi_crouchgetuprocketANIM[style]:t.csi_crouchgetupANIM[style],
+        rocket?t.csi_crouchidlerocketANIM[style]:t.csi_crouchidlenormalANIM0[style],
+        rocket?t.csi_crouchidlerocketANIM[style]:t.csi_crouchidlenormalANIM1[style],
+        t.csi_crouchmoveforeANIM[style],t.csi_crouchmovebackANIM[style],
+        t.csi_crouchmoveleftANIM[style],t.csi_crouchmoverightANIM[style]
+    };
+    for(int slot:slots){
+        if(offset<0||offset>g.animmax||slot<0||slot>g.animmax-offset)return false;
+        const auto& clip=t.entityanim[bank][offset+slot];
+        if(!ValidCharacterClip(clip.start,clip.finish,extent))return false;
+    }
+    return true;
+}
+static int PWNativeThirdPersonCrouch(lua_State* L) {
+    using namespace PWThirdPerson;
+    int e=0,avatar=0;
+    if(!PWNativeThirdPersonReady(e,avatar)){lua_pushboolean(L,0);return 1;}
+    const int body=t.aisystem.objectstartindex;
+    const bool ducked=ODEGetCharacterControllerDucking(body)!=0;
+    const bool grounded=ObjectAngleX(body)==1.f; // existing Bullet grounded flag
+    const int index=t.playercontrol.thirdperson.characterindex;
+    bool stanceCanChange=ducked;
+    if(index>0&&index<=g.charanimindexmax){
+        const int seq=t.charanimstates[index].playcsi;
+        stanceCanChange=stanceCanChange||(seq>0&&seq<=g.csi_csimax&&t.charseq[seq].trigger!=0);
+    }
+    const bool allowed=stanceCanChange&&t.player[1].health>0&&t.plrhasfocus!=0&&
+        g.luacameraoverride!=1&&g.luacameraoverride!=3&&t.playercontrol.gravityactive==1&&
+        t.playercontrol.underwater==0&&t.playercontrol.jumpmode!=1;
+    t.aisystem.playerducking=CrouchRequest(t.plrkeyC==1||g.forcecrouch==1,
+        PWThirdPersonCrouchSupported(e,index),allowed,grounded,ducked);
+    lua_pushboolean(L,1);return 1;
+}
+static int PWNativeThirdPersonCanJump(lua_State* L) {
+    int e=0,avatar=0;
+    if(!PWNativeThirdPersonReady(e,avatar)){lua_pushboolean(L,1);return 1;}
+    const int body=t.aisystem.objectstartindex;
+    const int index=t.playercontrol.thirdperson.characterindex;
+    if(index>0&&index<=g.charanimindexmax&&
+        t.charanimstates[index].playcsi==PWThirdPerson::LandCSI(g.csi_csimax)){
+        lua_pushboolean(L,0);return 1;
+    }
+    lua_pushboolean(L,PWThirdPerson::CanStartGroundJump(ObjectAngleX(body)==1.f,
+        t.aisystem.playerducking!=0,ODEGetCharacterControllerDucking(body)!=0));
+    return 1;
+}
+// The old crouch movement sequences include trigger-zero segments designed
+// for AI root motion. Keep player input responsive during those segments,
+// while preserving animation locks for actual actions and stance changes.
+static bool PWCrouchMovementSequence(int csi,int style) {
+    if(style<1||style>5)return false;
+    return csi>=t.csi_crouchmovefore[style]&&csi<t.csi_crouchmoverun[style];
+}
+static int PWNativeThirdPersonCrouchMoving(lua_State* L) {
+    int e=0,avatar=0;
+    if(!PWNativeThirdPersonReady(e,avatar)){lua_pushboolean(L,0);return 1;}
+    const int index=t.playercontrol.thirdperson.characterindex;
+    if(index<=0||index>g.charanimindexmax){lua_pushboolean(L,0);return 1;}
+    const auto& state=t.charanimstates[index];
+    // Air poses are also locomotion, not a scripted input lock.
+    lua_pushboolean(L,PWCrouchMovementSequence(state.playcsi,state.weapstyle)||
+        PWThirdPerson::AirCSI(state.playcsi,g.csi_csimax));
+    return 1;
+}
+// Compute third-person locomotion from the same remapped digital actions used
+// by the native physics controller. Keep its existing acceleration/slope and
+// jump integration, rather than teleporting the avatar.
+static int PWNativeThirdPersonMove(lua_State* L) {
+    using namespace PWThirdPerson;
+    int e=0,avatar=0;
+    if(lua_gettop(L)!=2||!PWNativeThirdPersonReady(e,avatar)){
+        lua_pushboolean(L,0);return 1;
+    }
+    const int buttons=static_cast<int>(lua_tointeger(L,1));
+    const bool allowed=lua_toboolean(L,2)!=0&&t.plrhasfocus!=0&&t.player[1].health>0&&
+        g.luacameraoverride!=1&&g.luacameraoverride!=3;
+    const auto& tp=t.playercontrol.thirdperson;
+    // RMB is aim, including the simultaneous LMB+RMB state (bitmask 3).
+    t.playercontrol.camrightmousemode=allowed&&(buttons&2)!=0?1:0;
+    const bool aim=t.playercontrol.camrightmousemode!=0||tp.shotfired!=0||tp.camerafollow==0;
+    const auto m=DecideMovement(CameraAngleY(0),t.plrkeyW,t.plrkeyA,t.plrkeyS,t.plrkeyD,
+        t.plrkeySHIFT==1||t.plrkeySHIFT2==1,t.playercontrol.canrun!=0,aim,
+        t.aisystem.playerducking!=0||ODEGetCharacterControllerDucking(t.aisystem.objectstartindex)!=0,allowed);
+    t.playercontrol.movement=m.moving?1:0;
+    if(m.moving)t.playercontrol.movey_f=m.direction;
+    t.playercontrol.isrunning=m.running?1:0;
+    // Return the base speed to the shared setter so the existing physics
+    // frequency scaling remains identical to the FPS path.
+    lua_pushboolean(L,1);lua_pushnumber(L,m.speed);return 2;
+}
+// Optional clips live in the same FPE/CSI bank as other character clips.
+static bool PWValidAirClip(int e,int seq) {
+    const int bank=t.entityelement[e].bankindex;
+    if(bank<=0||bank>g.entidmaster||t.entityprofile[bank].animstyle!=0)return false;
+    const int obj=g.entitybankoffset+bank;
+    if(!ObjectExist(obj))return false;
+    const sObject* data=GetObjectData(obj);
+    if(!data||!data->pAnimationSet||!data->pAnimationSet->pAnimation)return false;
+    const int offset=t.entityprofile[bank].startofaianim;
+    if(offset<0||offset>g.animmax||seq<0||seq>g.animmax-offset)return false;
+    const auto& clip=t.entityanim[bank][offset+seq];
+    return PWThirdPerson::ValidCharacterClip(clip.start,clip.finish,
+        static_cast<float>(data->pAnimationSet->ulLength));
+}
+static void PWNativeAirAnimation(int e,int index,int avatar,bool ducked) {
+    using namespace PWThirdPerson;
+    static AirMotion motion;
+    static DWORD lastTime=0,landStart=0;
+    static int lastAvatar=0,lastEntity=0,lastBank=0;
+    static unsigned int lastEpoch=0;
+    static Vec previous={};
+    const DWORD now=GetTickCount();
+    const int body=t.aisystem.objectstartindex,bank=t.entityelement[e].bankindex;
+    const Vec pos={ObjectPositionX(body),ObjectPositionY(body),ObjectPositionZ(body)};
+    const bool grounded=ObjectAngleX(body)==1.f;
+    const bool permitted=t.player[1].health>0&&t.playercontrol.gravityactive==1&&
+        t.playercontrol.underwater==0&&g.luacameraoverride!=1&&g.luacameraoverride!=3;
+    const unsigned int epoch=t.playercontrol.thirdperson.pwLifecycleEpoch;
+    const bool reset=!permitted||lastEpoch!=epoch||lastAvatar!=avatar||lastEntity!=e||lastBank!=bank||
+        now-lastTime>250||Length(Sub(pos,previous))>200.f;
+    const float dt=static_cast<float>(now-lastTime)*0.001f;
+    const auto event=motion.Step(grounded,pos.y,dt,reset);
+    lastTime=now;lastAvatar=avatar;lastEntity=e;lastBank=bank;previous=pos;lastEpoch=epoch;
+    const int fall=FallCSI(g.csi_csimax),land=LandCSI(g.csi_csimax);
+    auto& state=t.charanimstate;
+    auto& controls=t.charanimcontrols[index];
+    const int style=state.weapstyle;
+    if(style<1||style>5)return;
+    const int seq=state.playcsi;
+    const bool ownAir=AirCSI(seq,g.csi_csimax);
+    const bool safeLocomotion=(seq>=t.csi_stood[style]&&seq<t.csi_stoodstartled[style])||
+        (seq>=t.csi_stoodmovefore[style]&&seq<t.csi_stoodreload[style]);
+    const bool action=controls.meleeing!=0||controls.spotactioning!=0||
+        controls.impacting!=0||controls.covering!=0;
+    int next=seq;
+    if(ownAir&&(reset||ducked||action||(seq==fall&&grounded)||
+        (seq==land&&(!grounded||now-landStart>650))))next=t.csi_stood[style];
+    // Do not interrupt action, death, authored sequences or crouch. A landing
+    // can follow a normal jump or ledge drop even if no fall clip is mapped.
+    if(!reset&&permitted&&!ducked&&!action&&(ownAir||safeLocomotion)){
+        if(event.landed&&PWValidAirClip(e,land)){
+            next=land;landStart=now;
+        }else if(event.falling&&!grounded&&PWValidAirClip(e,fall)){
+            next=fall;
+        }
+    }
+    if(next!=seq){
+        state.playcsi=next;
+        state.freezeanyrotation=0;
+        state.advancedcapactive=0;
+        if(AirCSI(next,g.csi_csimax))controls.leaping=0;
+        // Force transition even if two authored ranges have the same start.
+        if(avatar>0&&avatar<=t.tmaxobjectnumber)t.smoothanim[avatar].st=-1;
+    }
+}
+static int PWNativeThirdPersonAnimate(lua_State* L) {
+    using namespace PWThirdPerson;
+    int e=0,avatar=0;
+    if(!PWNativeThirdPersonReady(e,avatar)){lua_pushboolean(L,0);return 1;}
+    const int index=t.playercontrol.thirdperson.characterindex;
+    if(index<=0||index>g.charanimindexmax||t.charanimstates[index].obj!=avatar){
+        lua_pushboolean(L,0);return 1;
+    }
+    const auto& tp=t.playercontrol.thirdperson;
+    const bool aim=t.playercontrol.camrightmousemode!=0||tp.shotfired!=0||tp.camerafollow==0;
+    const bool moving=t.playercontrol.movement!=0&&t.player[1].health>0&&g.luacameraoverride!=1&&g.luacameraoverride!=3;
+    t.charanimstate=t.charanimstates[index];
+    t.charanimstate.e=e;
+    const bool ducked=ODEGetCharacterControllerDucking(t.aisystem.objectstartindex)!=0;
+    const bool crouchSupported=PWThirdPersonCrouchSupported(e,index);
+    t.charanimcontrols[index].ducking=CrouchAnimation(ducked&&crouchSupported);
+    const int movement=MovementAnimation(moving,t.playercontrol.isrunning!=0&&!ducked,
+        aim,t.playercontrol.movey_f,t.playercontrol.cy_f);
+    t.charanimcontrols[index].moving=movement;
+    const int style=t.charanimstate.weapstyle;
+    // Standing locomotion's loop mode does not inspect ducking. Explicitly
+    // enter the crouch transition when the physical controller has crouched.
+    if(ducked&&crouchSupported&&style>=1&&style<=5){
+        const int seq=t.charanimstate.playcsi;
+        if((seq>=t.csi_stoodmovefore[style]&&seq<t.csi_stoodvault[style])||
+           (seq>=t.csi_stoodmoverun[style]&&seq<t.csi_stoodreload[style])){
+            t.charanimstate.playcsi=t.charanimstate.rocketstyle==1?
+                t.csi_crouchdownrocket[style]:t.csi_crouchdown[style];
+        }
+    }
+    // Interrupt only existing crouch locomotion (never reload/death/attack)
+    // when stopping, changing direction or when Bullet actually stands.
+    if(PWCrouchMovementSequence(t.charanimstate.playcsi,style)){
+        const int current=t.charanimstate.playcsi;
+        const int desired=movement==1?t.csi_crouchmovefore[style]:
+            movement==2?t.csi_crouchmoveback[style]:
+            movement==3?t.csi_crouchmoveleft[style]:
+            movement==4?t.csi_crouchmoveright[style]:t.csi_crouchidle[style];
+        const int currentStart=current<t.csi_crouchmoveback[style]?t.csi_crouchmovefore[style]:
+            current<t.csi_crouchmoveleft[style]?t.csi_crouchmoveback[style]:
+            current<t.csi_crouchmoveright[style]?t.csi_crouchmoveleft[style]:t.csi_crouchmoveright[style];
+        if(!ducked||!crouchSupported||desired!=currentStart){
+            t.charanimstate.playcsi=!crouchSupported?t.csi_stood[style]:
+                (ducked?desired:(t.charanimstate.rocketstyle==1?
+                t.csi_crouchgetuprocket[style]:t.csi_crouchgetup[style]));
+            t.charanimstate.freezeanyrotation=0;
+        }
+    }
+    PWNativeAirAnimation(e,index,avatar,ducked);
+    const float polarity=GetSpeed(avatar)<0.f?-1.f:1.f;
+    SetObjectSpeed(avatar,t.entityelement[e].speedmodulator_f*t.charanimstate.animationspeed_f*polarity*2.5f*g.timeelapsed_f);
+    // This is the same engine animation state machine used by the original
+    // script. It continues to own melee, reload and authored sequences.
+    const int previousIndex=g.charanimindex;
+    g.charanimindex=index;
+    char_loop();
+    g.charanimindex=previousIndex;
+    const int original=t.charanimstate.originale;
+    if(original>0&&original<=g.entityelementlist&&t.charanimstate.obj==avatar&&ObjectExist(avatar)){
+        const int bank=t.entityelement[original].bankindex;
+        const int style=t.charanimstate.weapstyle;
+        if(bank>0&&bank<=g.entidmaster&&style>=1&&style<=5){
+            const int anim=t.entityprofile[bank].startofaianim+t.csi_stoodvaultANIM[style];
+            if(anim>=0&&anim<=g.animmax){
+            const float first=t.entityanim[bank][anim].start,last=t.entityanim[bank][anim].finish;
+            const float hold=JumpHoldFrame(first,last,t.entityprofile[bank].jumphold);
+            const float frame=GetFrame(avatar);
+            const bool airborne=ObjectAngleX(t.aisystem.objectstartindex)!=1.f;
+            const int csi=t.charanimstate.playcsi;
+            // Only hold the actual vault sequence, not other clips that
+            // happen to overlap its frame range. Release on ground contact.
+            if(hold>=0.f&&airborne&&t.playercontrol.jumpmode==1&&
+                csi>=t.csi_stoodvault[style]&&csi<t.csi_stoodvault[style]+3&&
+                frame>=first&&frame<=last&&frame>hold)SetObjectFrame(avatar,hold);
+            }
+        }
+    }
+    t.charanimstate.e=0;
+    t.charanimstates[index]=t.charanimstate;
+    lua_pushboolean(L,1);return 1;
+}
+static int PWNativeThirdPersonUpdate(lua_State* L) {
+    using namespace PWThirdPerson;
+    const auto& tp=t.playercontrol.thirdperson;
+    const int body=t.aisystem.objectstartindex;
+    int e=0,avatar=0;
+    if(!PWNativeThirdPersonReady(e,avatar)){lua_pushboolean(L,0);return 1;}
+    const Vec player={ObjectPositionX(body),ObjectPositionY(body),ObjectPositionZ(body)};
+    const float yaw=Finite(t.playercontrol.finalcameraangley_f,CameraAngleY(0));
+    const float pitch=Clamp(Signed(Finite(t.playercontrol.finalcameraanglex_f-tp.camerafocus,0.f)),-65.f,80.f);
+    static DWORD last=0;static int lastAvatar=0;static Vec lastPosition={};static float fraction=1.f;
+    static float stanceOffset=0.f;
+    static unsigned int lastEpoch=0;
+    const DWORD now=GetTickCount();
+    const bool reset=lastEpoch!=tp.pwLifecycleEpoch||lastAvatar!=avatar||now-last>250||Length(Sub(player,lastPosition))>200.f;
+    const float dt=reset?0.016f:Clamp(static_cast<float>(now-last)*0.001f,0.f,0.1f);
+    last=now;lastAvatar=avatar;lastPosition=player;lastEpoch=tp.pwLifecycleEpoch;
+    PositionObject(avatar,player.x,player.y-35.f,player.z);
+    const bool aiming=t.playercontrol.camrightmousemode==1||tp.shotfired==1||tp.camerafollow==0;
+    const float current=ObjectAngleY(avatar);
+    const bool canFace=t.player[1].health>0&&t.plrhasfocus!=0&&g.luacameraoverride!=1&&g.luacameraoverride!=3;
+    const float desired=!canFace?current:(aiming?yaw:(t.playercontrol.movement!=0?t.playercontrol.movey_f:current));
+    RotateObject(avatar,0.f,ApproachAngle(current,desired,dt),0.f);
+    t.playercontrol.thirdperson.shotfired=0;
+    // Preserve authored cutscene overrides, including angle-only overrides.
+    if(g.luacameraoverride==1||g.luacameraoverride==3){lua_pushboolean(L,1);return 1;}
+    const float orbitYaw=tp.camerafollow?yaw:ObjectAngleY(avatar);
+    // Smooth only the extra stance offset. Do not smooth the collision
+    // result or player position through geometry; recast the entire boom.
+    const float desiredStance=ODEGetCharacterControllerDucking(body)!=0?-12.f:0.f;
+    stanceOffset=reset?desiredStance:ApproachScalar(stanceOffset,desiredStance,dt,12.f);
+    const Vec pivot={player.x,player.y+Clamp(Finite(tp.cameraheight,100.f)-65.f+stanceOffset,-27.f,160.f),player.z};
+    const auto orbit=Build(orbitYaw,pitch,tp.cameradistance,static_cast<float>(tp.camerashoulder),
+        tp.cameraheight-70.f,tp.cameralocked==1);
+    const Vec ideal=Add(pivot,orbit.offset);
+    float allowed=1.f;
+    // Centre and four near-plane clearance rays. Include terrain and static
+    // geometry; retain the existing merged/lightmap collision setup.
+    if(g.lightmappedobjectoffset>=g.lightmappedobjectoffsetfinish)
+        IntersectAll(87000,87000+g.merged_new_objects-1,0,0,0,0,0,0,-123);
+    else IntersectAll(g.lightmappedobjectoffset,g.lightmappedobjectoffsetfinish,0,0,0,0,0,0,-123);
+    const Vec offsets[]={{0,0,0},Scale(orbit.right,8.f),Scale(orbit.right,-8.f),Scale(orbit.up,8.f),Scale(orbit.up,-8.f)};
+    for(const auto& offset:offsets) {
+        const Vec a=Add(pivot,offset),b=Add(ideal,offset);
+        if(ODERayTerrain(a.x,a.y,a.z,b.x,b.y,b.z)==1) {
+            const Vec hit={ODEGetRayCollisionX(),ODEGetRayCollisionY(),ODEGetRayCollisionZ()};
+            const float f=ContactFraction(a,b,hit,6.f);if(f<allowed)allowed=f;
+        }
+        if(IntersectAllEx(g.entityviewstartobj,g.entityviewendobj,a.x,a.y,a.z,b.x,b.y,b.z,avatar,1)>0) {
+            const Vec hit={ChecklistFValueA(6),ChecklistFValueB(6),ChecklistFValueC(6)};
+            const float f=ContactFraction(a,b,hit,6.f);if(f<allowed)allowed=f;
+        }
+    }
+    fraction=reset?allowed:Boom(fraction,allowed,dt,Finite(tp.cameraspeed,50.f)*0.15f);
+    const Vec cam=Add(pivot,Scale(orbit.offset,fraction));
+    PositionCamera(0,cam.x,cam.y,cam.z);
+    if(g.luacameraoverride!=2) {
+        if(tp.cameralocked==1)PointCamera(0,pivot.x,pivot.y,pivot.z);
+        else RotateCamera(0,pitch,orbitYaw,0.f);
+    }
+    lua_pushboolean(L,1);return 1;
+}
+
+static int PWCanInteract(lua_State* L) {
+    const double index=lua_tonumber(L,1),range=lua_tonumber(L,2);
+    const bool valid=lua_gettop(L)==2&&lua_isnumber(L,1)&&lua_isnumber(L,2)&&
+        index>=1&&index<=g.entityelementlist&&std::floor(index)==index&&
+        std::isfinite(range)&&range>0&&range<=1000000.0;
+    lua_pushboolean(L,valid&&PWThirdPerson::CanInteract(static_cast<int>(index),static_cast<float>(range)));
+    return 1;
+}
 void addFunctions()
 {
+    lua_register(lua,"PWCanInteract",PWCanInteract);
+    lua_register(lua,"PWNativeThirdPersonCrouch",PWNativeThirdPersonCrouch);
+    lua_register(lua,"PWNativeThirdPersonCanJump",PWNativeThirdPersonCanJump);
+    lua_register(lua,"PWNativeThirdPersonCrouchMoving",PWNativeThirdPersonCrouchMoving);
+    lua_register(lua,"PWNativeThirdPersonMove",PWNativeThirdPersonMove);
+    lua_register(lua,"PWNativeThirdPersonAnimate",PWNativeThirdPersonAnimate);
+    lua_register(lua,"PWNativeThirdPersonUpdate",PWNativeThirdPersonUpdate);
+    lua_register(lua,"PWNativeRestoreWeaponPlan",PWNativeRestoreWeaponPlan);
+    lua_register(lua,"PWNativeRestoreWeaponApply",PWNativeRestoreWeaponApply);
+    lua_register(lua,"PWProfileWriteRaw",PWProfileWriteRaw);
+    lua_register(lua,"PWProfileListRaw",PWProfileListRaw);
 	lua_register(lua, "SendMessage", LuaSendMessage);
 	lua_register(lua, "SendMessageI", LuaSendMessageI);
 	lua_register(lua, "SendMessageF", LuaSendMessageF);

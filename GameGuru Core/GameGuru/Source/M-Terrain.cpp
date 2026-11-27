@@ -3,6 +3,7 @@
 //----------------------------------------------------
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-GrassMix.h"
 #include "..\..\Dark Basic Public Shared\Dark Basic Pro SDK\Shared\Objects\ShadowMapping\cShadowMaps.h"
 #include "DirectXTex.h"
 #include "wincodec.h"
@@ -98,6 +99,7 @@ bool bEnableVeg = true; //Display veg on by default.
 
 bool bEnableWeather = false;
 int iLastUpdateVeg = 0;
+#include "PW-TerrainStyleUI.h"
 extern bool bTutorialCheckAction;
 bool TutorialNextAction(void);
 bool CheckTutorialPlaceit(void);
@@ -529,12 +531,16 @@ void imgui_terrain_loop(void)
 			t.terrain.grassupdateafterterrain = 1;
 			grass_loop();
 			t.terrain.grassupdateafterterrain = 0;
-			ShowVegetationGrid();
+            // The native vegetation grid owns all enabled species.
+            // Native visibility covers every species batch.
+            ShowVegetationGrid();
 			visuals_justshaderupdate();
 			iLastUpdateVeg = Timer();
 		}
-		else 
+		else
 		{
+            // The toggle must hide PW-owned objects as well as Classic's grid.
+            PWGrassMix::ResetInstances();
 			HideVegetationGrid();
 			iLastUpdateVeg = Timer();
 		}
@@ -567,7 +573,10 @@ void imgui_terrain_loop(void)
 			t.terrain.grassupdateafterterrain = 1;
 			grass_loop();
 			t.terrain.grassupdateafterterrain = 0;
-			ShowVegetationGrid();
+            // The native Classic species always remains the reliable base.
+            // PW's separate secondary species are overlay objects, not a
+            // replacement for the original vegetation renderer.
+            ShowVegetationGrid();
 
 			//visuals_justshaderupdate();
 			bReadyToUpdateVeg = false;
@@ -592,6 +601,13 @@ void imgui_terrain_loop(void)
 				break;
 		 }
 		#endif
+        // Execute file picker on the next UI tick, outside the widget draw.
+        if (delay_terrain_execute == 2 || delay_terrain_execute == 3)
+        {
+            const bool skyStyle = delay_terrain_execute == 2;
+            delay_terrain_execute = 0;
+            PWImportTerrainStyle(skyStyle);
+        }
 		if (skib_terrain_frames_execute > 0)
 			skib_terrain_frames_execute--;
 
@@ -900,7 +916,12 @@ void imgui_terrain_loop(void)
 					ImGui::EndCombo();
 				}
 			
-				ImGui::PopItemWidth();
+                ImGui::PopItemWidth();
+                if (ImGui::Button("Import Sky Style..."))
+                    delay_terrain_execute = 2;
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Choose one image. PW Edition clones the selected native sky style and applies this texture automatically.");
+                ImGui::TextDisabled("Automatically creates and selects a new sky style using the existing sky dome.");
 				ImGui::Indent(-10);
 				ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX(), ImGui::GetCursorPosY() + 3));
 
@@ -1167,7 +1188,138 @@ void imgui_terrain_loop(void)
 					ImGui::EndCombo();
 				}
 
-				ImGui::PopItemWidth();
+                ImGui::PopItemWidth();
+                if (ImGui::Button("Import Grass Style..."))
+                    delay_terrain_execute = 3;
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Choose one image. PW Edition clones the selected native grass style and applies this texture automatically.");
+                ImGui::TextDisabled("Automatically creates and selects a new grass style using the existing grass mesh.");
+
+                if (ImGui::CollapsingHeader("Mix Multiple Grass Types", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    // Native Classic only supports one model per grass grid.
+                    // The PW mix creates deterministic, bounded instances of
+                    // each enabled mesh over the already-painted vegetation mask.
+                    static bool pwMixFirstOpen = true;
+                    if (pwMixFirstOpen)
+                    {
+                        pwMixFirstOpen = false;
+                        if (PWGrassMix::Count() == 0 && PWGrassMix::slots[0].style.empty()
+                            && g.vegstyle_s.Len() > 0)
+                        {
+                            PWGrassMix::slots[0].style = g.vegstyle_s.Get();
+                            PWGrassMix::slots[0].enabled = true;
+                            PWGrassMix::slots[0].weight = 100.f;
+                        }
+                    }
+                    bool pwMixChanged = false;
+                    const bool pwMixWasActive = PWGrassMix::Active();
+                    for (int i = 0; i < PWGrassMix::MaxStyles; ++i)
+                    {
+                        PWGrassMix::Slot& slot = PWGrassMix::slots[i];
+                        ImGui::PushID(i);
+                        ImGui::Separator();
+                        ImGui::Text("Grass %d", i + 1);
+                        if (ImGui::Checkbox("Use", &slot.enabled)) pwMixChanged = true;
+                        ImGui::SameLine();
+                        const char* preview = slot.style.empty() ? "Select grass model" : slot.style.c_str();
+                        if (ImGui::BeginCombo("Type", preview))
+                        {
+                            for (int bank = 1; bank <= g.vegstylemax; ++bank)
+                            {
+                                const char* styleName = t.vegstylebank_s[bank].Get();
+                                if (!styleName || !*styleName) continue;
+                                const bool selected = PWStyleImport::Same(slot.style, styleName);
+                                if (ImGui::Selectable(styleName, selected))
+                                {
+                                    slot.style = styleName;
+                                    slot.enabled = true;
+                                    if (slot.weight <= 0.f) slot.weight = 25.f;
+                                    pwMixChanged = true;
+                                }
+                                if (selected) ImGui::SetItemDefaultFocus();
+                            }
+                            ImGui::EndCombo();
+                        }
+                        if (ImGui::SliderFloat("Spread weight (%)", &slot.weight, 0.f, 100.f, "%.0f"))
+                            pwMixChanged = true;
+                        ImGui::PopID();
+                    }
+                    float total = 0.f;
+                    for (int i = 0; i < PWGrassMix::MaxStyles; ++i)
+                        if (PWGrassMix::slots[i].enabled && !PWGrassMix::slots[i].style.empty())
+                            total += PWGrassMix::slots[i].weight;
+                    if (PWGrassMix::Active() && total > 0.f)
+                    {
+                        ImGui::TextUnformatted("Spread across the painted grass areas:");
+                        for (int i = 0; i < PWGrassMix::MaxStyles; ++i)
+                        {
+                            const PWGrassMix::Slot& slot = PWGrassMix::slots[i];
+                            if (slot.enabled && slot.weight > 0.f && !slot.style.empty())
+                                ImGui::Text("%s: %.0f%%", slot.style.c_str(),
+                                    100.f * slot.weight / total);
+                        }
+                        ImGui::TextDisabled("Classic remains the first species; preview adds other species.");
+                        ImGui::TextDisabled("Mixed overlay uses up to 320 extra instances; precise ratios are not yet verified.");
+                    }
+                    else
+                        ImGui::TextDisabled("Select at least two enabled types to mix. One type uses Classic grass.");
+
+                    // When a second type is first selected, enable the
+                    // supplementary renderer so the mix actually appears.
+                    // The Classic grass stays visible at all times, and the
+                    // user can explicitly disable secondary grass below.
+                    if (!pwMixWasActive && PWGrassMix::Active())
+                        PWGrassMix::SetPreviewEnabled(true);
+                    bool pwPreview = PWGrassMix::PreviewEnabled();
+                    if (ImGui::Checkbox("Show additional grass types##PWSafeGrassPreview", &pwPreview))
+                    {
+                        PWGrassMix::SetPreviewEnabled(pwPreview);
+                        pwMixChanged = true;
+                    }
+                    const std::string pwGrassDiag = PWGrassMix::Diagnostics();
+                    ImGui::TextWrapped("%s",pwGrassDiag.c_str());
+                    if (ImGui::Button("Copy grass diagnostics##PWGrassCopy"))
+                        ImGui::SetClipboardText(pwGrassDiag.c_str());
+                    if (!PWGrassMix::PreviewEnabled())
+                        ImGui::TextDisabled("Safe mode: Classic grass remains visible; selected mix is saved.");
+                    else
+                        ImGui::TextDisabled("Native weighted grass batches share terrain density, mask and shaders.");
+                    if (pwMixChanged)
+                    {
+                        PWGrassMix::Dirty();
+                        bUpdateVeg = true;
+                        iLastUpdateVeg = 0;
+                        g.projectmodified = 1;
+                        // The native Classic renderer is the first enabled
+                        // mix species at full density; other selected species
+                        // are supplementary objects. Previously the native
+                        // base was only updated when Count()==1, leaving an
+                        // unrelated old grass style dominating any multi-mix.
+                        // Keep a valid native species even with two+ slots.
+                        if (PWGrassMix::Count() >= 1)
+                        {
+                            for (int n = 0; n < PWGrassMix::MaxStyles; ++n)
+                            {
+                                const PWGrassMix::Slot& slot = PWGrassMix::slots[n];
+                                if (!slot.enabled || slot.weight <= 0.f || slot.style.empty()) continue;
+                                for (int bank = 1; bank <= g.vegstylemax; ++bank)
+                                {
+                                    if (!PWStyleImport::Same(slot.style, t.vegstylebank_s[bank].Get())) continue;
+                                    g.vegstyleindex = bank;
+                                    g.vegstyle_s = t.vegstylebank_s[bank];
+                                    t.visuals.vegetationindex = bank;
+                                    t.visuals.vegetation_s = t.vegstylebank_s[bank];
+                                    t.gamevisuals.vegetationindex = bank;
+                                    t.gamevisuals.vegetation_s = t.vegstylebank_s[bank];
+                                    grass_changevegstyle();
+                                    break;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
 
 				ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX(), ImGui::GetCursorPosY() + 3));
 				ImGui::Text("Display Vegetation:");
@@ -4069,11 +4221,14 @@ void terrain_shadowupdate ( void )
 				}
 			}
 
-			//  hide all vegetation
-			if (  t.hardwareinfoglobals.nograss == 0 ) 
+			//  Hide both Classic vegetation and PW mixed grass while rendering
+            // the cascade shadow targets. Mixed instances were previously left
+            // visible here, unlike the native grid.
+			if (  t.hardwareinfoglobals.nograss == 0 )
 			{
-				HideVegetationGrid (  );
+				HideVegetationGrid();
 			}
+            PWGrassMix::SetInstancesVisible(false);
 
 			//  shadows for map editor and game
 			if ( 1 ) 
@@ -4280,15 +4435,27 @@ void terrain_shadowupdate ( void )
 				}
 			}
 
-			//  show all vegetation, but only if in game (we don't show veg in grid edit mode)
-			if (  t.hardwareinfoglobals.nograss == 0 ) 
+			// Restore only the active vegetation renderer after the shadow pass.
+            // Showing both sets of blades overlays textures and causes flicker.
+			if (t.hardwareinfoglobals.nograss == 0)
 			{
 				#ifdef ENABLEIMGUI
-				if (  t.game.gameloop  !=  0 || bEnableVeg )  ShowVegetationGrid (  );
+                if (t.game.gameloop != 0 || bEnableVeg)
 				#else
-				  if (t.game.gameloop != 0)  ShowVegetationGrid();
+                if (t.game.gameloop != 0)
 				#endif
+                {
+                    // Restore Classic's grid AND the secondary grass overlay
+                    // after the shadow pass; never hide Classic in mixed mode.
+                    ShowVegetationGrid();
+                    // The source/primitive proof must remain visible even
+                    // when zero painted samples were placed. Each ordinary
+                    // mixed instance is still restricted by its own rs.used.
+                    PWGrassMix::SetInstancesVisible(PWGrassMix::RenderEnabled());
+                }
+                else PWGrassMix::SetInstancesVisible(false);
 			}
+            else PWGrassMix::SetInstancesVisible(false);
 
 			//  show water in editor
 			if (  ObjectExist(t.terrain.objectstartindex+2) == 1 && t.twaterobj == 1  )  ShowObject (  t.terrain.objectstartindex+2 );

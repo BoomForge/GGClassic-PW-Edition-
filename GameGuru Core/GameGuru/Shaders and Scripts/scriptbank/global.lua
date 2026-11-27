@@ -74,6 +74,10 @@ g_PlayerDeadTime = 0
 g_Time = 0
 g_TimeElapsed = 0
 g_KeyPressE = 0
+g_PWInteractionMode = 0
+g_PWInteractionTarget = 0
+g_PWInteractionPressed = 0
+g_PWInteractionCaller = 0
 g_KeyPressQ = 0
 g_KeyPressW = 0
 g_KeyPressA = 0
@@ -215,55 +219,219 @@ function GameLoopQuit()
  gameloop.quit()
 end
 
-function GameLoopSaveStats()
- file = io.open("savegames\\standalonelevelstats.dat", "w+")
- io.output(file)
- io.write("v1\n")
- io.write(g_PlayerHealth .. "\n")
- io.write(g_PlayerLives .. "\n")
- WeaponID = GetPlayerWeaponID()
- io.write(WeaponID .. "\n")
- for index = 1, 10, 1 do
-  WeaponID = GetWeaponSlot ( index )
-  io.write(WeaponID .. "\n")
-  WeaponAmmoQty = GetWeaponAmmo ( index )
-  io.write(WeaponAmmoQty .. "\n")
-  WeaponAmmoClipQty = GetWeaponClipAmmo ( index )
-  io.write(WeaponAmmoClipQty .. "\n")
-  WeaponAmmoPoolQty = GetWeaponPoolAmmo ( index )
-  io.write(WeaponAmmoPoolQty .. "\n")
+-- PW Edition: independent, opt-in connected-area quest state.
+-- Classic projects without the companion module retain their old behaviour.
+local pwTransitionModuleLoaded, pwTransitionModule = pcall(require, "scriptbank\\pw_transition_state")
+if not pwTransitionModuleLoaded then pwTransitionModule = nil end
+
+function PWSetTransitionValue(key, value)
+ if pwTransitionModule then return pwTransitionModule.set(key, value) end
+ return false
+end
+
+function PWGetTransitionValue(key, fallback)
+ if pwTransitionModule then return pwTransitionModule.get(key, fallback) end
+ return fallback
+end
+
+function PWClearTransitionValues()
+ if pwTransitionModule then pwTransitionModule.clear() end
+end
+
+-- PW Edition persistent named player profiles. Explicit API, no changes
+-- to Classic save slots or automatic profile creation for existing games.
+local function pwProfileName(name)
+ return type(name)=="string" and #name>0 and #name<=32 and name:match("^[%w_%-]+$")~=nil
+end
+local function pwProfileFinite(value,limit,integer)
+ return type(value)=="number" and value==value and value>=-limit and value<=limit
+  and (not integer or math.floor(value)==value)
+end
+local function pwProfileParse(payload)
+ if type(payload)~="string" or #payload>160*1024 or not pwTransitionModule or not pwTransitionModule.parse then return nil end
+ local pos=1
+ local function line()
+  local stop=payload:find("\n",pos,true)
+  if not stop then return nil end
+  local value=payload:sub(pos,stop-1);pos=stop+1;return value
  end
- io.close(file)
+ if line()~="PWGAME1" then return nil end
+ local stats={}
+ for i=1,49 do
+  local value=tonumber(line())
+  if not pwProfileFinite(value,i<=43 and 2147483647 or 1000000,i<=43) then return nil end
+  if i<=43 and value<0 then return nil end
+  stats[i]=value
+ end
+ local scalars=payload:sub(pos)
+ if not pwTransitionModule.parse(scalars) then return nil end
+ return stats,scalars
+end
+-- Semantic gameplay queries. Raw InKey/ScanCode retain their meaning.
+function PWActionDown(action)
+ local keys={
+  move_forward=g_KeyPressW,move_backward=g_KeyPressS,move_left=g_KeyPressA,move_right=g_KeyPressD,
+  jump=g_KeyPressSPACE,crouch=g_KeyPressC,reload=g_KeyPressR,lean_left=g_KeyPressQ,
+  interact=g_KeyPressE,sprint=g_KeyPressSHIFT,action_f=g_KeyPressF,action_j=g_KeyPressJ,
+  use=g_PlrKeyRETURN,action_z=g_PlrKeyZ
+ }
+ return keys[action]==1
+end
+
+function PWProfileSave(name)
+ if not pwProfileName(name) or not PWProfileWriteRaw or not pwTransitionModule or not pwTransitionModule.export then return false end
+ local stats={g_PlayerHealth,g_PlayerLives,GetPlayerWeaponID()}
+ for index=1,10 do
+  stats[#stats+1]=GetWeaponSlot(index) or 0
+  stats[#stats+1]=GetWeaponAmmo(index) or 0
+  stats[#stats+1]=GetWeaponClipAmmo(index) or 0
+  stats[#stats+1]=GetWeaponPoolAmmo(index) or 0
+ end
+ for _,value in ipairs({g_PlayerPosX,g_PlayerPosY,g_PlayerPosZ,g_PlayerAngX,g_PlayerAngY,g_PlayerAngZ}) do stats[#stats+1]=value end
+ if #stats~=49 then return false end
+ local lines={"PWGAME1"}
+ for i=1,49 do
+  local v=stats[i]
+  if not pwProfileFinite(v,i<=43 and 2147483647 or 1000000,i<=43) or (i<=43 and v<0) then return false end
+  lines[#lines+1]=string.format("%.17g",v)
+ end
+ local scalars=pwTransitionModule.export()
+ if not scalars then return false end
+ local payload=table.concat(lines,"\n").."\n"..scalars
+ if not pwProfileParse(payload) then return false end
+ local ok=PWProfileWriteRaw(name,payload)
+ g_PWProfileStatus=ok and "Profile saved." or "Profile save failed."
+ return ok
+end
+function PWProfileCheckpoint(name) return PWProfileSave(name) end
+function PWProfileAutosave(name) return PWProfileSave(name) end
+function PWProfileList()
+ return PWProfileListRaw and PWProfileListRaw() or {}
+end
+function PWProfileLoad(name)
+ if not pwProfileName(name) then return false end
+ -- Accepted for asynchronous processing, not a claim the load succeeded.
+ SendMessageS("pwprofileload",name)
+ return true
+end
+function PWProfileValidatePending()
+ g_PWProfileValid=pwProfileParse(g_PWProfilePayload) and 1 or 0
+end
+function PWProfileImportPendingValues()
+ local stats,scalars=pwProfileParse(g_PWProfilePayload)
+ if stats then pwTransitionModule.import(scalars) end
+end
+-- Preflight only in the native single-player destination. Older engines and
+-- FPS retain their established restore behaviour.
+local function pwNativeRestorePlan(saved)
+ if not PWNativeRestoreWeaponPlan or not PWNativeRestoreWeaponApply then return nil end
+ return PWNativeRestoreWeaponPlan(saved[3],saved[4],saved[8],saved[12],saved[16],
+  saved[20],saved[24],saved[28],saved[32],saved[36],saved[40])
+end
+function PWProfileApplyPending()
+ g_PWProfileValid=0
+ g_PWProfileWeaponFallback=0
+ local saved,scalars=pwProfileParse(g_PWProfilePayload)
+ if not saved then return end
+ local planned=pwNativeRestorePlan(saved)
+ if planned~=nil and (planned<0 or saved[1]<=0) then return end
+ if not pwTransitionModule.import(scalars) then return end
+ g_PlayerHealth=saved[1];g_PlayerLives=saved[2]
+ SetPlayerHealth(saved[1]);SetPlayerLives(saved[2])
+ local offset=4
+ for index=1,10 do
+  local weapon=saved[offset]
+  SetWeaponSlot(index,weapon,weapon)
+  SetWeaponAmmo(index,saved[offset+1])
+  SetWeaponClipAmmo(index,saved[offset+2])
+  SetWeaponPoolAmmo(index,saved[offset+3])
+  offset=offset+4
+ end
+ if planned~=nil then
+  local selected=PWNativeRestoreWeaponApply(planned)
+  g_PWProfileWeaponFallback=(not selected or planned~=saved[3]) and 1 or 0
+ else ChangePlayerWeaponID(saved[3]) end
+ SetFreezePosition(saved[44],saved[45],saved[46])
+ SetFreezeAngle(saved[47],saved[48],saved[49])
+ TransportToFreezePosition()
+ g_PWProfileValid=1
+end
+
+function GameLoopSaveStats()
+ -- Reuse Classic's existing v1 health/lives and 10 weapon-slot save format.
+ -- Avoid leaving a partially written file when the destination is unavailable.
+ local file = io.open("savegames\\standalonelevelstats.dat", "w+")
+ if not file then return end
+ local ok = file:write("v1\n", tostring(g_PlayerHealth or 0), "\n",
+                            tostring(g_PlayerLives or 0), "\n",
+                            tostring(GetPlayerWeaponID() or 0), "\n")
+ if ok then
+  for index = 1, 10 do
+   ok = file:write(tostring(GetWeaponSlot(index) or 0), "\n",
+                   tostring(GetWeaponAmmo(index) or 0), "\n",
+                   tostring(GetWeaponClipAmmo(index) or 0), "\n",
+                   tostring(GetWeaponPoolAmmo(index) or 0), "\n")
+   if not ok then break end
+  end
+ end
+ local closed = file:close()
+ if ok and closed and pwTransitionModule then
+  pwTransitionModule.save()
+ end
 end
 
 function GameLoopLoadStats()
- file = io.open("savegames\\standalonelevelstats.dat", "r")
- if file ~= nil then
-  io.input(file)
-  versionString = io.read()
-  g_PlayerHealth = tonumber(io.read())
-  g_PlayerLives = tonumber(io.read())
-  SetPlayerHealth(g_PlayerHealth)
-  SetPlayerLives(g_PlayerLives)
-  CurrentlyHeldWeaponID = tonumber(io.read())
-  for index = 1, 10, 1 do
-   WeaponID = tonumber(io.read())
-   if WeaponID > 0 then
-    SetWeaponSlot ( index, WeaponID, WeaponID )
-    ChangePlayerWeaponID(WeaponID)
-   else
-    SetWeaponSlot ( index, 0, 0 )
+ local file = io.open("savegames\\standalonelevelstats.dat", "r")
+ if not file then return end
+ local versionString = file:read("*l")
+ local saved = {}
+ local valid = versionString == "v1"
+ if valid then
+  -- Three player stats plus four values for each of 10 weapon slots.
+  -- Parse the whole file first; corrupt/truncated saves must not partly
+  -- overwrite a newly initialised player's stats or inventory.
+  for index = 1, 43 do
+   local line = file:read("*l")
+   local value = tonumber(line)
+   if value == nil or value ~= value or value < -2147483648
+      or value > 2147483647 or math.floor(value) ~= value then
+    valid = false
+    break
    end
-   WeaponAmmoQty = tonumber(io.read())
-   SetWeaponAmmo ( index, WeaponAmmoQty ) 
-   WeaponAmmoClipQty = tonumber(io.read())
-   SetWeaponClipAmmo ( index, WeaponAmmoClipQty )
-   WeaponAmmoPoolQty = tonumber(io.read())
-   SetWeaponPoolAmmo ( index, WeaponAmmoPoolQty )
+   saved[index] = value
   end
-  io.close(file)
-  ChangePlayerWeaponID(CurrentlyHeldWeaponID)
  end
+ file:close()
+ if not valid then return end
+ local planned=pwNativeRestorePlan(saved)
+ if planned~=nil and planned<0 then return end
+
+ g_PlayerHealth = saved[1]
+ g_PlayerLives = saved[2]
+ SetPlayerHealth(g_PlayerHealth)
+ SetPlayerLives(g_PlayerLives)
+ local heldWeaponID = saved[3]
+ local offset = 4
+ for index = 1, 10 do
+  local weaponID = saved[offset]
+  local ammo = saved[offset+1]
+  local clip = saved[offset+2]
+  local pool = saved[offset+3]
+  if weaponID > 0 then
+   SetWeaponSlot(index, weaponID, weaponID)
+   if planned==nil then ChangePlayerWeaponID(weaponID) end
+  else
+   SetWeaponSlot(index, 0, 0)
+  end
+  SetWeaponAmmo(index, ammo)
+  SetWeaponClipAmmo(index, clip)
+  SetWeaponPoolAmmo(index, pool)
+  offset = offset + 4
+ end
+ if planned~=nil then PWNativeRestoreWeaponApply(planned)
+ else ChangePlayerWeaponID(heldWeaponID) end
+
+ if pwTransitionModule then pwTransitionModule.load() end
 end
 
 function PlayerControl()
@@ -335,10 +503,19 @@ function GetPlayerDistance( e )
 end
 
 -- Common Action Functions (called by LUA)
+-- Explicit contextual API; older binaries retain their original script behavior.
+function PWInteractionFocused(e)
+ return g_PWInteractionMode == 1 and g_PWInteractionTarget == e
+end
+function PWInteractionPressed(e)
+ return PWInteractionFocused(e) and g_PWInteractionPressed == e
+end
 function Prompt(str)
+ if g_PWInteractionMode == 1 and g_PWInteractionCaller ~= 0 and g_PWInteractionCaller ~= g_PWInteractionTarget then return end
  SendMessageS("prompt",str);
 end
 function PromptDuration(str,v)
+ if g_PWInteractionMode == 1 and g_PWInteractionCaller ~= 0 and g_PWInteractionCaller ~= g_PWInteractionTarget then return end
  SendMessageS("promptduration",v,str);
 end
 function PromptTextSize(v)

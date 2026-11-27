@@ -1,0 +1,62 @@
+#include "PW-GrassMix.h"
+#include "PW-ProjectileContact.h"
+#include <cassert>
+#include <cstdio>
+#include <cmath>
+#include <limits>
+namespace PWGrassMix { Slot slots[MaxStyles]; unsigned revision = 0; }
+int main() {
+    using namespace PWGrassMix;
+    // Fast direct projectiles, near misses, short segments and stopped physics.
+    float hit=-1;
+    assert(PWProjectile::FirstContact(-100,0,0,100,0,0,0,0,0,10,hit));
+    assert(std::fabs(hit-0.45f)<0.0001f);
+    assert(!PWProjectile::FirstContact(-100,11,0,100,11,0,0,0,0,10,hit));
+    assert(!PWProjectile::FirstContact(-100,0,0,-20,0,0,0,0,0,10,hit));
+    assert(!PWProjectile::FirstContact(-20,0,0,-20,0,0,0,0,0,10,hit));
+    assert(PWProjectile::FirstContact(0,0,0,0,0,0,0,0,0,10,hit) && hit==0);
+    assert(!PWProjectile::FirstContact(0,0,0,1,0,0,0,0,0,0,hit));
+    assert(!Active());
+    slots[0] = {"Short Grass", 25.f, true};
+    slots[1] = {"Tall Grass", 75.f, true};
+    assert(Active());
+    assert(Pick(0.0f) == 0);
+    assert(Pick(0.249f) == 0);
+    assert(Pick(0.251f) == 1);
+    assert(Pick(0.999f) == 1);
+    assert(Hash(100, 200) == Hash(100, 200));
+    assert(Hash(100, 200) != Hash(101, 200));
+    // Verify the same deterministic seeded hash as the live painter chooses
+    // both species over a painted patch; this is NOT a GPU-render proof.
+    slots[0].weight = slots[1].weight = 50.f;
+    int selectedNative=0, selectedSecondary=0;
+    for (unsigned z=100;z<132;++z)
+        for (unsigned x=100;x<132;++x) {
+            const int species=Pick(Unit(Hash(x,z)));
+            if (species==0) ++selectedNative;
+            if (species==1) ++selectedSecondary;
+        }
+    assert(selectedNative>350);
+    assert(selectedSecondary>350);
+    // Normalised world dimensions must respect native VegWidth/VegHeight,
+    // custom-style size settings, and MUST apply scale only once to instances.
+    InstanceSizing size;
+    assert(ComputeInstanceSizing(25.f, 10.f, 50.f, 50.f, 100.f, size));
+    assert(std::fabs(size.xz-200.f)<0.001f);
+    assert(std::fabs(size.y-500.f)<0.001f);
+    assert(ComputeInstanceSizing(25.f, 10.f, 50.f, 50.f, 200.f, size));
+    assert(std::fabs(size.xz-400.f)<0.001f);
+    assert(std::fabs(size.y-1000.f)<0.001f);
+    assert(!ComputeInstanceSizing(0.f, 10.f, 50.f, 50.f, 100.f, size));
+    assert(!ComputeInstanceSizing(25.f, 0.f, 50.f, 50.f, 100.f, size));
+    assert(!ComputeInstanceSizing(25.f, 10.f, 0.f, 50.f, 100.f, size));
+    assert(!ComputeInstanceSizing(25.f, 10.f, 50.f, 50.f,
+        std::numeric_limits<float>::infinity(), size));
+    slots[1].enabled = false;
+    assert(!Active());
+    assert(Pick(0.5f) == 0);
+    slots[0].weight = 0.f;
+    assert(Pick(0.5f) == -1);
+    puts("PW weighted multi-grass selection tests passed");
+    return 0;
+}

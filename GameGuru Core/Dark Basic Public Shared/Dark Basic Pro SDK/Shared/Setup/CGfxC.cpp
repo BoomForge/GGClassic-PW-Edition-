@@ -91,6 +91,11 @@ DBPRO_GLOBAL int							m_iProcess;			// vertex processing mode
 DBPRO_GLOBAL int							m_iDepth;			// depth of display
 DBPRO_GLOBAL int							m_iBackBufferCount;	// back buffer count
 DBPRO_GLOBAL bool							m_bLockable;		// lockable mode
+#ifdef DX11
+// Experimental main-window flip presentation. OFF unless explicitly requested.
+// Keep secondary chains, legacy DX9, fullscreen and Present(TEST) unchanged.
+static bool g_pwMainFlipModel = false;
+#endif
 DBPRO_GLOBAL bool							m_bVSync = true;
 DBPRO_GLOBAL int							m_iVSyncInterval = 1;
 DBPRO_GLOBAL bool							m_bVSyncInitialDefault = false;
@@ -512,8 +517,13 @@ DARKSDK HRESULT SwapChainPresent ( int iID )
 		
 		if(g_bNoSwapchainPresent)
 			return m_pSwapChain[iID]->Present(iSyncInterval, DXGI_PRESENT_TEST);
-		else
-			return m_pSwapChain [ iID ]->Present( iSyncInterval, 0 );
+		HRESULT hrPresent = m_pSwapChain[iID]->Present(iSyncInterval, 0);
+		// Flip presentation unbinds the back buffer. Only restore the PRIMARY
+		// main-chain render target after a real successful Present, never TEST.
+		if ( SUCCEEDED(hrPresent) && iID == 0 && g_pwMainFlipModel &&
+			 m_pImmediateContext && m_pRenderTargetView )
+			m_pImmediateContext->OMSetRenderTargets(1, &m_pRenderTargetView, m_pDepthStencilView);
+		return hrPresent;
 	}
 	else
 		return 0;
@@ -2255,9 +2265,15 @@ DARKSDK bool SetupDX11 ( void )
         D3D_FEATURE_LEVEL_11_0,
 	};
 	g_featureLevel = D3D_FEATURE_LEVEL_11_0;
+	// An opt-in trial for Win10+ windowed/borderless mode. The old path remains
+	// the default while we benchmark, test fullscreen and validate GDI interop.
+	char pwFlipEnv[4] = {};
+	const DWORD pwFlipLen = GetEnvironmentVariableA("GGCPW_DXGI_FLIP", pwFlipEnv, sizeof(pwFlipEnv));
+	bool pwTryFlip = (bWindowed && m_bVSync && pwFlipLen == 1 && pwFlipEnv[0] == '1');
+	g_pwMainFlipModel = false;
     DXGI_SWAP_CHAIN_DESC sd;
 	ZeroMemory ( &sd, sizeof( sd ) );
-    sd.BufferCount							= 1;
+    sd.BufferCount = pwTryFlip ? 3 : 1;
     sd.BufferDesc.Width						= m_iWidth;
     sd.BufferDesc.Height					= m_iHeight;
     sd.BufferDesc.Format					= GGFMT_A8R8G8B8;
@@ -2265,13 +2281,13 @@ DARKSDK bool SetupDX11 ( void )
 	{
 		sd.BufferDesc.RefreshRate.Numerator		= 0;
 		sd.BufferDesc.RefreshRate.Denominator	= 1;
-		sd.SwapEffect							= DXGI_SWAP_EFFECT_DISCARD;
+		sd.SwapEffect = pwTryFlip ? DXGI_SWAP_EFFECT_FLIP_DISCARD : DXGI_SWAP_EFFECT_DISCARD;
 	}
 	else
 	{
 		sd.BufferDesc.RefreshRate.Numerator		= numerator;
 		sd.BufferDesc.RefreshRate.Denominator	= denominator;
-		sd.SwapEffect							= DXGI_SWAP_EFFECT_DISCARD;
+		sd.SwapEffect = pwTryFlip ? DXGI_SWAP_EFFECT_FLIP_DISCARD : DXGI_SWAP_EFFECT_DISCARD;
 	}
 	if ( bWindowed )
 		sd.Flags = 0 ;
@@ -2307,6 +2323,44 @@ DARKSDK bool SetupDX11 ( void )
 												D3D11_SDK_VERSION, &sd, &m_pSwapChain[0], &m_pD3D, 
 												&g_featureLevel, &m_pImmediateContext );
 	}
+	if ( FAILED(hr) && pwTryFlip )
+	{
+		// A driver, OS or presentation mode may refuse flip-model creation.
+		// Fall back to the original single-buffer blt model rather than
+		// preventing a PW Edition user from opening the editor.
+		SAFE_RELEASE(m_pSwapChain[0]);
+		SAFE_RELEASE(m_pImmediateContext);
+		SAFE_RELEASE(m_pD3D);
+		sd.BufferCount = 1;
+		sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+		if ( m_iForceAdapterD3D11ONLY == 1 )
+		{
+			hr = D3D11CreateDeviceAndSwapChain(pAdapter, adapterType, NULL, creationFlags,
+				featureLevelsD3D11ONLY, ARRAYSIZE(featureLevelsD3D11ONLY),
+				D3D11_SDK_VERSION, &sd, &m_pSwapChain[0], &m_pD3D,
+				&g_featureLevel, &m_pImmediateContext);
+			if ( FAILED(hr) )
+				hr = D3D11CreateDeviceAndSwapChain(pAdapter, adapterType, NULL, creationFlags,
+					featureLevels, ARRAYSIZE(featureLevels),
+					D3D11_SDK_VERSION, &sd, &m_pSwapChain[0], &m_pD3D,
+					&g_featureLevel, &m_pImmediateContext);
+		}
+		else
+		{
+			hr = D3D11CreateDeviceAndSwapChain(pAdapter, adapterType, NULL, creationFlags,
+				featureLevels, ARRAYSIZE(featureLevels),
+				D3D11_SDK_VERSION, &sd, &m_pSwapChain[0], &m_pD3D,
+				&g_featureLevel, &m_pImmediateContext);
+		}
+		pwTryFlip = false;
+		OutputDebugStringA("PW Edition: flip-model swap chain unavailable; using legacy DXGI blt model.\n");
+	}
+	if ( SUCCEEDED(hr) )
+	{
+		g_pwMainFlipModel = pwTryFlip;
+		if ( g_pwMainFlipModel )
+			OutputDebugStringA("PW Edition: experimental main-window DXGI FLIP_DISCARD enabled.\n");
+	}
     if( FAILED( hr ) )
 	{
 		if ( hr == D3D11_ERROR_FILE_NOT_FOUND ) Error1 ( "D3D11CreateDeviceAndSwapChain = D3D11_ERROR_FILE_NOT_FOUND\n" );
@@ -2332,7 +2386,10 @@ DARKSDK bool SetupDX11 ( void )
 	// Set Full screen state (or not)
 	if ( m_pSwapChain[0] ) 
 	{
-		m_pSwapChain[0]->SetFullscreenState ( !bWindowed, NULL );
+		// Keep the experimental flip chain windowed. No fullscreen state
+		// transition means no extra ResizeBuffers obligation here.
+		if ( !g_pwMainFlipModel )
+			m_pSwapChain[0]->SetFullscreenState ( !bWindowed, NULL );
 		// Create back buffer and depth buffer (with views) from swapchain
 		if ( GetBackBufferAndDepthBuffer() == false )
 			return false;

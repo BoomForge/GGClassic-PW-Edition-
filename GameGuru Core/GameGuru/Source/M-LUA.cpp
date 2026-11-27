@@ -5,6 +5,8 @@
 // Includes
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-ThirdPersonGameplay.h"
+#include <cstring>
 
 // Externs
 #ifdef VRTECH
@@ -15,8 +17,63 @@ extern GGVR_PlayerData GGVR_Player;
 //  LUA Module
 // 
 
+namespace {
+    PWThirdPerson::InteractionPress pwInteractionPress;
+    int pwInteractionMode=0,pwInteractionTarget=0,pwInteractionPressed=0;
+    // Only stock contextual scripts and deliberately named custom scripts
+    // participate. Ordinary AI, zones, automatic pickups and FPS scripts retain
+    // their original key state and execution schedule.
+    float PWInteractionRange(const char* name) {
+        if(!name)return 0.f;
+        if(std::strcmp(name,"door")==0||std::strcmp(name,"switchmain")==0)return 100.f;
+        if(std::strcmp(name,"doorswitch")==0||std::strcmp(name,"doorswitchanimate")==0||
+            std::strcmp(name,"lightswitch")==0||std::strcmp(name,"key")==0||
+            std::strcmp(name,"weapon")==0||std::strncmp(name,"pw_interact_",12)==0)return 150.f;
+        return 0.f;
+    }
+    void PWUpdateInteraction() {
+        using namespace PWThirdPerson;
+        pwInteractionMode=0;pwInteractionTarget=0;pwInteractionPressed=0;
+        Vec origin={};int avatar=0;
+        char legacy[4]={};
+        const bool useLegacy=GetEnvironmentVariableA("GGCPW_LEGACY_THIRDPERSON",legacy,sizeof(legacy))==1&&legacy[0]=='1';
+        if(!useLegacy&&t.playercontrol.thirdperson.enabled==1&&t.game.runasmultiplayer==0&&
+            g.gvrmode==0&&g.globals.riftmode==0&&t.conkit.editmodeactive==0&&PlayerOrigin(origin,avatar)) {
+            pwInteractionMode=1;
+        }
+        const bool allowed=pwInteractionMode==1&&t.game.gameloop==1&&
+            t.player[t.plrid].health>0&&t.plrhasfocus!=0&&g.luacameraoverride==0&&g.luaactivatemouse==0;
+        if(allowed) {
+            const float yaw=ObjectAngleY(avatar);
+            float best=0.f;
+            for(int e=1;e<=g.entityelementlist;++e) {
+                auto& ent=t.entityelement[e]; // cStr::Get is non-const in Classic
+                if(ent.active==0||ent.staticflag!=0||ent.eleprof.aimain!=1||ent.eleprof.aipreexit>=1||
+                    e==t.playercontrol.thirdperson.charactere)continue;
+                const float range=PWInteractionRange(ent.eleprof.aimainname_lower_s.Get());
+                if(range<=0.f)continue;
+                // Reject distant objects using live transforms, never stale script coordinates.
+                if(ent.obj<=0||!ObjectExist(ent.obj))continue;
+                if(!InReach(origin,{ObjectPositionX(ent.obj),ObjectPositionY(ent.obj),ObjectPositionZ(ent.obj)},range+100.f))continue;
+                Vec target={};int object=0;
+                if(!EntityTarget(e,target,object)||object==avatar||!GetVisible(object))continue;
+                const float score=InteractionScore(origin,target,yaw,range);
+                if(BetterInteraction(score,e,best,pwInteractionTarget)&&LineClear(origin,target,avatar,object)) {
+                    best=score;pwInteractionTarget=e;
+                }
+            }
+        }
+        pwInteractionPressed=pwInteractionPress.Step(t.tKeyPressE!=0,allowed,pwInteractionTarget);
+        LuaSetInt("g_PWInteractionMode",pwInteractionMode);
+        LuaSetInt("g_PWInteractionTarget",pwInteractionTarget);
+        LuaSetInt("g_PWInteractionPressed",pwInteractionPressed);
+        LuaSetInt("g_PWInteractionCaller",0);
+    }
+}
 void lua_init ( void )
 {
+    pwInteractionPress=PWThirdPerson::InteractionPress{};
+    pwInteractionMode=pwInteractionTarget=pwInteractionPressed=0;
 	//  Clear lua bank
 	g.luabankmax=0 ; Dim (  t.luabank_s,g.luabankmax  );
 
@@ -358,13 +415,15 @@ void lua_loop_begin ( void )
 	#endif
 
 	//  Quick detection of E key
+    extern bool PWGameplayControlsActive();
+    extern int PWGameplayKey(int logical,int fallback);
 	if (  t.aisystem.processplayerlogic == 1 ) 
 	{
-		if (  t.player[t.plrid].health>0  )  t.tKeyPressE = KeyState(18); else t.tKeyPressE = 0;
+		if (  t.player[t.plrid].health>0  )  t.tKeyPressE = PWGameplayKey(18,18); else t.tKeyPressE = 0;
 	}
 	else
 	{
-		t.tKeyPressE=KeyState(g.keymap[18]);
+		t.tKeyPressE=PWGameplayKey(18,g.keymap[18]);
 	}
 	if ( g.gxbox == 1 ) 
 	{
@@ -379,25 +438,25 @@ void lua_loop_begin ( void )
 	}
 	#endif
 	LuaSetInt ( "g_KeyPressE",t.tKeyPressE );
-	LuaSetInt ( "g_KeyPressQ",KeyState(g.keymap[16]) );
+	LuaSetInt ( "g_KeyPressQ",PWGameplayKey(16,g.keymap[16]) );
 
 	// 241115 - other common keys which might require SIMULTANEOUS detection (bot control)
-	LuaSetInt ( "g_KeyPressW", KeyState(g.keymap[17]) );
-	LuaSetInt ( "g_KeyPressA", KeyState(g.keymap[30]) );
-	LuaSetInt ( "g_KeyPressS", KeyState(g.keymap[31]) );
-	LuaSetInt ( "g_KeyPressD", KeyState(g.keymap[32]) );
-	LuaSetInt ( "g_KeyPressR", KeyState(g.keymap[19]) );
-	LuaSetInt ( "g_KeyPressF", KeyState(g.keymap[33]) );
-	LuaSetInt ( "g_KeyPressC", KeyState(g.keymap[46]) );
+	LuaSetInt ( "g_KeyPressW", PWGameplayKey(17,g.keymap[17]) );
+	LuaSetInt ( "g_KeyPressA", PWGameplayKey(30,g.keymap[30]) );
+	LuaSetInt ( "g_KeyPressS", PWGameplayKey(31,g.keymap[31]) );
+	LuaSetInt ( "g_KeyPressD", PWGameplayKey(32,g.keymap[32]) );
+	LuaSetInt ( "g_KeyPressR", PWGameplayKey(19,g.keymap[19]) );
+	LuaSetInt ( "g_KeyPressF", PWGameplayKey(33,g.keymap[33]) );
+	LuaSetInt ( "g_KeyPressC", PWGameplayKey(46,g.keymap[46]) );
 	//LuaSetInt ( "g_KeyPressJ", !!done in player control code!! );
-	LuaSetInt ( "g_KeyPressSPACE", KeyState(g.keymap[57]) );
+	LuaSetInt ( "g_KeyPressSPACE", PWGameplayKey(57,g.keymap[57]) );
 	LuaSetInt ( "g_KeyPressALT"  , KeyState(g.keymap[56]));
 
 	// shift key for running/etc
 	#ifdef VRTECH
 	int tKeyPressShift = 0;
-	if ( KeyState(g.keymap[42]) ) tKeyPressShift = 1;
-	if ( KeyState(g.keymap[54]) ) tKeyPressShift = 1;
+	if ( PWGameplayKey(42,g.keymap[42]) ) tKeyPressShift = 1;
+	if ( (!PWGameplayControlsActive() && KeyState(g.keymap[54])) ) tKeyPressShift = 1;
 	if ( g.vrglobals.GGVREnabled > 0 && g.vrglobals.GGVRUsingVRSystem == 1 )
 	{
 		if ( GGVR_RightController_Grip() == 1 )
@@ -405,7 +464,7 @@ void lua_loop_begin ( void )
 	}
 	LuaSetInt ( "g_KeyPressSHIFT", tKeyPressShift );
 	#else
-	LuaSetInt ( "g_KeyPressSHIFT", KeyState(g.keymap[42]) | KeyState(g.keymap[54]) );
+	LuaSetInt ( "g_KeyPressSHIFT", PWGameplayKey(42,g.keymap[42]) | (!PWGameplayControlsActive() && KeyState(g.keymap[54])) );
 	#endif
 
 	if ( g.luaactivatemouse != 0 )
@@ -552,6 +611,7 @@ void lua_loop_begin ( void )
 	LuaSetInt ( "g_EntityElementMax", g.entityelementlist );	
 
 	LuaSetInt("g_PlayerUnderwaterMode", g.underwatermode); // PE: underwater mode active.
+	PWUpdateInteraction();
 
 	// 020316 - call the global loop once per cycle (for things like loading game states)
 	if ( t.playercontrol.gameloopinitflag > 0 ) t.playercontrol.gameloopinitflag--;
@@ -1039,8 +1099,17 @@ void lua_loop_allentities ( void )
 									{
 										//t.strwork = cstr(cstr(Lower(t.entityelement[t.e].eleprof.aimainname_s.Get()))+"_main"); //PE: Slow
 										t.strwork = cstr(cstr(t.entityelement[t.e].eleprof.aimainname_lower_s.Get()) + "_main");
-										LuaSetFunction ( t.strwork.Get() ,1,0 );
-										LuaPushInt (  t.e  ); LuaCall (  );
+										const bool managed=pwInteractionMode==1&&PWInteractionRange(t.entityelement[t.e].eleprof.aimainname_lower_s.Get())>0.f;
+                                        if(managed) {
+                                            LuaSetInt("g_PWInteractionCaller",t.e);
+                                            LuaSetInt("g_KeyPressE",pwInteractionPressed==t.e?1:0);
+                                        }
+                                        LuaSetFunction ( t.strwork.Get() ,1,0 );
+                                        LuaPushInt (  t.e  ); LuaCall (  );
+                                        if(managed) {
+                                            LuaSetInt("g_KeyPressE",t.tKeyPressE);
+                                            LuaSetInt("g_PWInteractionCaller",0);
+                                        }
 									}
 								}
 							}
@@ -1068,6 +1137,11 @@ void lua_loop_finish ( void )
 		t.luaaction_s=LuaMessageDesc();
 
 		int iLen = t.luaaction_s.Len();
+        if(strcmp(t.luaaction_s.Get(),"pwprofileload")==0) {
+            extern void PWProfileRequestLoad(const char*);
+            PWProfileRequestLoad(LuaMessageString());
+            continue;
+        }
 
 		//PE: Move most used to top.
 		if (iLen == 11)

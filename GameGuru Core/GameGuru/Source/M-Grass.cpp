@@ -3,7 +3,20 @@
 //----------------------------------------------------
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-EnvironmentStyleSettings.h"
+#include "PW-GrassMix.h"
+#include "PW-StyleImport.h"
+#include <array>
+#include <cmath>
+#include <limits>
+#include <cstdio>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
 
+
+namespace PWGrassMix { bool PrepareNative(); }
 
 // Global
 int g_iSuperTriggerFullGrassReveal = 0;
@@ -21,6 +34,29 @@ extern bool bUpdateVeg;
 
 void grass_init ( void )
 {
+    PWGrassMix::ResetInstances(); // release previous map's owned instances
+    // A saved mixed-grass map must retain its actual first selected species
+    // as the native Classic base even after the level header restores the
+    // previously selected single-style vegbank setting.
+    if (PWGrassMix::RenderEnabled())
+    {
+        for (int slotIndex=0; slotIndex<PWGrassMix::MaxStyles; ++slotIndex)
+        {
+            const PWGrassMix::Slot& slot=PWGrassMix::slots[slotIndex];
+            if (!slot.enabled || slot.weight<=0.f || slot.style.empty()) continue;
+            for (int bank=1; bank<=g.vegstylemax; ++bank)
+            {
+                if (!PWStyleImport::Same(slot.style,t.vegstylebank_s[bank].Get()))
+                    continue;
+                g.vegstyleindex=bank;
+                g.vegstyle_s=t.vegstylebank_s[bank];
+                t.visuals.vegetationindex=bank;
+                t.visuals.vegetation_s=t.vegstylebank_s[bank];
+                break;
+            }
+            break;
+        }
+    }
 	//  init our resource values
 	t.tGrassObj=t.terrain.objectstartindex+6;
 	t.tGrassImg=t.terrain.imagestartindex+8;
@@ -68,7 +104,16 @@ void grass_init ( void )
 	cstr pFileToLoad = cstr(cstr("vegbank\\")+g.vegstyle_s+"\\veg.DBO");
 	if ( FileExist ( pFileToLoad.Get() ) == 0 ) pFileToLoad = cstr(cstr("vegbank\\")+g.vegstyle_s+"\\veg.X");
 	LoadObject ( pFileToLoad.Get(),t.tGrassObj );
-	ScaleObject ( t.tGrassObj,200,200,200 );
+    if (ObjectExist(t.tGrassObj) == 1)
+    {
+        // Custom mesh import saves size/orientation in its style folder.
+        // The legacy default is precisely 200% with no extra yaw.
+        const std::string style = std::string("vegbank\\") + g.vegstyle_s.Get();
+        const PWEnvironmentStyle::Settings pwSettings = PWEnvironmentStyle::Read(style);
+        const float scale = 200.f * pwSettings.percent / 100.f;
+        ScaleObject(t.tGrassObj, scale, scale, scale);
+        if (pwSettings.yaw != 0.f) YRotateObject(t.tGrassObj, pwSettings.yaw);
+    }
 	MakeMeshFromObject ( t.tGrassObj,t.tGrassObj );
 
 
@@ -89,6 +134,9 @@ void grass_init ( void )
 	{
 		grass_loadgrass ( );
 	}
+
+	// Load all selected style meshes/atlases before creating native patches.
+    PWGrassMix::PrepareNative();
 
 	//  calculate how big our grid of vegetation is
 	grass_setgrassgridandfade ( );
@@ -114,6 +162,8 @@ void grass_init ( void )
 	else
 		MakeVegetationGrid( 4.0f*t.visuals.VegQuantity_f,t.visuals.VegWidth_f,t.visuals.VegHeight_f,terrain_veg_areawidth,t.terrain.vegetationgridsize,t.tTerrainID, iTrimUsingGrassMemblock , false );
 
+    UpdateGrassTexture(g.gpbroverride);
+
 	//  small lookup for memblock painting circles
 	Dim ( t.curve_f,100 );
 	for ( t.r = 0 ; t.r <= 180; t.r++ )
@@ -125,7 +175,12 @@ void grass_init ( void )
 
 	RefreshGridExistArray();
 	UpdateBlitzTerrain(CameraPositionX(0), CameraPositionZ(0), t.terrain.TerrainID, g.postprocessimageoffset + 5);
-	SetVegetationGridVisible(true);
+    // Do not briefly draw the original one-style vegetation grid on top of a
+    // selected PW mix while the replacement instances are being prepared.
+    // grass_loop() will explicitly restore Classic on invalid/missing assets.
+    // Keep Classic visible until PW has *actually* placed mixed blades.
+    // Resource readiness and an empty painted mask must not blank the editor.
+    SetVegetationGridVisible(true);
 
 }
 
@@ -234,7 +289,16 @@ void grass_setgrassimage ( void )
 	}
 	else
 	{
-		LoadImage ( cstr(cstr("vegbank\\")+g.vegstyle_s+"\\grass.dds").Get(),t.tGrassImg );
+        // PW Edition: user grass styles may provide an ordinary PNG atlas
+        // instead of DDS. Preserve DDS-first Classic compatibility.
+        cstr grassBase = cstr(cstr("vegbank\\") + g.vegstyle_s + "\\grass");
+        cstr grassFile = grassBase + ".dds";
+        if (FileExist(grassFile.Get()) == 0) grassFile = grassBase + ".png";
+        if (FileExist(grassFile.Get()) == 0) grassFile = grassBase + ".jpg";
+        if (FileExist(grassFile.Get()) == 0) grassFile = grassBase + ".jpeg";
+        if (FileExist(grassFile.Get()) == 0) grassFile = grassBase + ".bmp";
+        if (FileExist(grassFile.Get()) == 0) grassFile = grassBase + ".tga";
+        LoadImage(grassFile.Get(), t.tGrassImg);
 	}
 	extern bool bResourcesSet, bGridMade;
 	#ifdef ENABLEIMGUI
@@ -260,7 +324,6 @@ void grass_setgrassgridandfade ( void )
 
 void grass_loop ( void )
 {
-
 	// early exit if no veg used
 	if ( t.visuals.vegetationmode == 0  )  return;
 
@@ -300,6 +363,7 @@ void grass_loop ( void )
 			UpdateBlitzTerrain ( CameraPositionX(0),CameraPositionZ(0),t.terrain.TerrainID,g.postprocessimageoffset+5 );
 		}
 	}
+
 }
 
 void grass_clearregion ( void )
@@ -384,6 +448,7 @@ void grass_updategrassfrombitmap ( void )
 	
 	//this was only required because images are loading in RGBA, when they should be BGRA (as it was with DX9!!)
 	//ConvertVegMemblock ( t.terrain.grassmemblock );
+    PWGrassMix::InvalidateMask();
 
 	// slopes and water can't exist in superflat mode, so only delete invalid grass in terrain mode
 	if ( t.terrain.superflat == 0  )  DeleteInvalidGrass (  t.terrain.TerrainID,t.terrain.waterliney_f,1.0 );
@@ -491,6 +556,7 @@ void grass_buildblankgrass_fornew ( void )
 
 void grass_free ( void )
 {
+    PWGrassMix::ResetInstances();
 	//  We used to DeleteVegetationGrid (  here to clear away veg. Now to save time during testing we HideVegetationGrid (  instead. ) )
 	HideVegetationGrid (  );
 }
@@ -660,3 +726,143 @@ void grass_paint(void)
 	}
 }
 
+
+
+// -------------------------------------------------------------------------
+// Pixelwolf weighted multi-grass renderer (bounded draw budget).
+// Classic's native vegetation module has one model+atlas only. This renderer
+// instances the actual enabled grass-style meshes against its painted mask;
+// it does NOT claim that a shader-only texture blend changes grass species.
+// -------------------------------------------------------------------------
+namespace PWGrassMix {
+Slot slots[MaxStyles];
+unsigned revision = 1;
+
+struct RenderStyle { int mesh=0, image=0, slot=-1; bool owned=false; };
+static RenderStyle render[MaxStyles];
+static int nativeCount=0;
+static bool ready=false, previewEnabled=false;
+static std::string lastIssue;
+bool Ready(){return ready;}
+bool PreviewEnabled(){return previewEnabled;}
+bool RenderEnabled(){return previewEnabled && Active();}
+bool OwnsGrid(){return ready && nativeCount>1;}
+bool ProbeEnabled(){return false;}
+void SetProbeEnabled(bool){}
+void SetInstancesVisible(bool){} // native grid visibility covers every batch
+void InvalidateMask(){} // native painted mask is refreshed by Classic
+void Refresh(float,float,int,bool,float,int,float){} // legacy call compatibility
+void ResetInstances(){
+    SetPWVegetationMix(0,nullptr,nullptr,nullptr);
+    for(auto& rs:render){
+        if(rs.owned){
+            if(rs.mesh && GetMeshExist(rs.mesh)) DeleteMesh(rs.mesh);
+            if(rs.image && ImageExist(rs.image)) DeleteImage(rs.image);
+        }
+        rs=RenderStyle();
+    }
+    nativeCount=0; ready=false;
+}
+void SetPreviewEnabled(bool enabled){if(previewEnabled!=enabled){previewEnabled=enabled; Dirty();}}
+std::string Diagnostics(){
+    std::ostringstream out;
+    out << "Native grass mix " << (RenderEnabled()?"ON":"OFF");
+    for(int s=0;s<nativeCount;++s)
+        out << " | " << slots[render[s].slot].style << ": " << GetPWVegetationClumpCount(s) << " clumps/patch";
+    if(!lastIssue.empty()) out << " | issue: " << lastIssue;
+    return out.str();
+}
+static std::string ConfigPath(const std::string& folder) {
+    if (folder.empty()) return "pw_grassmix.cfg";
+    return folder + ((folder.back() == '\\' || folder.back() == '/') ? "" : "\\")
+        + "pw_grassmix.cfg";
+}
+void Save(const std::string& levelFolder) {
+    const std::string cfg = ConfigPath(levelFolder);
+    if (!Active()) { DeleteFileA(cfg.c_str()); return; }
+    std::ofstream out(cfg, std::ios::binary | std::ios::trunc);
+    if (!out) return;
+    out << "PW_GRASS_MIX_V1\n";
+    for (int i = 0; i < MaxStyles; ++i)
+        out << (slots[i].enabled ? 1 : 0) << "|" << slots[i].weight << "|" << slots[i].style << "\n";
+}
+void Load(const std::string& levelFolder) {
+    // Reset runtime objects while switching maps. Valid saved multi-style
+    // configurations now restore their secondary overlays automatically;
+    // Classic native grass always remains visible as the safe base.
+    previewEnabled = false;
+    ResetInstances();
+    lastIssue.clear();
+    for (int i = 0; i < MaxStyles; ++i) slots[i] = Slot();
+    std::ifstream in(ConfigPath(levelFolder), std::ios::binary);
+    std::string line;
+    if (!std::getline(in, line) || line != "PW_GRASS_MIX_V1") {
+        ++revision; return;
+    }
+    for (int i = 0; i < MaxStyles && std::getline(in, line); ++i) {
+        const size_t a = line.find('|'), b = line.find('|', a == std::string::npos ? 0 : a + 1);
+        if (a == std::string::npos || b == std::string::npos) continue;
+        const std::string style = line.substr(b + 1);
+        float weight = 0.f;
+        if (style.empty() || !PWStyleImport::SafeName(style) ||
+            ::sscanf_s(line.substr(a + 1, b - a - 1).c_str(), "%f", &weight) != 1)
+            continue;
+        slots[i].enabled = line[0] == '1';
+        slots[i].weight = (std::max)(0.f, (std::min)(100.f, weight));
+        slots[i].style = style;
+    }
+    // Previously a correctly saved 2+-style mix silently reloaded in
+    // Classic-only mode, so the owner always saw just one grass species.
+    // Allow the optional overlay to resume for a valid saved configuration.
+    // The UI can still turn it off for an immediate Classic-only fallback.
+    previewEnabled = Active();
+    ++revision;
+}
+
+bool PrepareNative(){
+    lastIssue.clear();
+    if(!RenderEnabled()) return false;
+    int meshes[MaxStyles]={}, images[MaxStyles]={};
+    float weights[MaxStyles]={};
+    // Native base first; all other slots use distinct mesh and atlas IDs.
+    int primary=-1;
+    for(int s=0;s<MaxStyles;++s)
+        if(slots[s].enabled && slots[s].weight>0 && PWStyleImport::Same(slots[s].style,g.vegstyle_s.Get())) {primary=s;break;}
+    if(primary<0){lastIssue="native base style unavailable";return false;}
+    render[0].mesh=t.tGrassObj; render[0].image=t.tGrassImg; render[0].slot=primary;
+    meshes[0]=t.tGrassObj; images[0]=t.tGrassImg; weights[0]=slots[primary].weight; nativeCount=1;
+    for(int s=0;s<MaxStyles;++s){
+        if(s==primary || !slots[s].enabled || slots[s].weight<=0 || slots[s].style.empty()) continue;
+        const std::string dir=std::string("vegbank\\")+slots[s].style;
+        std::string model=dir+"\\veg.DBO";
+        if(!FileExist((LPSTR)model.c_str())) model=dir+"\\veg.X";
+        std::string atlas;
+        const char* extensions[]={".dds",".png",".jpg",".jpeg",".bmp",".tga"};
+        for(const char* ext:extensions){std::string candidate=dir+"\\grass"+ext;if(FileExist((LPSTR)candidate.c_str())){atlas=candidate;break;}}
+        if(!FileExist((LPSTR)model.c_str()) || atlas.empty()){
+            lastIssue="missing native mesh/atlas for "+slots[s].style; ResetInstances();return false;
+        }
+        auto& rs=render[nativeCount]; rs.owned=true;rs.slot=s;
+        for(int id=229000;id<230000;++id) if(!ObjectExist(id)&&!GetMeshExist(id)){rs.mesh=id;break;}
+        for(int id=125000;id<126000;++id) if(!ImageExist(id)){rs.image=id;break;}
+        if(!rs.mesh||!rs.image){lastIssue="no free vegetation resource IDs";ResetInstances();return false;}
+        LoadObject((LPSTR)model.c_str(),rs.mesh);
+        if(!ObjectExist(rs.mesh)){lastIssue="could not load grass mesh for "+slots[s].style;ResetInstances();return false;}
+        const auto opt=PWEnvironmentStyle::Read(dir);
+        const float scale=200.f*opt.percent/100.f;
+        ScaleObject(rs.mesh,scale,scale,scale);
+        if(opt.yaw!=0.f) YRotateObject(rs.mesh,opt.yaw);
+        MakeMeshFromObject(rs.mesh,rs.mesh);
+        DeleteObject(rs.mesh);
+        SetImageAutoMipMap(1);
+        LoadImage((LPSTR)atlas.c_str(),rs.image);
+        SetImageAutoMipMap(0);
+        if(!GetMeshExist(rs.mesh)||!ImageExist(rs.image)){lastIssue="could not prepare native grass assets for "+slots[s].style;ResetInstances();return false;}
+        meshes[nativeCount]=rs.mesh; images[nativeCount]=rs.image; weights[nativeCount]=slots[s].weight; ++nativeCount;
+    }
+    if(nativeCount<2){ResetInstances();return false;}
+    SetPWVegetationMix(nativeCount,meshes,images,weights);
+    ready=true;
+    return true;
+}
+} // namespace PWGrassMix

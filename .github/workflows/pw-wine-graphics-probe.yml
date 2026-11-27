@@ -1,0 +1,122 @@
+name: PW Wine software graphics feasibility
+on:
+  push:
+    branches:
+      - work/pw-community-integration-20261121
+    paths:
+      - '.github/workflows/pw-wine-graphics-probe.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  wine-d3d11:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      WINEARCH: win64
+      WINEDEBUG: '-all'
+      LIBGL_ALWAYS_SOFTWARE: '1'
+    steps:
+      - name: Install Wine and Mesa software rendering
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends wine wine64 xvfb xauth mesa-utils libgl1-mesa-dri gcc-mingw-w64-x86-64
+          wine --version
+      - name: Compile original synthetic Direct3D 11 probe
+        run: |
+          cat > probe.c <<'EOF'
+          #define COBJMACROS
+          #define WIN32_LEAN_AND_MEAN
+          #include <windows.h>
+          #include <d3d11.h>
+          #include <dxgi.h>
+          #include <stdio.h>
+          int main(void) {
+            WNDCLASSA wc = {0};
+            wc.lpfnWndProc = DefWindowProcA;
+            wc.hInstance = GetModuleHandleA(NULL);
+            wc.lpszClassName = "PW_Wine_Probe";
+            if (!RegisterClassA(&wc)) return 1;
+            HWND w = CreateWindowA(wc.lpszClassName, "Wine D3D11 probe",
+              WS_OVERLAPPEDWINDOW|WS_VISIBLE, 0, 0, 640, 480, NULL, NULL, wc.hInstance, NULL);
+            if (!w) return 2;
+            DXGI_SWAP_CHAIN_DESC s = {0};
+            s.BufferDesc.Width = 640;
+            s.BufferDesc.Height = 480;
+            s.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+            s.SampleDesc.Count = 1;
+            s.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+            s.BufferCount = 1;
+            s.OutputWindow = w;
+            s.Windowed = TRUE;
+            s.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+            ID3D11Device *d = NULL;
+            ID3D11DeviceContext *c = NULL;
+            IDXGISwapChain *swap = NULL;
+            D3D_FEATURE_LEVEL level;
+            HRESULT hr = D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_HARDWARE,
+              NULL, 0, NULL, 0, D3D11_SDK_VERSION, &s, &swap, &d, &level, &c);
+            printf("Device HRESULT=0x%08lx\n", (unsigned long)hr);
+            if (FAILED(hr)) return 3;
+            printf("D3D feature level=0x%x\n", (unsigned)level);
+            IDXGIDevice *dx = NULL;
+            IDXGIAdapter *adapter = NULL;
+            if (SUCCEEDED(ID3D11Device_QueryInterface(d,&IID_IDXGIDevice,(void**)&dx))) {
+              if (SUCCEEDED(IDXGIDevice_GetAdapter(dx,&adapter))) {
+                DXGI_ADAPTER_DESC desc;
+                if (SUCCEEDED(IDXGIAdapter_GetDesc(adapter,&desc)))
+                  printf("DXGI adapter=%ls\n",desc.Description);
+                IDXGIAdapter_Release(adapter);
+              }
+              IDXGIDevice_Release(dx);
+            }
+            ID3D11Texture2D *back = NULL;
+            ID3D11RenderTargetView *view = NULL;
+            hr = IDXGISwapChain_GetBuffer(swap,0,&IID_ID3D11Texture2D,(void**)&back);
+            if (FAILED(hr)) return 4;
+            hr = ID3D11Device_CreateRenderTargetView(d,(ID3D11Resource*)back,NULL,&view);
+            ID3D11Texture2D_Release(back);
+            if (FAILED(hr)) return 5;
+            float rgba[4] = {.3f,.1f,.5f,1.f};
+            for (int i=0;i<120;i++) {
+              MSG m;
+              while (PeekMessageA(&m,NULL,0,0,PM_REMOVE)) {
+                TranslateMessage(&m);
+                DispatchMessageA(&m);
+              }
+              ID3D11DeviceContext_ClearRenderTargetView(c,view,rgba);
+              hr = IDXGISwapChain_Present(swap,0,0);
+              if (FAILED(hr)) {
+                printf("Present failed: 0x%08lx\n",(unsigned long)hr);
+                return 6;
+              }
+            }
+            ID3D11RenderTargetView_Release(view);
+            ID3D11DeviceContext_Release(c);
+            IDXGISwapChain_Release(swap);
+            ID3D11Device_Release(d);
+            DestroyWindow(w);
+            puts("PASS: 120 synthetic clear/present calls. Not a GameGuru benchmark.");
+            return 0;
+          }
+          EOF
+          x86_64-w64-mingw32-gcc -O2 -Wall probe.c -o probe.exe -ld3d11 -ldxgi -ldxguid -luuid -lgdi32 -luser32
+      - name: Verify software graphics and Wine Direct3D
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            uname -a
+            wine --version
+            xvfb-run -a glxinfo -B
+            xvfb-run -a timeout 180s wine ./probe.exe
+          } 2>&1 | tee wine-probe.log
+          grep -F 'PASS: 120 synthetic clear/present calls.' wine-probe.log
+      - name: Publish feasibility log only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wine-software-graphics-probe
+          path: wine-probe.log
+          if-no-files-found: warn
+          retention-days: 7

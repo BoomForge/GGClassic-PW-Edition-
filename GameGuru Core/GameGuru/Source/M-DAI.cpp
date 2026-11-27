@@ -4,6 +4,7 @@
 
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-ThirdPerson.h"
 
 // prototypes to link with entity avoidance
 void entity_lua_moveforward_core_nooverlap ( int te, float* pNX, float* pNZ );
@@ -2692,6 +2693,9 @@ void darkai_assignanimtofield ( void )
 				if (  t.tcsiindex == t.csi_crouchgetupANIM[t.tweapsty]  )  t.tryfield_s = t.strwork + "csi"+t.tweapsty_s+"_crouchgetup";
 				if (  t.tcsiindex == t.csi_crouchgetuprocketANIM[t.tweapsty]  )  t.tryfield_s = t.strwork + "csi"+t.tweapsty_s+"_crouchgetuprocket";
 			}
+            // Optional player-only slots: no stock fallback frame numbers.
+            if(t.tcsiindex==PWThirdPerson::FallCSI(g.csi_csimax))t.tryfield_s="csi_pw_fall";
+            if(t.tcsiindex==PWThirdPerson::LandCSI(g.csi_csimax))t.tryfield_s="csi_pw_land";
 			if (  t.field_s == t.tryfield_s && t.field_s != "" ) 
 			{
 				t.q=t.tstartofaianim+t.tcsiindex;
@@ -2711,7 +2715,8 @@ void darkai_assignanimtofield ( void )
 						t.entityanim[t.entid][t.q].start=t.value1 ; t.entityanim[t.entid][t.q].finish=t.value2;
 						if (  t.q>t.tnewanimmax  )  t.tnewanimmax = t.q;
 						//  if using extra anims from weapstyle, then flag this next gen entity for later
-						if (  t.tcsiindex >= t.csi_stoodnormalANIM[2]  ) 
+						if ( t.tcsiindex >= t.csi_stoodnormalANIM[2] &&
+                            !PWThirdPerson::AirCSI(t.tcsiindex,g.csi_csimax) ) 
 							t.entityprofile[t.entid].usesweapstyleanims = 1;
 					}
 				}
@@ -3132,6 +3137,14 @@ void char_createseqdata ( void )
 	t.charseq[t.csi].mode=1 ; t.charseq[t.csi].loopback=100 ; t.charseq[t.csi].a_f=6573 ; t.charseq[t.csi].b_f=6607 ; t.charseq[t.csi].c_f=10 ; t.charseq[t.csi].freeze=1 ; ++t.csi;
 	t.charseq[t.csi].mode=92 ; t.charseq[t.csi].a_f=t.csi_stood[t.weapstyle] ; ++t.csi;
 	}
+    // Append, never insert: all legacy animation IDs remain identical.
+    // Fall loops; landing plays once; final instruction returns to the
+    // current standing weapon style instead of hard-coding a style.
+    t.charseq[t.csi].mode=2; t.charseq[t.csi].trigger=0;
+    t.charseq[t.csi].c_f=3; ++t.csi;
+    t.charseq[t.csi].mode=1; t.charseq[t.csi].trigger=0;
+    t.charseq[t.csi].c_f=3; ++t.csi;
+    t.charseq[t.csi].mode=92; t.charseq[t.csi].a_f=g.csi_choosealertstate; ++t.csi;
 	g.csi_csimax = t.csi-1;
 	if (  g.csi_csimax>t.tcharseqmax-10 ) 
 	{
@@ -3152,6 +3165,17 @@ void char_getcharseqcsifromplaycsi ( void )
 		t.charseqcsib_f=t.entityanim[t.ttentid][t.q+t.csi_stoodnormalANIM[t.charanimstate.weapstyle]].start+1;
 	}
 	t.charseqcsiloopback=t.charseq[t.charanimstate.playcsi].loopback;
+	// Native player crouch-walk may use custom CSI ranges. Its legacy
+	// absolute loopback (2075) must follow the mapped clip start instead.
+	if(t.playercontrol.thirdperson.enabled==1&&t.charanimstate.e==t.playercontrol.thirdperson.charactere&&
+		t.charanimstate.weapstyle>=1&&t.charanimstate.weapstyle<=5&&
+		t.charanimstate.playcsi==t.csi_crouchmoveforeANIM[t.charanimstate.weapstyle])
+	{
+		char legacy[4]={};
+		const bool useLegacy=GetEnvironmentVariableA("GGCPW_LEGACY_THIRDPERSON",legacy,sizeof(legacy))==1&&legacy[0]=='1';
+		if(!useLegacy&&t.game.runasmultiplayer==0&&g.gvrmode==0&&g.globals.riftmode==0)
+			t.charseqcsiloopback=t.charseqcsia_f;
+	}
 	if (  t.charseqcsiloopback>0 ) 
 	{
 		if (  t.charseqcsiloopback == 100  )  t.charseqcsiloopback = t.entityanim[t.ttentid][t.q+t.csi_stoodnormalANIM[t.charanimstate.weapstyle]].start;
@@ -3956,7 +3980,14 @@ void char_loop ( void )
 			}
 			if (  t.charseq[t.charanimstate.playcsi].mode == 92 ) 
 			{
-				if (  t.charseq[t.charanimstate.playcsi].a_f == g.csi_choosealertstate ) 
+				if(t.charanimstate.playcsi==g.csi_csimax&&
+                    t.playercontrol.thirdperson.enabled==1&&
+                    t.charanimstate.e==t.playercontrol.thirdperson.charactere&&
+                    t.charanimstate.weapstyle>=1&&t.charanimstate.weapstyle<=5)
+                {
+                    t.charanimstate.playcsi=t.csi_stood[t.charanimstate.weapstyle];
+                }
+                else if (  t.charseq[t.charanimstate.playcsi].a_f == g.csi_choosealertstate ) 
 				{
 					if (  t.charanimstate.alerted == 0 ) 
 					{

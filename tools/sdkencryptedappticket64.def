@@ -1,0 +1,6 @@
+LIBRARY sdkencryptedappticket64.dll
+EXPORTS
+SteamEncryptedAppTicket_BDecryptTicket
+SteamEncryptedAppTicket_BIsTicketForApp
+SteamEncryptedAppTicket_GetTicketSteamID
+SteamEncryptedAppTicket_GetUserVariableData

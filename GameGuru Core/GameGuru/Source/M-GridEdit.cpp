@@ -6,9 +6,14 @@
 // Includes 
 #include "stdafx.h"
 #include "gameguru.h"
+#include "PW-LoadTrace.h" // Pixelwolf Edition: optional load profiling
+#include "PW-ImportedGeometry.h" // Validate selected imported asset before cursor placement
+#include "PW-GrassMix.h" // Keep original grass grid hidden while mixed styles render
 #include "M-WelcomeSystem.h"
 #include "M-Widget.h"
 #include "direct.h"
+#include <shellapi.h>
+#include <string>
 
 #ifdef VRTECH
 //Windows Mixed Reality Support
@@ -24,6 +29,7 @@
 #include "..\Imgui\imgui_internal.h"
 #include "..\Imgui\imgui_impl_win32.h"
 #include "..\Imgui\imgui_gg_dx11.h"
+#include "PW-LuaStudio.h"
 #endif
 
 #ifdef PETESTING
@@ -35,6 +41,7 @@
 #endif
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <time.h>
 
@@ -78,6 +85,8 @@ float fMouseWheelZoomFactor = 1.0;
 extern bool g_occluderf9Mode;
 //Skip terrain rendering when going into importer mode
 extern bool g_bSkipTerrainRender;
+extern bool g_bOverrideXCacheWhenUsingImporter; // Native FBX loader global.
+void LoadFBX(LPSTR pFilename, int iObjectNumber);
 // extern to global that toggles when load map removed from entities
 extern bool g_bBlackListRemovedSomeEntities;
 extern bool gbWelcomeSystemActive;
@@ -141,6 +150,152 @@ bool bEntityGotFocus = false;
 char cDirectOpen[260];
 bool imgui_is_running = false;
 int refresh_gui_docking = 0;
+// New dockspace identity migrates the default layout once without continually
+// overwriting user adjustments saved in uiv3.layout.
+static const char* g_pwEngineDockspaceName = "PWEngineDockspaceV7";
+
+// PW Edition: persistent checkpoints to distinguish an unhandled window-close
+// from a blocked common_justbeforeend() / Steam cleanup. No forced process kill.
+static void PWShutdownTrace(const char* stage)
+{
+    char local[MAX_PATH] = {};
+    DWORD len = GetEnvironmentVariableA("LOCALAPPDATA", local, MAX_PATH);
+    if (!len || len >= MAX_PATH || !stage) return;
+    const std::string pwDir = std::string(local) + "\\Pixelwolf";
+    const std::string pwLogs = pwDir + "\\GGClassicPW";
+    CreateDirectoryA(pwDir.c_str(), nullptr);
+    CreateDirectoryA(pwLogs.c_str(), nullptr);
+    const std::string file = pwLogs + "\\shutdown-trace.log";
+    FILE* out = nullptr;
+    if (fopen_s(&out, file.c_str(), "ab") != 0 || !out) return;
+    SYSTEMTIME now = {};
+    GetLocalTime(&now);
+    fprintf(out, "%04d-%02d-%02d %02d:%02d:%02d.%03d pid=%lu stage=%s\r\n",
+        now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute,
+        now.wSecond, now.wMilliseconds, (unsigned long)GetCurrentProcessId(), stage);
+    fclose(out);
+}
+
+// Authoritative bottom dock ID: the full asset library is never a floating window.
+static ImGuiID g_pwBottomAssetDockId = 0;
+static bool g_pwSceneHierarchyOpen = true;
+// Scene Hierarchy replaces the old "Entities" window (current level objects).
+// The actual Classic folder/thumbnail browser must be the ONLY bottom pane.
+static const bool g_pwShowLegacyLevelEntityList = false;
+// Classic disables shadow rendering when the editor camera zooms out too far.
+// Keep cascaded realtime editor shadows available at all distances by default.
+static bool g_pwEditorRealtimeShadows = true;
+static char g_pwSceneHierarchySearch[128] = "";
+#ifdef ENABLEIMGUI
+#include "PW-SceneHierarchy.h"
+#endif
+
+#ifdef ENABLEIMGUI
+// Match Windows Classic's neutral, flat editor treatment instead of the
+// rounded blue/cyan PW theme. GameGuru's original toolbar PNGs remain assets;
+// UI styling never replaces them with synthetic artwork.
+static ImVec4 PWClassicSystemColour(int colourId, float alpha = 1.0f)
+{
+    const COLORREF value = GetSysColor(colourId);
+    return ImVec4(GetRValue(value) / 255.0f, GetGValue(value) / 255.0f,
+                  GetBValue(value) / 255.0f, alpha);
+}
+static void PWApplyClassicEditorStyle()
+{
+    myLightStyle(NULL);
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.WindowRounding = 0.0f;
+    style.ChildRounding = 0.0f;
+    style.FrameRounding = 0.0f;
+    style.PopupRounding = 0.0f;
+    style.TabRounding = 0.0f;
+    style.ScrollbarRounding = 0.0f;
+    style.GrabRounding = 0.0f;
+    style.WindowBorderSize = 1.0f;
+    style.FrameBorderSize = 1.0f;
+    style.TabBorderSize = 1.0f;
+    style.WindowPadding = ImVec2(4.0f, 4.0f);
+    ImVec4* colors = style.Colors;
+    const ImVec4 face = PWClassicSystemColour(COLOR_BTNFACE);
+    const ImVec4 window = PWClassicSystemColour(COLOR_WINDOW);
+    const ImVec4 border = PWClassicSystemColour(COLOR_3DSHADOW);
+    const ImVec4 active = PWClassicSystemColour(COLOR_HIGHLIGHT);
+    colors[ImGuiCol_WindowBg] = face;
+    colors[ImGuiCol_ChildBg] = window;
+    colors[ImGuiCol_PopupBg] = face;
+    colors[ImGuiCol_MenuBarBg] = face;
+    colors[ImGuiCol_TitleBg] = face;
+    colors[ImGuiCol_TitleBgActive] = face;
+    colors[ImGuiCol_FrameBg] = window;
+    colors[ImGuiCol_Button] = face;
+    colors[ImGuiCol_Header] = face;
+    colors[ImGuiCol_Tab] = face;
+    colors[ImGuiCol_TabUnfocused] = face;
+    colors[ImGuiCol_TabActive] = window;
+    colors[ImGuiCol_TabUnfocusedActive] = window;
+    colors[ImGuiCol_Border] = border;
+    colors[ImGuiCol_Separator] = border;
+    colors[ImGuiCol_HeaderHovered] = PWClassicSystemColour(COLOR_HIGHLIGHT, 0.25f);
+    colors[ImGuiCol_HeaderActive] = PWClassicSystemColour(COLOR_HIGHLIGHT, 0.42f);
+    colors[ImGuiCol_ButtonHovered] = PWClassicSystemColour(COLOR_HIGHLIGHT, 0.22f);
+    colors[ImGuiCol_ButtonActive] = PWClassicSystemColour(COLOR_HIGHLIGHT, 0.42f);
+    colors[ImGuiCol_TabHovered] = PWClassicSystemColour(COLOR_HIGHLIGHT, 0.22f);
+    colors[ImGuiCol_CheckMark] = active;
+    colors[ImGuiCol_DockingEmptyBg] = face;
+}
+#endif
+
+static void PWShowInstalledBuildDetails()
+{
+	char executable[MAX_PATH] = { 0 };
+	DWORD n = GetModuleFileNameA(NULL, executable, MAX_PATH);
+	if (n == 0 || n >= MAX_PATH)
+	{
+		MessageBoxA(NULL, "Unable to read the active executable path.", "PW Edition - Verify Build", MB_OK | MB_ICONERROR);
+		return;
+	}
+	std::string details = "Running Pixelwolf PW Edition editor:\r\n";
+	details += executable;
+	details += "\r\n\r\nOpen this file directly if Steam still shows the old GameGuru Classic interface.";
+	MessageBoxA(NULL, details.c_str(), "Pixelwolf PW Edition - Active Editor", MB_OK | MB_ICONINFORMATION);
+}
+
+static void PWLaunchInstalledUpdater()
+{
+	char executable[MAX_PATH] = { 0 };
+	DWORD n = GetModuleFileNameA(NULL, executable, MAX_PATH);
+	if (n == 0 || n >= MAX_PATH) { PWShowInstalledBuildDetails(); return; }
+	std::string editorPath(executable);
+	size_t slash = editorPath.find_last_of("\\/");
+	if (slash == std::string::npos) { PWShowInstalledBuildDetails(); return; }
+	const std::string directory = editorPath.substr(0, slash);
+	const std::string updater = directory + "\\Pixelwolf-GGC-Updater.exe";
+	if (GetFileAttributesA(updater.c_str()) == INVALID_FILE_ATTRIBUTES)
+	{
+		MessageBoxA(NULL,
+			"The standalone PW Edition updater was not installed beside this editor.\r\n"
+			"Download and run the newest Pixelwolf-GGC-Updater.exe to repair this installation.",
+			"PW Edition Update", MB_OK | MB_ICONWARNING);
+		return;
+	}
+	if (MessageBoxA(NULL,
+		"PW Edition will start the source-build updater for this installation.\r\n"
+		"To replace the editor safely, your current level must be saved and the editor closed.\r\n\r\n"
+		"Save/close the editor and open the updater now?",
+		"Update Pixelwolf PW Edition", MB_YESNO | MB_ICONQUESTION) != IDYES) return;
+	// Existing editor save guard also handles Cancel. Only exit if the
+	// user's changes were handled, never force-close a modified level.
+	if (AskSaveBeforeNewAction() == 2) return;
+	const std::string arguments = "--install-dir=\"" + directory + "\"";
+	HINSTANCE launched = ShellExecuteA(NULL, "open", updater.c_str(), arguments.c_str(), directory.c_str(), SW_SHOWNORMAL);
+	if ((INT_PTR)launched <= 32)
+	{
+		MessageBoxA(NULL, "Windows could not launch the PW Edition updater.", "PW Edition Update", MB_OK | MB_ICONERROR);
+		return;
+	}
+	g_bCascadeQuitFlag = true;
+}
+
 ImGuiID dock_main_tabs, dock_tools_windows;
 cstr RedockNextWindow;
 ImGuiViewport* viewport;
@@ -212,7 +367,7 @@ extern cFolderItem MainEntityList;
 
 bool bExport_Standalone_Window = false;
 bool bExport_SaveToGameCloud_Window = false;
-bool bExternal_Entities_Window = false;
+bool bExternal_Entities_Window = true; // Full stock asset library is the default bottom browser.
 int iDisplayLibraryType = 0;
 int iLastDisplayLibraryType = -1;
 cstr sStartLibrarySearchString = "";
@@ -333,7 +488,49 @@ extern int iLastUpdateVeg;
 bool TutorialNextAction(void);
 bool CheckTutorialPlaceit(void);
 bool CheckTutorialAction(const char * action, float x_adder = 0.0f );
-void RenderToPreview(int displayobj);
+void RenderToPreview(int displayobj, int previewImageId = 0, float yaw = 0.0f, float pitch = 0.0f, float zoom = 1.0f);
+namespace PWAssetInspector { void RenderPending(); }
+// Inspector owns its capture separately from the legacy image registry. The
+// native tooltip still uses its original GrabImage path.
+static ID3D11ShaderResourceView* pwInspectorCapture=nullptr;
+static void PWReleaseInspectorCapture(){
+    if(pwInspectorCapture){pwInspectorCapture->Release();pwInspectorCapture=nullptr;}
+}
+static bool PWCaptureInspectorSurface(ID3D11Texture2D* surface,const GGVIEWPORT& viewport){
+    PWReleaseInspectorCapture();
+    if(!surface)return false;
+    D3D11_TEXTURE2D_DESC source={};surface->GetDesc(&source);
+    if(!source.Width||!source.Height||source.SampleDesc.Count!=1||source.ArraySize!=1)return false;
+    // Crop around the actual rendered viewport, not the backing texture centre.
+    const UINT vx=static_cast<UINT>(viewport.X);
+    const UINT vy=static_cast<UINT>(viewport.Y);
+    if(vx>=source.Width||vy>=source.Height||viewport.Width==0||viewport.Height==0)return false;
+    const UINT vw=(std::min)(source.Width-vx,static_cast<UINT>(viewport.Width));
+    const UINT vh=(std::min)(source.Height-vy,static_cast<UINT>(viewport.Height));
+    const UINT side=(std::min)(512u,(std::min)(vw,vh));
+    if(!side)return false;
+    ID3D11Device* device=nullptr;surface->GetDevice(&device);
+    if(!device)return false;
+    ID3D11DeviceContext* context=nullptr;device->GetImmediateContext(&context);
+    D3D11_TEXTURE2D_DESC desc={};
+    desc.Width=side;desc.Height=side;desc.MipLevels=1;desc.ArraySize=1;
+    desc.Format=source.Format;desc.SampleDesc.Count=1;desc.Usage=D3D11_USAGE_DEFAULT;
+    desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+    ID3D11Texture2D* copy=nullptr;ID3D11ShaderResourceView* view=nullptr;
+    bool ok=context&&SUCCEEDED(device->CreateTexture2D(&desc,nullptr,&copy))&&copy&&
+        SUCCEEDED(device->CreateShaderResourceView(copy,nullptr,&view))&&view;
+    if(ok){
+        const UINT x=vx+(vw-side)/2,y=vy+(vh-side)/2;
+        D3D11_BOX region={x,y,0,x+side,y+side,1};
+        context->CopySubresourceRegion(copy,0,0,0,0,surface,0,&region);
+        ok=SUCCEEDED(device->GetDeviceRemovedReason());
+    }
+    if(ok){pwInspectorCapture=view;view=nullptr;}
+    if(view)view->Release();if(copy)copy->Release();
+    if(context)context->Release();device->Release();
+    return ok;
+}
+
 void CheckTooltipObjectDelete(void);
 void get_tutorials(void);
 void SmallTutorialVideo(char *tutorial,char* combo_items[] = NULL, int combo_entries = 0,int iVideoSection = 0);
@@ -775,7 +972,9 @@ void mapeditorexecutable_init ( void )
 	t.terrain.grassupdateafterterrain = 1;
 	grass_loop();
 	t.terrain.grassupdateafterterrain = 0;
-	ShowVegetationGrid();
+    // The PW mix preview overlays secondary species; the native grid is
+    // always the safe base, including during editor startup.
+    ShowVegetationGrid();
 	visuals_justshaderupdate();
 
 	// Moved last so we can load levels before main loop.
@@ -1000,6 +1199,19 @@ void mapeditorexecutable_loop(void)
 			iLaunchAfterSync = 0;
 			break;
 		}
+        case 32: // Asset Inspector 3D preview: reuse the native offscreen renderer.
+        {
+            g_bNoSwapchainPresent = true;
+            PWAssetInspector::RenderPending();
+            iLaunchAfterSync = 33;
+            break;
+        }
+        case 33:
+        {
+            g_bNoSwapchainPresent = false;
+            iLaunchAfterSync = 0;
+            break;
+        }
 
 		case 21: //Social VR.
 		{
@@ -1585,7 +1797,7 @@ void mapeditorexecutable_loop(void)
 			#else
 			RedockNextWindow = "Character Creator##PropertiesWindow";
 			g_bCharacterCreatorPlusActivated = true; //cyb
-			ImGui::SetWindowFocus(TABENTITYNAME);
+			ImGui::SetWindowFocus("Asset Browser##PWAssetBrowser");
 			#endif
 
 		}
@@ -1655,7 +1867,7 @@ void mapeditorexecutable_loop(void)
 
 			iLaunchAfterSync = 8; //Import model
 			iSkibFramesBeforeLaunch = 5;
-			ImGui::SetWindowFocus(TABENTITYNAME);
+			ImGui::SetWindowFocus("Asset Browser##PWAssetBrowser");
 		}
 		if (ImGui::IsItemHovered() && iSkibFramesBeforeLaunch == 0) ImGui::SetTooltip("%s", "Importer");
 		ImGui::SameLine();
@@ -1938,6 +2150,7 @@ void mapeditorexecutable_loop(void)
 					int iRet = AskSaveBeforeNewAction();
 					if (iRet != 2)
 					{
+                        PWShutdownTrace("file-exit accepted");
 						g_bCascadeQuitFlag = true;
 					}
 				}
@@ -1953,6 +2166,9 @@ void mapeditorexecutable_loop(void)
 
 			if (ImGui::BeginMenu("Edit"))
 			{
+				if (ImGui::MenuItem("Lua Script Editor...")) PWLuaStudio::Open(GetActiveWindow());
+				ImGui::Separator();
+
 				if (ImGui::MenuItem("Undo","CTRL+Z")) 
 				{
 					t.inputsys.doundo = 1;
@@ -2023,8 +2239,8 @@ void mapeditorexecutable_loop(void)
 				if (ImGui::BeginMenu("Change Color Scheme")) 
 				{
 					#ifdef ENABLEIMGUI
-					if (ImGui::MenuItem("Light Style")) { // VRQ/Classic = Light Style
-						myLightStyle(NULL);
+					if (ImGui::MenuItem("Classic Light Style")) { // VRQ/Classic = Light Style
+						PWApplyClassicEditorStyle();
 						pref.current_style = 3;
 					}
 					if (ImGui::MenuItem("Dark Style")) {
@@ -2041,6 +2257,12 @@ void mapeditorexecutable_loop(void)
 
 				if (ImGui::BeginMenu("Reset Layout")) 
 				{
+					if (ImGui::MenuItem("PW Engine Layout (Scene / Assets / Inspector)"))
+					{
+						g_pwSceneHierarchyOpen = true;
+						refresh_gui_docking = 2;
+					}
+					ImGui::Separator();
 					//Full Desktop Size
 					if (ImGui::MenuItem("Full Desktop Size")) 
 					{
@@ -2356,6 +2578,11 @@ void mapeditorexecutable_loop(void)
 					strcpy(cForceTutorialName, "01 - Getting started");
 				}
 				#endif
+				// PW Edition source-building updater; the helper launched by this
+				// command is installed alongside the rebuilt editor.
+				if (ImGui::MenuItem("Check for PW Edition Updates..."))
+					PWLaunchInstalledUpdater();
+
 				if (ImGui::MenuItem("About")) {
 					bAbout_Window = true;
 					bAbout_Window_First_Run = true;
@@ -2371,6 +2598,50 @@ void mapeditorexecutable_loop(void)
 						ImGui::OpenPopup("Help");
 			}
 
+			// Persistent product identity visible on every PW Edition editor build.
+			if (ImGui::BeginMenu("PW Edition"))
+			{
+				if (ImGui::MenuItem("Check for Updates..."))
+					PWLaunchInstalledUpdater();
+				if (ImGui::MenuItem("Restore PW Workspace Layout"))
+				{
+					g_pwSceneHierarchyOpen = true;
+					refresh_gui_docking = 2;
+				}
+				if (ImGui::MenuItem("Verify PW Edition Executable"))
+					PWShowInstalledBuildDetails();
+				ImGui::Separator();
+				// Can be turned on while a slow project is already open. Begin and
+				// slow-stage markers survive in the trace even if the next load hangs.
+				const bool tracingNow = pw_loadtrace_enabled();
+				if (ImGui::MenuItem("Capture Load Diagnostics (CSV)", NULL, tracingNow))
+					SetEnvironmentVariableA("GGCPW_PROFILE_LOAD", tracingNow ? "0" : "1");
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Log each future project/Test Level phase to %%TEMP%%\\GGCPW-loadtrace-<pid>.csv");
+				char textureTrace[8]={};
+                const bool textureTraceNow=GetEnvironmentVariableA("GGCPW_PROFILE_TEXTURES",textureTrace,sizeof(textureTrace))==1&&textureTrace[0]=='1';
+                if(ImGui::MenuItem("Capture Texture Memory (CSV)",NULL,textureTraceNow)){
+                    SetEnvironmentVariableA("GGCPW_PROFILE_TEXTURES",textureTraceNow?"0":"1");
+                    if(!textureTraceNow)PWTextureMemorySample("editor_capture_begin");
+                }
+                if(ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Capture image registry and GPU/CPU memory at level boundaries and every five seconds of play.");
+				if (ImGui::MenuItem("Real-time Editor Shadows (all zoom levels)", NULL, g_pwEditorRealtimeShadows))
+				{
+					g_pwEditorRealtimeShadows = !g_pwEditorRealtimeShadows;
+					t.updatezoom = 1;
+				}
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Preserve cascaded editor shadows when zoomed out; higher GPU cost.");
+				if (ImGui::MenuItem("Open Load Diagnostics Folder"))
+				{
+					char tempPath[MAX_PATH] = { 0 };
+					DWORD pathLen = GetTempPathA(MAX_PATH, tempPath);
+					if (pathLen > 0 && pathLen < MAX_PATH)
+						ShellExecuteA(NULL, "open", tempPath, NULL, NULL, SW_SHOWNORMAL);
+				}
+				ImGui::EndMenu();
+			}
 			ImGui::EndMenuBar();
 		}
 
@@ -2644,88 +2915,77 @@ void mapeditorexecutable_loop(void)
 		ImGui::PopStyleVar(2);
 
 
+
 		static ImGuiID dock_id_bottom;
-		//We cant make all windows dock if all windows is NOT undocked first (.ini setup problem ), so refresh_gui_docking == 2
-		if (ImGui::DockBuilderGetNode(ImGui::GetID("MyDockspace")) == NULL || refresh_gui_docking == 2)
+		// PW Edition workspace: scene instances left, asset browser bottom,
+		// familiar editing viewport central, existing properties/tools right.
+		// Users can resize tabs and save the arrangement in uiv3.layout.
+		if (ImGui::DockBuilderGetNode(ImGui::GetID(g_pwEngineDockspaceName)) == NULL || refresh_gui_docking == 2)
 		{
-			//Default docking setup.
-			ImGuiID dockspace_id = ImGui::GetID("MyDockspace");
-			ImGui::DockBuilderRemoveNode(dockspace_id); // Clear out existing layout
-			//int ImGuiDockNodeFlags_Dockspace = 1 << 10;
-			ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace); // Add empty node
+			// Restore Classic's light neutral UI instead of the PW dark/blue skin.
+			pref.current_style = 3;
+			PWApplyClassicEditorStyle();
+			ImGui::GetStyle().Colors[ImGuiCol_WindowBg].w = 1.0f;
+			bExternal_Entities_Window = true;
+			ImGuiID dockspace_id = ImGui::GetID(g_pwEngineDockspaceName);
+			ImGui::DockBuilderRemoveNode(dockspace_id);
+			ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
 			ImGui::DockBuilderSetNodePos(dockspace_id, viewport->Pos + ImVec2(0, toolbar_size));
-			ImGui::DockBuilderSetNodeSize(dockspace_id, viewport->Size - ImVec2(0, toolbar_size+ ImGuiStatusBar_Size));
+			ImGui::DockBuilderSetNodeSize(dockspace_id, viewport->Size - ImVec2(0, toolbar_size + ImGuiStatusBar_Size));
 
+			// Split the LEFT and RIGHT panels off the shared dockspace first.
+			// Then split the remaining CENTRAL frame horizontally, so the
+			// asset browser is genuinely part of the editor frame, between
+			// the hierarchy and inspector. A bottom-first split made it
+			// span the whole screen independent of both side panels.
 			ImGuiID dock_main_id = dockspace_id;
-			ImGuiID dock_id_top = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Up, 0.12f, NULL, &dock_main_id); //Toolbar
-
-
-			ImGuiID dock_id_right;
-			if(viewport->Size.x > 1300)
-				dock_id_right = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, 0.14f, NULL, &dock_main_id); //0.20f
-			else if (viewport->Size.x < 1100)
-				dock_id_right = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, 0.23f, NULL, &dock_main_id); //0.20f
-			else
-				dock_id_right = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, 0.21f, NULL, &dock_main_id); //0.20f
-
-
-			ImGuiID dock_id_right2out;
-			ImGuiID dock_id_right2 = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, 0.2f, &dock_id_right2out, &dock_main_id); //0.20f
-
-			// create dock ID for above Tutorial Help Window (for Tutorial Video area)
-			ImGuiID dock_id_right2below = ImGui::DockBuilderSplitNode(dock_id_right2out, ImGuiDir_Down, 0.26f, NULL, NULL); //0.18
-
-			// leelee, technically not allowed by IMGUI but I fudged the IMGUI code to allow it - seems to work fine!
-			ImGuiID dock_id_right3below = ImGui::DockBuilderSplitNode(dock_id_right2out, ImGuiDir_Down, 0.60f, NULL, NULL); //(0.65) PE: Video area must have room for a normal mp4.
-
-
-			ImGuiID dock_id_left = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.15f, NULL, &dock_main_id); //0.15f
-			ImGuiID dock_id_left_down = ImGui::DockBuilderSplitNode(dock_id_left, ImGuiDir_Down, 0.15f, NULL, &dock_id_left); //0.15f
-			ImGuiID dock_id_left_down_large = ImGui::DockBuilderSplitNode(dock_id_left, ImGuiDir_Down, 0.30f, NULL, &dock_id_left); //0.15f
-
-			ImGuiID dock_id_left2out;
-			ImGuiID dock_id_left2 = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.30f, &dock_id_left2out, &dock_main_id); //0.20f
-			ImGuiID dock_id_left2below = ImGui::DockBuilderSplitNode(dock_id_left2out, ImGuiDir_Down, 0.26f, NULL, NULL); //0.18
-			ImGuiID dock_id_left3below = ImGui::DockBuilderSplitNode(dock_id_left2out, ImGuiDir_Down, 0.60f, NULL, NULL); //(0.65) PE: Video area must have room for a normal mp4.
-
-			// Disable tab bar for custom toolbar and statusbar
-			ImGuiDockNode* node = ImGui::DockBuilderGetNode(dock_id_top);
-			node->LocalFlags |= ImGuiDockNodeFlags_NoTabBar;
+			ImGuiID dock_id_left = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.20f, NULL, &dock_main_id);
+			const float inspectorRatio = viewport->Size.x < 1100.0f ? 0.30f : 0.24f;
+			ImGuiID dock_id_right = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Right, inspectorRatio, NULL, &dock_main_id);
+			dock_id_bottom = ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Down, 0.31f, NULL, &dock_main_id);
+			g_pwBottomAssetDockId = dock_id_bottom;
+            // Permanent editor and asset browser panes: disable tab tearing /
+            // undocking, but preserve splitter resizing between them.
+            ImGuiDockNode* sceneDock = ImGui::DockBuilderGetNode(dock_main_id);
+            ImGuiDockNode* assetDock = ImGui::DockBuilderGetNode(dock_id_bottom);
+            if (sceneDock)
+                sceneDock->LocalFlags |= ImGuiDockNodeFlags_NoTabBar | ImGuiDockNodeFlags_NoWindowMenuButton;
+            if (assetDock)
+                assetDock->LocalFlags |= ImGuiDockNodeFlags_NoTabBar | ImGuiDockNodeFlags_NoWindowMenuButton;
 
 			ImGui::DockBuilderDockWindow(TABEDITORNAME, dock_main_id);
-			ImGui::DockBuilderDockWindow(TABENTITYNAME, dock_id_left);
-
+			ImGui::DockBuilderDockWindow("Scene Hierarchy##PWSceneHierarchy", dock_id_left);
+			// ONE bottom browser: no current-level Entities pane alongside it.
+			ImGui::DockBuilderDockWindow("Asset Browser##PWAssetBrowser", dock_id_bottom);
 #ifdef USELEFTPANELSTRUCTUREEDITOR
 			ImGui::DockBuilderDockWindow("Structure Editor##LeftPanel", dock_id_left);
 #endif
-			ImGui::DockBuilderDockWindow("Tutorial Video##HelpVideoWindow", dock_id_right2below);
-			ImGui::DockBuilderDockWindow("Tutorial Steps##HelpWindow", dock_id_right3below);
+			// Help panels remain accessible as tabs rather than occupying an
+			// additional full-height column and shrinking the main viewport.
+			ImGui::DockBuilderDockWindow("Tutorial Video##HelpVideoWindow", dock_id_right);
+			ImGui::DockBuilderDockWindow("Tutorial Steps##HelpWindow", dock_id_right);
+			ImGui::DockBuilderDockWindow("Tutorial Video##LeftHelpVideoWindow", dock_id_right);
+			ImGui::DockBuilderDockWindow("Tutorial Steps##LeftHelpWindow", dock_id_right);
 
-			ImGui::DockBuilderDockWindow("Tutorial Video##LeftHelpVideoWindow", dock_id_left2below);
-			ImGui::DockBuilderDockWindow("Tutorial Steps##LeftHelpWindow", dock_id_left3below);
-
+			ImGui::DockBuilderDockWindow("Inspector##PWInspector", dock_id_right);
 			ImGui::DockBuilderDockWindow("Entity Properties##PropertiesWindow", dock_id_right);
 			ImGui::DockBuilderDockWindow("Character Creator##PropertiesWindow", dock_id_right);
 			ImGui::DockBuilderDockWindow("Structure Properties##BuilderPropertiesWindow", dock_id_right);
 			ImGui::DockBuilderDockWindow("Importer##ImporterWindow", dock_id_right);
-
 			ImGui::DockBuilderDockWindow("Terrain Tools##TerrainToolsWindow", dock_id_right);
 			ImGui::DockBuilderDockWindow("Sculpt Terrain##TerrainToolsWindow", dock_id_right);
 			ImGui::DockBuilderDockWindow("Paint Terrain##TerrainToolsWindow", dock_id_right);
 			ImGui::DockBuilderDockWindow("Add Vegetation##TerrainToolsWindow", dock_id_right);
-
 			ImGui::DockBuilderDockWindow("Waypoints##WaypointsToolsWindow", dock_id_right);
-
 #ifdef USE_ENTITY_TOOL_WINDOW
 			ImGui::DockBuilderDockWindow("Object Tools##EntityToolsWindow", dock_id_right);
 #endif
-			//ImGuiDockNodeFlags_AutoHideTabBar
 			dock_main_tabs = dock_main_id;
 			dock_tools_windows = dock_id_right;
 			ImGui::DockBuilderFinish(dockspace_id);
 		}
 
-		ImGuiID dockspace_id = ImGui::GetID("MyDockspace");
+		ImGuiID dockspace_id = ImGui::GetID(g_pwEngineDockspaceName);
 		
 		ImGuiStyle& style = ImGui::GetStyle();
 		ImVec2 vOldWindowMinSize = style.WindowMinSize;
@@ -2740,6 +3000,58 @@ void mapeditorexecutable_loop(void)
 
 		if (dock_main_tabs == 0)
 			dock_main_tabs = dockspace_id;
+
+		// Fully nested scene tree; uses engine-native parent indices and
+		// GameGuru's existing group movement/undo machinery.
+		if (ImGui::Begin("Scene Hierarchy##PWSceneHierarchy", &g_pwSceneHierarchyOpen,
+				iGenralWindowsFlags | ImGuiWindowFlags_NoMove))
+		{
+			PWRenderSceneHierarchy();
+		}
+		ImGui::End();
+
+		// Persistent inspector is always available even before Classic enters
+		// its dedicated entity-property zoom/edit mode.
+		if (ImGui::Begin("Inspector##PWInspector", NULL, iGenralWindowsFlags | ImGuiWindowFlags_NoMove))
+		{
+			const int selected = t.widget.pickedEntityIndex;
+			if (selected > 0 && selected <= g.entityelementlist &&
+				t.entityelement[selected].bankindex > 0 && t.entityelement[selected].obj > 0)
+			{
+				const char* label = t.entityelement[selected].eleprof.name_s.Get();
+				ImGui::TextWrapped("%s", label && *label ? label : "Unnamed entity");
+				ImGui::TextDisabled("Level instance #%d", selected);
+				ImGui::Separator();
+				ImGui::Text("Transform");
+				ImGui::Text("Position: %.1f, %.1f, %.1f",
+					t.entityelement[selected].x, t.entityelement[selected].y, t.entityelement[selected].z);
+				ImGui::Text("Rotation: %.1f, %.1f, %.1f",
+					t.entityelement[selected].rx, t.entityelement[selected].ry, t.entityelement[selected].rz);
+				ImGui::Text("Scale: %.1f, %.1f, %.1f",
+					t.entityelement[selected].scalex, t.entityelement[selected].scaley, t.entityelement[selected].scalez);
+				ImGui::Separator();
+				const char* entityLua = t.entityelement[selected].eleprof.aimain_s.Get();
+				ImGui::Separator();
+				ImGui::TextWrapped("AI Lua script: %s", (entityLua && *entityLua) ? entityLua : "(none assigned)");
+				if (ImGui::Button("Edit Lua Script..."))
+					PWLuaStudio::OpenEntityScript(GetActiveWindow(), entityLua);
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Open the entity's assigned script in Pixelwolf Lua Studio.");
+				ImGui::Separator();
+				ImGui::TextDisabled("The transform gizmo works in the central viewport.");
+				if (ImGui::Button("Edit Entity Properties"))
+				{
+					// Delegate edits to the existing Classic property flow,
+					// including EBE and its zoom/restore safeguards.
+					t.widget.propertybuttonselected = 2;
+				}
+			}
+			else
+			{
+				ImGui::TextDisabled("Select an object in the Scene Hierarchy or viewport.");
+			}
+		}
+		ImGui::End();
 
 		//#######################
 		//#### Tutorial Help ####
@@ -2768,7 +3080,8 @@ void mapeditorexecutable_loop(void)
 			//use first entry.
 			std::map<std::string, std::string>::iterator it = tutorial_files.begin();
 				
-			if (it->first.length() > 0) {
+			// Empty/absent optional tutorialbank is a valid Steam configuration.
+			if (it != tutorial_files.end() && it->first.length() > 0) {
 				strcpy(cTutorialName, it->first.c_str());
 			}
 
@@ -2910,13 +3223,13 @@ void mapeditorexecutable_loop(void)
 		if (refresh_gui_docking == 0)
 		{
 			//Make sure window is setup in docking space.
-			ImGui::Begin("Tutorial Video##HelpVideoWindow", &bHelpVideo_Window, iGenralWindowsFlags);
+			ImGui::Begin("Tutorial Video##HelpVideoWindow", &bHelpVideo_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
-			ImGui::Begin("Tutorial Steps##HelpWindow", &bHelp_Window, iGenralWindowsFlags);
+			ImGui::Begin("Tutorial Steps##HelpWindow", &bHelp_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
-			ImGui::Begin("Tutorial Video##LeftHelpVideoWindow", &bHelpVideo_Window, iGenralWindowsFlags);
+			ImGui::Begin("Tutorial Video##LeftHelpVideoWindow", &bHelpVideo_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
-			ImGui::Begin("Tutorial Steps##LeftHelpWindow", &bHelp_Window, iGenralWindowsFlags);
+			ImGui::Begin("Tutorial Steps##LeftHelpWindow", &bHelp_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
 		}
 		else if (bHelp_Window && tutorial_files.size() > 0)
@@ -2984,7 +3297,7 @@ void mapeditorexecutable_loop(void)
 			}
 			else 
 			{
-				ImGui::Begin(cTutWindowVideoName, &bHelpVideo_Window, iGenralWindowsFlags);
+				ImGui::Begin(cTutWindowVideoName, &bHelpVideo_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			}
 			ImGui::Indent(10);
 			ImGui::PushItemWidth(-10);
@@ -3227,7 +3540,7 @@ void mapeditorexecutable_loop(void)
 
 			///
 
-			ImGui::Begin(cTutWindowStepsName, &bHelp_Window, iGenralWindowsFlags);
+			ImGui::Begin(cTutWindowStepsName, &bHelp_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 
 			ImGui::PushItemWidth(-10);
 			if (ImGui::StyleButton(tut.cStartText, ImVec2(ImGui::GetContentRegionAvail().x - 10.0f, 0.0f))) {
@@ -3475,7 +3788,7 @@ void mapeditorexecutable_loop(void)
 			#endif
 
 			char pBuildText[1024];
-			sprintf(pBuildText, "Build: %s", g.version_s.Get());
+			sprintf(pBuildText, "Pixelwolf PW Edition (GameGuru Classic base) | Base build: %s", g.version_s.Get());
 			ImGui::TextCenter(pBuildText);
 			ImGui::TextCenter("");
 
@@ -3563,7 +3876,7 @@ void mapeditorexecutable_loop(void)
 		if (refresh_gui_docking == 0 && !bImporter_Window) 
 		{
 			//Make sure window is setup in docking space.
-			ImGui::Begin("Importer##ImporterWindow", &bImporter_Window, iGenralWindowsFlags);
+			ImGui::Begin("Importer##ImporterWindow", &bImporter_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
 		}
 		imgui_importer_loop();
@@ -3685,6 +3998,13 @@ void mapeditorexecutable_loop(void)
 				}
 				ImGui::PopItemWidth();
 
+
+				if (iStandaloneCycle == 0) {
+					extern bool g_pwExportCap2048;
+					ImGui::Checkbox("Compact export: max 2048px entity DDS", &g_pwExportCap2048);
+					ImGui::TextWrapped("Optional: reduces texture detail; source files remain unchanged.");
+					ImGui::TextWrapped("Public build: assets are not encrypted.");
+				}
 
 				// Save or Cancel button
 				ImGui::Indent(-10);
@@ -4229,7 +4549,7 @@ void mapeditorexecutable_loop(void)
 		if (refresh_gui_docking == 0 && !bWaypoint_Window) 
 		{
 			//Make sure window is setup in docking space.
-			ImGui::Begin("Waypoints##WaypointsToolsWindow", &bWaypoint_Window, iGenralWindowsFlags);
+			ImGui::Begin("Waypoints##WaypointsToolsWindow", &bWaypoint_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
 		}
 		waypoint_imgui_loop();
@@ -4243,7 +4563,7 @@ void mapeditorexecutable_loop(void)
 		{
 			//Make sure window is setup in docking space.
 			bool bTrue = true;
-			ImGui::Begin("Terrain Tools##TerrainToolsWindow", &bTerrain_Tools_Window, iGenralWindowsFlags);
+			ImGui::Begin("Terrain Tools##TerrainToolsWindow", &bTerrain_Tools_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
 			bTerrainToolsDocked = true;
 		}
@@ -4259,7 +4579,7 @@ void mapeditorexecutable_loop(void)
 		if (refresh_gui_docking == 0 && !bBuilder_Properties_Window) 
 		{
 			//Make sure window is setup in docking space.
-			ImGui::Begin("Structure Properties##BuilderPropertiesWindow", &bBuilder_Properties_Window, iGenralWindowsFlags);
+			ImGui::Begin("Structure Properties##BuilderPropertiesWindow", &bBuilder_Properties_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
 		}
 		else {
@@ -4277,7 +4597,7 @@ void mapeditorexecutable_loop(void)
 		if (refresh_gui_docking == 0 && !g_bCharacterCreatorPlusActivated) 
 		{
 			//Make sure window is setup in docking space.
-			ImGui::Begin("Character Creator##PropertiesWindow", &g_bCharacterCreatorPlusActivated, iGenralWindowsFlags);  //cyb
+			ImGui::Begin("Character Creator##PropertiesWindow", &g_bCharacterCreatorPlusActivated, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);  //cyb
 			ImGui::End();
 		}
 		charactercreatorplus_imgui();
@@ -4295,7 +4615,7 @@ void mapeditorexecutable_loop(void)
 		if (refresh_gui_docking == 0) 
 		{
 			//Need to be here while first time docking.
-			ImGui::Begin("Entity Properties##PropertiesWindow", &bEntity_Properties_Window, iGenralWindowsFlags);
+			ImGui::Begin("Entity Properties##PropertiesWindow", &bEntity_Properties_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
 		}
 		else if (bEntity_Properties_Window) {
@@ -4371,7 +4691,7 @@ void mapeditorexecutable_loop(void)
 				}
 
 
-				ImGui::Begin("Entity Properties##PropertiesWindow", &bEntity_Properties_Window, iGenralWindowsFlags);
+				ImGui::Begin("Entity Properties##PropertiesWindow", &bEntity_Properties_Window, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 
 				int media_icon_size = 64;
 				ImGui::BeginChild("##cEntitiesPropertiesHeader", ImVec2(0, 0),false, iGenralWindowsFlags);
@@ -4426,6 +4746,8 @@ void mapeditorexecutable_loop(void)
 
 							t.grideleprof.name_s = imgui_setpropertystring2(t.group, t.grideleprof.name_s.Get(), t.strarr_s[413].Get(), "Choose a unique name for this character");
 							t.grideleprof.aimain_s = imgui_setpropertylist2(t.group, t.controlindex, t.grideleprof.aimain_s.Get(), "Behaviour", "Select a behaviour for this character", 11);
+							if (ImGui::SmallButton("Edit Script##PWLuaSimpleCharacter"))
+								PWLuaStudio::OpenEntityScript(GetActiveWindow(), t.grideleprof.aimain_s.Get());
 							t.grideleprof.soundset1_s = imgui_setpropertyfile2(t.group, t.grideleprof.soundset1_s.Get(), "Voiceover", "Select t.a WAV or OGG file this character will use during their behavior", "audiobank\\");
 							t.grideleprof.ifused_s = imgui_setpropertystring2(t.group, t.grideleprof.ifused_s.Get(), "If Used", "Sometimes used to specify the name of an entity to be activated");
 						}
@@ -4612,6 +4934,8 @@ void mapeditorexecutable_loop(void)
 										ms = "Script";
 										cstr aim = t.grideleprof.aimain_s;
 										t.grideleprof.aimain_s = imgui_setpropertyfile2(t.group, t.grideleprof.aimain_s.Get(), (char *)ms.c_str(), t.strarr_s[207].Get(), pAIRoot);
+										if (ImGui::SmallButton("Edit Script##PWLuaBehaviour1"))
+											PWLuaStudio::OpenEntityScript(GetActiveWindow(), t.grideleprof.aimain_s.Get());
 										if (aim != t.grideleprof.aimain_s)
 											current_loaded_script = -1;
 									}
@@ -5016,6 +5340,8 @@ void mapeditorexecutable_loop(void)
 											ms = "Script";
 											cstr aim = t.grideleprof.aimain_s;
 											t.grideleprof.aimain_s = imgui_setpropertyfile2(t.group, t.grideleprof.aimain_s.Get(), (char *)ms.c_str(), t.strarr_s[207].Get(), pAIRoot);
+										if (ImGui::SmallButton("Edit Script##PWLuaBehaviour2"))
+											PWLuaStudio::OpenEntityScript(GetActiveWindow(), t.grideleprof.aimain_s.Get());
 											aimain = t.grideleprof.aimain_s.Lower();
 											if (aim != t.grideleprof.aimain_s)
 												current_loaded_script = -1;
@@ -5286,6 +5612,8 @@ void mapeditorexecutable_loop(void)
 										t.grideleprof.aimain_s = tmpvalue;
 										current_loaded_script = -1;
 									}
+									if (ImGui::SmallButton("Edit Script##PWLuaMainAI"))
+										PWLuaStudio::OpenEntityScript(GetActiveWindow(), t.grideleprof.aimain_s.Get());
 								}
 
 
@@ -5838,15 +6166,9 @@ void mapeditorexecutable_loop(void)
 		//###########################
 
 		static std::map<std::string, std::int32_t> entity_folders;
-		if (refresh_gui_docking == 0) ImGui::SetNextWindowPos(viewPortPos + ImVec2(180, 140), ImGuiCond_Always); //ImGuiCond_FirstUseEver
-		if (refresh_gui_docking == 0) ImGui::SetNextWindowSize(ImVec2(54 * ImGui::GetFontSize(), 33 * ImGui::GetFontSize()), ImGuiCond_Always); //ImGuiCond_FirstUseEver
+		// The library is docked along the bottom, not a separately sized popup.
 		ImGuiWindowFlags ex_window_flags = 0;
-		if (refresh_gui_docking == 0 && !bExternal_Entities_Window)
-		{
-			ImGui::Begin("##Object Library ExternalWindow", &bExternal_Entities_Window, ex_window_flags);
-			ImGui::End();
-		}
-
+		// Never create the old dummy floating library window.
 		process_entity_library();
 		
 		static char cFullWritePath[MAX_PATH];
@@ -5933,22 +6255,24 @@ void mapeditorexecutable_loop(void)
 		//########################
 
 
-		if (refresh_gui_docking == 0) 
+		if (g_pwShowLegacyLevelEntityList && refresh_gui_docking == 0) 
 		{
 			bool bOpen = true;
-			ImGui::Begin(TABENTITYNAME, &bOpen, iGenralWindowsFlags);
+			ImGui::Begin(TABENTITYNAME, &bOpen, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
-			ImGui::Begin("Current Objects##AdditionalIconsWindow", &bOpen, iGenralWindowsFlags);
+			ImGui::Begin("Current Objects##AdditionalIconsWindow", &bOpen, iGenralWindowsFlags | ImGuiWindowFlags_NoMove);
 			ImGui::End();
 		}
-		if (refresh_gui_docking > 0) 
+		if (g_pwShowLegacyLevelEntityList && refresh_gui_docking > 0) 
 		{
 			static int current_sort_order = 0;
 			bool bToolTipActive = true;
 
 			int iWinFlags = 0;
 			bool bAlwaysOpen = true;
-			ImGui::Begin(TABENTITYNAME, &bAlwaysOpen, iGenralWindowsFlags | ImGuiWindowFlags_NoScrollbar); //, &bAlwaysOpen, iWinFlags);
+			ImGui::Begin(TABENTITYNAME, &bAlwaysOpen, iGenralWindowsFlags | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove);
+            // This legacy current-level list is deliberately disabled in PW Edition.
+            // It must not alter the authoritative dock ID for the Asset Browser.
 			static char cSearchEntities[1024] = "\0";
 
 			ImGui::BeginChild("##ChirlEntitiesLeftPanel", ImVec2(ImGui::GetWindowSize().x - 2.0f, fsy*3.0), false, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoNavInputs); //ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_AlwaysHorizontalScrollbar
@@ -6901,8 +7225,8 @@ void mapeditorexecutable_loop(void)
 			static bool bLeftPanelSelectedAsDefault = false;
 			if (!bLeftPanelSelectedAsDefault) {
 				//ImGui::SetWindowFocus(TABENTITYNAME);
-				//PE: Start in terrain tools.
-				ImGui::SetWindowFocus("Terrain Tools##TerrainToolsWindow");
+				// PW Edition default focus: keep the Inspector visible on the right.
+				ImGui::SetWindowFocus("Inspector##PWInspector");
 
 				bLeftPanelSelectedAsDefault = true;
 			}
@@ -7248,12 +7572,18 @@ void mapeditorexecutable_loop(void)
 					iLaunchAfterSync = 0;
 					cStr tOldDir = GetDir();
 					char * cFileSelected;
-					cFileSelected = (char *)noc_file_dialog_open(NOC_FILE_DIALOG_OPEN, "All\0*.*\0X\0*.x\0DBO\0*.dbo\0OBJ\0*.obj\0FBX\0*.fbx\0GLTF\0*.gltf\0GLB\0*.glb\0\0\0", NULL, NULL , true );
+					cFileSelected = (char *)noc_file_dialog_open(NOC_FILE_DIALOG_OPEN, "All supported models\0*.x;*.dbo;*.obj;*.fbx\0X\0*.x\0DBO\0*.dbo\0OBJ\0*.obj\0FBX\0*.fbx\0\0\0", NULL, NULL , true );
 					SetDir(tOldDir.Get());
 					if (cFileSelected && strlen(cFileSelected) > 0) 
 					{
+                        if (strlen(cFileSelected) >= MAX_PATH)
+                        {
+                            strcpy(cTriggerMessage, "Model path is too long for the Classic importer.");
+                            bTriggerMessage = true;
+                            break;
+                        }
 						char szModelPath[ MAX_PATH ];
-						strcpy( szModelPath, cFileSelected );
+                        strcpy_s(szModelPath, sizeof(szModelPath), cFileSelected);
 						const char* pExtension = strrchr( szModelPath, '.' );
 						if ( !pExtension )
 						{
@@ -7268,6 +7598,7 @@ void mapeditorexecutable_loop(void)
 							if (stricmp(pExtension, ".dbo") == NULL) bPermittedFormat = true;
 							if (stricmp(pExtension, ".obj") == NULL) bPermittedFormat = true;
 							if (stricmp(pExtension, ".fbx") == NULL) bPermittedFormat = true;
+                            // PW Edition: GLB is disabled until it passes a real import test.
 							if (bPermittedFormat == true)
 							{
 								// load the model
@@ -7656,6 +7987,14 @@ void mapeditorexecutable_loop(void)
 
 			//  Render terrain elements (shadowupdatepacer as shadow calc is expensive, time slice it)
 			t.terrain.gameplaycamera=0;
+			// Loading a saved level can restore shadowmode=0 from its visual settings
+			// after the editor's last zoom recalculation. Reinstate the user's
+			// PW real-time-shadow preference once; do not rebuild every frame.
+			if (g_pwEditorRealtimeShadows && t.visuals.shadowmode < 100)
+			{
+				t.visuals.shadowmode = 100;
+				visuals_justshaderupdate();
+			}
 			if ( Timer() > (int)t.editor.shadowupdatepacer ) 
 			{
 				t.editor.shadowupdatepacer=Timer()+20;
@@ -7904,8 +8243,26 @@ void mapeditorexecutable_loop(void)
 
 void mapeditorexecutable_finish(void)
 {
+#ifdef ENABLEIMGUI
+    PWShutdownTrace("finish entered; before common_justbeforeend");
+    // ExitProcess terminates other threads before DLL detach. A live loader
+    // may hold a graphics/file-system lock needed by detach, so cancel and
+    // join while the device and engine services are still alive.
+    PWShutdownTrace("before texture stage shutdown");
+    PWTextureStageEnd();
+    PWShutdownTrace("texture stage shutdown returned; before image preload reset");
+    image_preload_files_reset();
+    PWShutdownTrace("image preload reset returned; before object preload reset");
+    object_preload_files_reset();
+    PWShutdownTrace("object preload reset returned; before inspector capture release");
+    PWReleaseInspectorCapture();
+    PWShutdownTrace("preview capture released");
+#endif
 	// End map editor program (moved above chdir and pref writes)
 	common_justbeforeend();
+#ifdef ENABLEIMGUI
+    PWShutdownTrace("common_justbeforeend returned; before prefs");
+#endif
 
 	// Come out of Files folder
 	SetCurrentDirectoryA(g.fpscrootdir_s.Get());
@@ -7946,6 +8303,9 @@ void mapeditorexecutable_finish(void)
 	//		GGVR_DeleteHolographicSpace;
 	#endif
 
+#ifdef ENABLEIMGUI
+    PWShutdownTrace("prefs saved; before ExitProcess");
+#endif
 	// final exit
 	ExitProcess ( 0 );
 }
@@ -8476,6 +8836,7 @@ void editor_showquickstart ( int iForceMainOpen )
 
 void editor_previewmapormultiplayer_initcode ( int iUseVRTest )
 {
+	PWLoadTraceScope pwTracePreviewInit("editor.preview_init.total");
 	//  store if project modified
 	t.storeprojectmodified=g.projectmodified;
 	g_tstoreprojectmodifiedstatic = g.projectmodifiedstatic; 
@@ -8701,7 +9062,10 @@ void editor_previewmapormultiplayer_initcode ( int iUseVRTest )
 	// And save the level to levelbank\testmap before launch preview
 	// so we can restore to this level if it crashes
 	g.gpretestsavemode=1;
-	gridedit_save_test_map ( );
+	{
+		PWLoadTraceScope pwTraceTestMapSave("editor.preview_init.save_test_map");
+		gridedit_save_test_map ( );
+	}
 	g.gpretestsavemode=0;
 
 	// Now saves all part-files into temp FPM file (which multiplayer can pick up later)
@@ -8713,10 +9077,13 @@ void editor_previewmapormultiplayer_initcode ( int iUseVRTest )
 		mapfile_saveproject_fpm ( );
 	}
 
-	// GCStore could have assed assets since the last 'test game' so refresh internal lists
-	sky_init ( );
-	terrain_initstyles ( );
-	grass_initstyles();
+	// Refresh preview environment references; measure their cost separately.
+	{
+		PWLoadTraceScope pwTraceEnvironmentRefresh("editor.preview_init.refresh_environment");
+		sky_init ( );
+		terrain_initstyles ( );
+		grass_initstyles();
+	}
 
 	// Re-acquire indices now the lists have changed
 	// takes visuals.sky$ visuals.terrain$ visuals.vegetation$
@@ -8884,9 +9251,10 @@ void editor_previewmapormultiplayer_initcode ( int iUseVRTest )
 	SetCameraFOV ( 75 );
 	g.grav_f=-5.0;
 
-	// store original terrain heights
+	// Store original terrain heights; 1025x1025 samples can dominate a small-map test.
 	if ( t.terrain.TerrainID>0 ) 
 	{
+		PWLoadTraceScope pwTraceTerrainSamples("editor.preview_init.terrain_height_samples");
 		for ( t.z = 0 ; t.z<=  1024; t.z++ )
 		{
 			for ( t.x = 0 ; t.x<=  1024; t.x++ )
@@ -8897,9 +9265,10 @@ void editor_previewmapormultiplayer_initcode ( int iUseVRTest )
 		}
 	}
 
-	// Create heightmap from this terrain (for quad reduction)
+	// Create heightmap from terrain (for quad reduction).
 	if ( t.terrain.TerrainID>0 ) 
 	{
+		PWLoadTraceScope pwTraceHeightmap("editor.preview_init.heightmap_generation");
 		t.terrain.terrainregionupdate=0;
 		terrain_refreshterrainmatrix ( );
 		t.theightfile_s=g.mysystem.levelBankTestMap_s+"heightmap.dds"; //"levelbank\\testmap\\heightmap.dds";
@@ -10939,7 +11308,7 @@ void imgui_input_getcontrols(void)
 		NewTitle = NewTitle + WinTitle;
 		SetWindowTitle(NewTitle.Get());
 		#else
-		cstr NewTitle = "GameGuru - ";
+		cstr NewTitle = "GameGuru Classic - PW Edition | ";
 		if (strnicmp(WinTitle.Get(), "mapbank\\", 8) == 0)
 			WinTitle = WinTitle.Get() + 8;
 		NewTitle = NewTitle + WinTitle;
@@ -12884,7 +13253,8 @@ void editor_overallfunctionality ( void )
 			}
 		}
 
-		//  modulate shadow strength based on distance
+		// Preserve real-time cascaded shadows across the editor camera range
+		// (stock Classic fades them to zero on distant zooms).
 		t.tcamrange_f=((600.0*t.gridzoom_f)+1000);
 		t.toldvisualsshadowmode=t.visuals.shadowmode;
 		if (  t.tcamrange_f<4000 ) 
@@ -12902,6 +13272,8 @@ void editor_overallfunctionality ( void )
 				t.visuals.shadowmode=0;
 			}
 		}
+		if (g_pwEditorRealtimeShadows)
+			t.visuals.shadowmode = 100;
 		if (  t.toldvisualsshadowmode != t.visuals.shadowmode ) 
 		{
 			visuals_justshaderupdate ( );
@@ -14063,9 +14435,19 @@ void editor_refresheditmarkers ( void )
 void editor_visuals ( void )
 {
 	//  Control entity selection and alpha of layers
-	if (  t.refreshgrideditcursor == 1 ) 
+	if (  t.refreshgrideditcursor == 1 )
 	{
+		const DWORD pwPreviewStart = GetTickCount();
 		gridedit_recreateentitycursor ( );
+		const DWORD pwPreviewMs = GetTickCount() - pwPreviewStart;
+		if (pwPreviewMs > 100)
+		{
+			char details[256] = { 0 };
+			sprintf_s(details, sizeof(details),
+				"PW ASSET PLACEMENT: 3D cursor preview %lu ms, bank ID %d",
+				(unsigned long)pwPreviewMs, t.gridentity);
+			timestampactivity(0, details);
+		}
 		t.refreshgrideditcursor=0;
 	}
 	gridedit_displayentitycursor ( );
@@ -16151,6 +16533,7 @@ void gridedit_mapediting ( void )
 				// Select widget controlled object
 				if (!bDisableWidgetSelection && (t.inputsys.mclick == 1|| iWidgetSelection > 0 ) && t.gridentity == 0)
 				{
+					const bool pwSelectionFromHierarchy = iWidgetSelection > 0;
 					if (iWidgetSelection > 0)
 					{
 						t.tentitytoselect = iWidgetSelection;
@@ -16168,9 +16551,11 @@ void gridedit_mapediting ( void )
 									#ifndef ALLOWSELECTINGLOCKEDOBJECTS
 									t.entityelement[t.widget.pickedEntityIndex].editorlock = 0;
 									#endif
-									t.widget.offsetx = g.glastpickedx_f - ObjectPositionX(t.widget.pickedObject);
-									t.widget.offsety = g.glastpickedy_f - ObjectPositionY(t.widget.pickedObject);
-									t.widget.offsetz = g.glastpickedz_f - ObjectPositionZ(t.widget.pickedObject);
+									// Scene hierarchy selection has no 3D hit point. Never
+									// reuse stale mouse-pick offsets or the gizmo can jump.
+									t.widget.offsetx = pwSelectionFromHierarchy ? 0.0f : g.glastpickedx_f - ObjectPositionX(t.widget.pickedObject);
+									t.widget.offsety = pwSelectionFromHierarchy ? 0.0f : g.glastpickedy_f - ObjectPositionY(t.widget.pickedObject);
+									t.widget.offsetz = pwSelectionFromHierarchy ? 0.0f : g.glastpickedz_f - ObjectPositionZ(t.widget.pickedObject);
 
 									// 271015 - this may not be required as it is duplicated later on..
 									if (g.entityrubberbandlist.size() > 0)
@@ -17357,12 +17742,12 @@ void gridedit_import_ask ( void )
 		{
 			if (  t.tdone  ==  0 ) 
 			{
-				SetFileMapString ( 1 , 1256 , "Choose an X or FBX file for a new object or an .fpe file for existing (*.*)" );
+				SetFileMapString ( 1 , 1256 , "Choose an X, FBX or DBO file for a new object, or FPE for an existing entity (*.*)" );
 				SetFileMapString (  1, 1512, "Import New Entity" );
 			}
 			else
 			{
-				SetFileMapString (  1, 1256, "Please try again ) You must choose either an X or FBX file or an .fpe file! (*.*)" );
+				SetFileMapString (  1, 1256, "Please choose X, FBX, DBO or FPE (*.x;*.fbx;*.dbo;*.fpe)" );
 				SetFileMapString (  1, 1512, "Invalid File, Please t.try again" );
 			}
 			SetFileMapDWORD (  1, 424, 1 );
@@ -17374,7 +17759,7 @@ void gridedit_import_ask ( void )
 			t.returnstring_s=GetFileMapString(1, 1000);
 			t.tdone = 1;
 			if (	strcmp ( Lower(Right(t.returnstring_s.Get(),2)) , ".x" ) == 0 
-			||		strcmp ( Lower(Right(t.returnstring_s.Get(),4)) ,".fbx" ) == 0 
+			||		strcmp ( Lower(Right(t.returnstring_s.Get(),4)) ,".fbx" ) == 0
 			||		strcmp ( Lower(Right(t.returnstring_s.Get(),4)) , ".dbo" ) == 0 
 			||		strcmp ( Lower(Right(t.returnstring_s.Get(),4)) , ".fpe" ) == 0 
 			||		t.returnstring_s  ==  ""  )  
@@ -20773,12 +21158,25 @@ void AddPayLoad(ImGuiPayload* payload, bool addtocursor)
 			t.addentityfile_s = payload_n->m_sFolder.Get();
 			if (t.addentityfile_s != "")
 			{
+				const DWORD pwAssetStart = GetTickCount();
 				entity_adduniqueentity(false);
-				t.tasset = t.entid;
-				if (t.talreadyloaded == 0)
+				const DWORD pwAssetLoadMs = GetTickCount() - pwAssetStart;
+				if (pwAssetLoadMs > 100)
 				{
-					editor_filllibrary();
+					char perf[384] = { 0 };
+					sprintf_s(perf, sizeof(perf), "PW ASSET INSERT: model bank load %lu ms (%s)",
+						(unsigned long)pwAssetLoadMs, t.addentityfile_s.Get());
+					timestampactivity(0, perf);
 				}
+				t.tasset = t.entid;
+				// PW's Asset Browser reads the entitybank directly. The old
+				// editor_filllibrary() sends blocking FPSEXCHANGE messages to
+				// the retired external entity pane, costing up to seconds.
+				// Keep it only when actually running the legacy IDE.
+#if !defined(ENABLEIMGUI) || defined(USEOLDIDE)
+				if (t.talreadyloaded == 0)
+					editor_filllibrary();
+#endif
 			}
 			if (addtocursor) {
 
@@ -20939,10 +21337,40 @@ float ApplyPivot(sObject* pObject, int iMode, GGVECTOR3 vecValue, float fValue)
 }
 
 
-void RenderToPreview(int displayobj)
+void RenderToPreview(int displayobj, int previewImageId, float yaw, float pitch, float zoom)
 {
 	float oldx_f, oldy_f, oldz_f, oldangx_f, oldangy_f;
 	int entid = displayobj - g.entitybankoffset;
+    const bool inspectorRender = previewImageId > 0;
+    if (!ObjectExist(displayobj)) return;
+    extern DBPRO_GLOBAL CCameraManager m_CameraManager;
+    tagCameraData* previewCamera=inspectorRender?m_CameraManager.GetData(0):nullptr;
+    if(inspectorRender&&!previewCamera)return;
+    const auto savedSmoothCamera=t.editorfreeflight.s;
+    const float restoreNear=previewCamera?previewCamera->fZNear:1.f;
+    const float restoreFar=previewCamera?previewCamera->fZFar:300000.f;
+    const float restoreCameraX=inspectorRender?CameraPositionX(0):0.f;
+    const float restoreCameraY=inspectorRender?CameraPositionY(0):0.f;
+    const float restoreCameraZ=inspectorRender?CameraPositionZ(0):0.f;
+    const float restoreCameraAX=inspectorRender?CameraAngleX(0):0.f;
+    const float restoreCameraAY=inspectorRender?CameraAngleY(0):0.f;
+    const float restoreCameraAZ=inspectorRender?CameraAngleZ(0):0.f;
+    sObject* previewObject=inspectorRender?GetObjectData(displayobj):nullptr;
+    const GGVECTOR3 restoreScale=previewObject?previewObject->position.vecScale:GGVECTOR3(1,1,1);
+    const float restoreAngleX = ObjectAngleX(displayobj);
+    const float restoreAngleY = ObjectAngleY(displayobj);
+    const float restoreAngleZ = ObjectAngleZ(displayobj);
+    if (inspectorRender) {
+        // Only the temporary preview object is resized; restore before it can
+        // be inserted/exported. Native DBO/X assets can have wildly different units.
+        const float largest=(std::max)({ObjectSizeX(displayobj,1),ObjectSizeY(displayobj,1),ObjectSizeZ(displayobj,1)});
+        if(std::isfinite(largest)&&largest>0.00001f){
+            const float factor=100.0f/largest;
+            ScaleObject(displayobj,restoreScale.x*100.f*factor,restoreScale.y*100.f*factor,restoreScale.z*100.f*factor);
+        }
+        RotateObject(displayobj, pitch, yaw, 0.0f);
+        SetCameraRange(0,1.f,300000.f);
+    }
 
 	// prepare for thumb , set camera.
 	oldx_f = t.editorfreeflight.c.x_f;
@@ -20956,15 +21384,21 @@ void RenderToPreview(int displayobj)
 	float fLargestZ = ObjectSizeZ(displayobj,1);
 
 	float fOffsetX = 0.0f,fOffsetZ = 0.0f;
+    float fOffsetY = 0.0f;
 
-	float terrain_height = BT_GetGroundHeight(t.terrain.TerrainID, GGORIGIN_X, GGORIGIN_Z, 1);
+    // Inspector previews must never depend on the live map height or on
+    // terrain/collision at the native thumbnail staging coordinates.
+    // Put the model high in a clean, isolated scene instead.
+    float terrain_height = inspectorRender ? 20000.0f :
+        BT_GetGroundHeight(t.terrain.TerrainID, GGORIGIN_X, GGORIGIN_Z, 1);
 
 	sObject* pObject = g_ObjectList[displayobj];
-	if (pObject && t.entityprofile[entid].ischaracter != 1) {
-		float fAdjustScaleX = 1.0, fAdjustScaleZ = 1.0;
+	if (pObject && (inspectorRender || (entid > 0 && entid <= g.entidmaster && t.entityprofile[entid].ischaracter != 1))) {
+		float fAdjustScaleX = 1.0, fAdjustScaleY = 1.0, fAdjustScaleZ = 1.0;
 		if (pObject->pInstanceOfObject)
 		{
 			fAdjustScaleX = pObject->position.vecScale[0];
+            fAdjustScaleY = pObject->position.vecScale[1];
 			fAdjustScaleZ = pObject->position.vecScale[2];
 			pObject = pObject->pInstanceOfObject;
 		}
@@ -20977,6 +21411,24 @@ void RenderToPreview(int displayobj)
 		fValue = ApplyPivot(pObject, 2, GGVECTOR3(pObject->collision.vecMax - pObject->collision.vecMin), fValue);
 		fValue = fValue * pObject->position.vecScale[2] * fAdjustScaleZ;
 		fOffsetZ = fValue * 0.5f;
+        if (inspectorRender) {
+            // Unlike a native thumbnail, a raw DBO/FBX may have an origin far
+            // away from its actual mesh. Aim at the scaled bounding-box centre.
+            // Rotate the centre with the model so drag-orbit stays centred even
+            // when the model pivot is offset from the geometry.
+            GGVECTOR3 centre=(pObject->collision.vecMax+pObject->collision.vecMin)*0.5f;
+            // Use the engine's actual scale/pivot/rotation matrix, rather than
+            // assuming a hand-written Euler order matches the object renderer.
+            if(previewObject){
+                GGVec3TransformCoord(&centre,&centre,&previewObject->position.matObjectNoTran);
+                fOffsetX=centre.x;fOffsetY=centre.y;fOffsetZ=centre.z;
+            }
+            if (!std::isfinite(fOffsetX) || !std::isfinite(fOffsetY) ||
+                !std::isfinite(fOffsetZ)) {
+                // Malformed bounds must not send the preview camera to NaN.
+                fOffsetX = fOffsetY = fOffsetZ = 0.0f;
+            }
+        }
 	}
 	float fLargest = fLargestX;
 
@@ -20985,18 +21437,43 @@ void RenderToPreview(int displayobj)
 	
 	fLargest += (fLargestY * 0.2);
 	//Prevent camera for getting to far away.
-	if (fLargest >= 1500) fLargest = 1500;
-	if (fLargestY >= 1500) fLargestY = 1500;
+	if (!inspectorRender && fLargest >= 1500) fLargest = 1500;
+	if (!inspectorRender && fLargestY >= 1500) fLargestY = 1500;
 
-	t.editorfreeflight.c.x_f = 25650 + (fLargest*2.4);
-	if(fLargestY < 10.0f)
-		t.editorfreeflight.c.y_f = terrain_height + 80 + (fLargestY*1.85);
-	else
-		t.editorfreeflight.c.y_f = terrain_height + 50 + (fLargestY*1.85);
-	t.editorfreeflight.c.z_f = 25550 - (fLargest*2.4);
-	t.editorfreeflight.c.angx_f = 13;
-	t.editorfreeflight.c.angy_f = -180;
-	t.editorfreeflight.s = t.editorfreeflight.c;
+    if (inspectorRender) {
+        // The native tooltip uses a hard-coded world camera and terrain
+        // height. It can capture a blank landscape when previewing an
+        // independent raw model. Frame the actual loaded bounding box.
+        // Use the complete 3D diagonal so long, flat or tall meshes fit in
+        // the square capture instead of disappearing beyond its edges.
+        const float extent=std::sqrt(fLargestX*fLargestX +
+                                     fLargestY*fLargestY +
+                                     fLargestZ*fLargestZ);
+        const float safeExtent=std::isfinite(extent) ? extent : 100.0f;
+        const float viewportHeight=(std::max)(1.f,static_cast<float>(previewCamera->viewPort3D.Height));
+        const float viewportWidth=(std::max)(1.f,static_cast<float>(previewCamera->viewPort3D.Width));
+        const float cropSide=(std::min)(512.f,(std::min)(viewportWidth,viewportHeight));
+        const float tanVertical=std::tan((std::max)(10.f,(std::min)(150.f,previewCamera->fFOV))*0.00872664626f);
+        const float tanCrop=(std::max)(0.01f,tanVertical*cropSide/viewportHeight*(std::min)(1.f,previewCamera->fAspect*viewportHeight/viewportWidth));
+        const float radius=(std::max)(2.f,safeExtent*0.5f*(1.f+1.10f/tanCrop)/1.49345f)
+                              * (std::max)(0.35f,(std::min)(4.0f,zoom));
+        t.editorfreeflight.c.x_f=GGORIGIN_X + fOffsetX + radius;
+        t.editorfreeflight.c.y_f=terrain_height + fOffsetY + radius*0.48f;
+        t.editorfreeflight.c.z_f=GGORIGIN_Z + fOffsetZ + radius;
+        t.editorfreeflight.c.angx_f=0.0f;
+        t.editorfreeflight.c.angy_f=0.0f;
+    } else {
+        // Do not change the existing, working native thumbnail framing.
+        t.editorfreeflight.c.x_f=25650 + (fLargest*2.4);
+        if (fLargestY < 10.0f)
+            t.editorfreeflight.c.y_f=terrain_height + 80 + (fLargestY*1.85);
+        else
+            t.editorfreeflight.c.y_f=terrain_height + 50 + (fLargestY*1.85);
+        t.editorfreeflight.c.z_f=25550 - (fLargest*2.4);
+        t.editorfreeflight.c.angx_f=13;
+        t.editorfreeflight.c.angy_f=-180;
+    }
+    t.editorfreeflight.s=t.editorfreeflight.c;
 
 	//Preview object could be reused so store old pos.
 	float fOldObjPosX = ObjectPositionX(displayobj), fOldObjPosY = ObjectPositionY(displayobj), fOldObjPosZ = ObjectPositionZ(displayobj);
@@ -21036,10 +21513,15 @@ void RenderToPreview(int displayobj)
 	}
 
 
-	PositionCamera(t.editorfreeflight.c.x_f, t.editorfreeflight.c.y_f, t.editorfreeflight.c.z_f);
-	RotateCamera(t.editorfreeflight.c.angx_f, t.editorfreeflight.c.angy_f, 0);
-	PointCamera(GGORIGIN_X + fOffsetX, terrain_height, GGORIGIN_Z + fOffsetZ);
-	
+    if (inspectorRender) {
+        PositionCamera(0,t.editorfreeflight.c.x_f,t.editorfreeflight.c.y_f,t.editorfreeflight.c.z_f);
+        PointCamera(0,GGORIGIN_X+fOffsetX,terrain_height+fOffsetY,GGORIGIN_Z+fOffsetZ);
+        t.editorfreeflight.c.angx_f=CameraAngleX(0);
+        t.editorfreeflight.c.angy_f=CameraAngleY(0);
+    } else {
+        PositionCamera(t.editorfreeflight.c.x_f,t.editorfreeflight.c.y_f,t.editorfreeflight.c.z_f);
+        RotateCamera(t.editorfreeflight.c.angx_f,t.editorfreeflight.c.angy_f,0);
+        PointCamera(GGORIGIN_X+fOffsetX,terrain_height,GGORIGIN_Z+fOffsetZ);
 	if(fLargestY > 1000.0f)
 		t.editorfreeflight.c.angx_f = CameraAngleX() - 9.0f; //6.0
 	else if (fLargestY > 500.0f)
@@ -21054,12 +21536,13 @@ void RenderToPreview(int displayobj)
 		t.editorfreeflight.c.angx_f = CameraAngleX() - 4.0f; //6.0
 	t.editorfreeflight.c.angy_f = CameraAngleY();
 	RotateCamera(t.editorfreeflight.c.angx_f, t.editorfreeflight.c.angy_f, 0);
+    }
 
 	PositionObject(displayobj, GGORIGIN_X, terrain_height, GGORIGIN_Z);
 
 	HideObject(t.terrain.objectstartindex + 2); //hide water
 
-	if (t.entityprofile[entid].ismarker != 0 || t.entityprofile[entid].zdepth == 0)
+	if (inspectorRender || t.entityprofile[entid].ismarker != 0 || t.entityprofile[entid].zdepth == 0)
 	{
 		SetObjectMask(displayobj, 1);
 	}
@@ -21072,12 +21555,14 @@ void RenderToPreview(int displayobj)
 	
 	visuals_justshaderupdate();
 
-	int iOldSpeedshadows = g.globals.speedshadows;
-	g.globals.speedshadows = 0; //We need all cascades.
-	terrain_shadowupdate();
-	g.globals.speedshadows = iOldSpeedshadows;
+    int iOldSpeedshadows=g.globals.speedshadows;
+    if (!inspectorRender) {
+        g.globals.speedshadows=0; // Native thumbnail needs all cascades.
+        terrain_shadowupdate();
+        g.globals.speedshadows=iOldSpeedshadows;
+    }
 
-	if (t.terrain.TerrainID > 0)
+	if (!inspectorRender && t.terrain.TerrainID > 0)
 	{
 		BT_SetCurrentCamera(t.terrain.gameplaycamera);
 		BT_UpdateTerrainCull(t.terrain.TerrainID);
@@ -21104,9 +21589,13 @@ void RenderToPreview(int displayobj)
 
 
 	PositionObject(displayobj, fOldObjPosX, fOldObjPosY, fOldObjPosZ);
+    if (inspectorRender) {
+        ScaleObject(displayobj,restoreScale.x*100.f,restoreScale.y*100.f,restoreScale.z*100.f);
+        RotateObject(displayobj, restoreAngleX, restoreAngleY, restoreAngleZ);
+    }
 	
 	// delete previous thumbnail
-	if (GetImageExistEx(g.importermenuimageoffset + 50))
+	if (!inspectorRender && GetImageExistEx(g.importermenuimageoffset + 50))
 	{
 		image_setlegacyimageloading(true);
 		DeleteImage(g.importermenuimageoffset + 50);
@@ -21114,11 +21603,14 @@ void RenderToPreview(int displayobj)
 	}
 
 	// we can't grab from the backbuffer when we use a camera image.
-	extern DBPRO_GLOBAL CCameraManager m_CameraManager;
 	DBPRO_GLOBAL tagCameraData* m_mycam;
 	m_mycam = m_CameraManager.GetData(0);
 	float thumbnail_dimension = 512;
-	if (m_mycam)
+	if (inspectorRender)
+	{
+		if(m_mycam)PWCaptureInspectorSurface(m_mycam->pCameraToImageSurface,m_mycam->viewPort3D);
+	}
+	else if (m_mycam)
 	{
 		extern GlobStruct* g_pGlob;
 		LPGGSURFACE	pTmpSurface = g_pGlob->pCurrentBitmapSurface;
@@ -21137,8 +21629,15 @@ void RenderToPreview(int displayobj)
 	t.editorfreeflight.c.z_f = oldz_f;
 	t.editorfreeflight.c.angx_f = oldangx_f;
 	t.editorfreeflight.c.angy_f = oldangy_f;
-	PositionCamera(t.editorfreeflight.c.x_f, t.editorfreeflight.c.y_f, t.editorfreeflight.c.z_f);
-	RotateCamera(t.editorfreeflight.c.angx_f, t.editorfreeflight.c.angy_f, 0);
+    if(inspectorRender){
+        t.editorfreeflight.s=savedSmoothCamera;
+        SetCameraRange(0,restoreNear,restoreFar);
+        PositionCamera(0,restoreCameraX,restoreCameraY,restoreCameraZ);
+        RotateCamera(0,restoreCameraAX,restoreCameraAY,restoreCameraAZ);
+    }else{
+        PositionCamera(t.editorfreeflight.c.x_f,t.editorfreeflight.c.y_f,t.editorfreeflight.c.z_f);
+        RotateCamera(t.editorfreeflight.c.angx_f,t.editorfreeflight.c.angy_f,0);
+    }
 
 
 	//Display everything again.
@@ -21165,9 +21664,11 @@ void RenderToPreview(int displayobj)
 	}
 
 
-	g.globals.speedshadows = 0; //We need all cascades.
-	terrain_shadowupdate(); //Remove preview objects shadow from cascades.
-	g.globals.speedshadows = iOldSpeedshadows;
+    if (!inspectorRender) {
+        g.globals.speedshadows=0;
+        terrain_shadowupdate(); // Remove native thumbnail shadows.
+        g.globals.speedshadows=iOldSpeedshadows;
+    }
 
 	//Turn off custom clear color.
 	custom_back_color[0] = 0.0f; custom_back_color[1] = 0.0f; custom_back_color[2] = 0.0f; custom_back_color[3] = 0.0f;
@@ -21198,7 +21699,17 @@ void get_tutorials(void)
 	cStr tOldDir = GetDir();
 
 	tutorial_files.clear();
-	
+
+	// PW Edition: Steam installations may not include the optional tutorialbank.
+	// Dark Basic SetDir displays a blocking "Path Cannot Be Found" dialog
+	// if the directory is absent; simply leave the tutorial list empty instead.
+	const DWORD tutorialAttributes = GetFileAttributesA("tutorialbank");
+	if (tutorialAttributes == INVALID_FILE_ATTRIBUTES ||
+		(tutorialAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+	{
+		return;
+	}
+
 	SetDir("tutorialbank");
 
 	ChecklistForFiles();
@@ -22149,7 +22660,7 @@ void RedockWindow(char *name)
 
 		//dock it.
 		int winNodeId = ImGui::GetWindowDockID();
-		dockspace_id = ImGui::GetID("MyDockspace");
+		dockspace_id = ImGui::GetID(g_pwEngineDockspaceName);
 		ImGui::DockBuilderDockWindow(name, dock_tools_windows);
 		int winNodeId2 = ImGui::GetWindowDockID();
 		if (winNodeId != 0 && winNodeId2 != 0 && winNodeId != winNodeId2) {
@@ -23132,16 +23643,146 @@ float ImGuiGetMouseY(void)
 }
 
 #ifdef ENABLEIMGUI
+#include "PW-AssetInspector.h"
+#ifdef ENABLEIMGUI
+static void PWOpenPlayerAnimationPreview(const std::string& profile)
+{
+    PWAssetInspector::Open();
+    PWAssetInspector::Select(profile);
+}
+#endif
+
+
+// Recoverable custom asset removal. Only the FPE registration is moved;
+// DBO/X, scripts, thumbnails and textures may be shared and are never deleted.
+// Keep the original folder and basename so manual recovery is unambiguous.
+namespace PWAssetRemoval {
+static std::string FullPath(const std::string& path)
+{
+    char buffer[MAX_PATH]={};
+    DWORD n=GetFullPathNameA(path.c_str(),MAX_PATH,buffer,nullptr);
+    if(!n || n>=MAX_PATH) return {};
+    return buffer;
+}
+static std::string Key(std::string path)
+{
+    for(char& c:path) {
+        if(c=='/') c='\\';
+        else if(c>='A' && c<='Z') c=char(c-'A'+'a');
+    }
+    return path;
+}
+static std::string UserRoot()
+{
+    return FullPath(std::string(g.fpscrootdir_s.Get())+"\\Files\\entitybank\\user");
+}
+static bool IsUserFpe(const std::string& path)
+{
+    const std::string root=Key(UserRoot());
+    const std::string key=Key(path);
+    return !root.empty() && key.size()>root.size()+5 &&
+        key.compare(0,root.size()+1,root+"\\")==0 &&
+        key.compare(key.size()-4,4,".fpe")==0;
+}
+// Reject aliases, traversal, alternate data streams and directory junctions.
+// Walk the entire absolute path, not just the final filename.
+static bool NoReparsePoints(const std::string& path)
+{
+    if(path.size()<4 || path[1]!=':' || path[2]!='\\' ||
+        path.find(':',2)!=std::string::npos) return false;
+    size_t start=3;
+    while(start<path.size()) {
+        const size_t end=path.find('\\',start);
+        const std::string leaf=path.substr(start,end==std::string::npos?end:end-start);
+        if(leaf.empty() || leaf=="." || leaf==".." ||
+            leaf.back()=='.' || leaf.back()==' ') return false;
+        const std::string prefix=path.substr(0,end);
+        DWORD attributes=GetFileAttributesA(prefix.c_str());
+        if(attributes==INVALID_FILE_ATTRIBUTES || (attributes&FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+        if(end!=std::string::npos && !(attributes&FILE_ATTRIBUTE_DIRECTORY)) return false;
+        if(end==std::string::npos) return !(attributes&FILE_ATTRIBUTE_DIRECTORY);
+        start=end+1;
+    }
+    return false;
+}
+static bool Validate(const std::string& path,std::string& issue)
+{
+    if(path.empty() || !IsUserFpe(path) || !NoReparsePoints(path)) {
+        issue="Only existing, ordinary .fpe files within Files\\entitybank\\user can be removed.";
+        return false;
+    }
+    const std::string bankRoot=FullPath(std::string(g.fpscrootdir_s.Get())+"\\Files\\entitybank");
+    const std::string target=Key(path);
+    for(int id=1;id<=g.entidmaster;++id) {
+        std::string entry=Key(t.entitybank_s[id].Get());
+        if(entry.compare(0,11,"entitybank\\")==0) entry.erase(0,11);
+        if(entry.empty()) continue;
+        if(Key(FullPath(bankRoot+"\\"+entry))!=target) continue;
+        for(int e=1;e<=g.entityelementlist;++e)
+            if(t.entityelement[e].bankindex==id) {
+                issue="This asset is referenced by the current level. Remove its instances first.";
+                return false;
+            }
+        // A loaded bank entry may also be referenced by the cursor, undo or
+        // cached editor state. Do not invalidate or renumber live bank IDs.
+        issue="This asset is loaded in the current level's entity bank. Save your work, open a clean level or restart the editor, then retry.";
+        return false;
+    }
+    return true;
+}
+static std::string Destination(const std::string& path)
+{
+    return path+".pw-quarantine";
+}
+static bool Quarantine(const std::string& path,std::string& issue)
+{
+    if(!Validate(path,issue)) return false;
+    const std::string dest=Destination(path);
+    if(dest.size()>=MAX_PATH || GetFileAttributesA(dest.c_str())!=INVALID_FILE_ATTRIBUTES) {
+        issue="A recovery file already exists or the recovery path is too long. Nothing was moved.";
+        return false;
+    }
+    // No replace flag: an existing recovery file is never overwritten.
+    if(!MoveFileExA(path.c_str(),dest.c_str(),MOVEFILE_WRITE_THROUGH)) {
+        issue="Windows could not move the asset (error "+std::to_string(GetLastError())+"). Nothing was intentionally deleted.";
+        return false;
+    }
+    return true;
+}
+}
+
 void process_entity_library(void)
 {
+	// The PW asset library is a permanent dock, not an optional external dialog.
+	// Older Classic event handlers may still set the legacy visibility flag false.
+	bExternal_Entities_Window = true;
+	// Opening Add brings the bottom Asset Library tab forward once.
+	static bool wasLibraryOpen = false;
+	const bool justOpened = bExternal_Entities_Window && !wasLibraryOpen;
+	wasLibraryOpen = bExternal_Entities_Window;
 	if (bExternal_Entities_Window)
 	{
-		ImGuiWindowFlags ex_window_flags = 0;
+		ImGuiWindowFlags ex_window_flags = ImGuiWindowFlags_NoMove;
 		ImGuiIO& io = ImGui::GetIO();
 
 		static int uniqueId = 4000; //PE: Also used for imageID for previews.
 		static int loaded_images = 0;
 		static bool multi_selections = false;
+        static std::string pwRemovePending, pwRemoveIssue, pwRemoveNotice, pwRefreshFolder;
+        static bool pwOpenRemove=false;
+        static cFolderItem::sFolderFiles *firstShiftFile=nullptr, *lastShiftFile=nullptr;
+        if(!pwRefreshFolder.empty()) {
+            // Refresh after the previous frame has finished rendering its thumbnail.
+            firstShiftFile=lastShiftFile=nullptr;
+            for(cFolderItem* f=MainEntityList.m_pNext;f;f=f->m_pNext) {
+                if(PWAssetRemoval::Key(PWAssetRemoval::FullPath(f->m_sFolderFullPath.Get()))==pwRefreshFolder) {
+                    RefreshEntityFolder(f->m_sFolderFullPath.Get(),f);
+                    f->m_fLastTimeUpdate=0;
+                    break;
+                }
+            }
+            pwRefreshFolder.clear();
+        }
 		int multi_selections_count = 0;
 		static int lf_multi_selections_count = 0;
 		int olduniqueId = uniqueId;
@@ -23151,7 +23792,11 @@ void process_entity_library(void)
 		static int max_load_persync = 200; //First time only , changed later to 15
 		bReleaseIconsDynamic = true;
 #else
-		int max_load_persync = 2000;
+        // Do not decode thousands of asset BMP/PNG previews in a single GUI
+        // frame: it makes the viewport and asset dragging appear frozen.
+        // Spread first-time thumbnails across frames; loaded previews are
+        // cached in iPreview exactly as before.
+        int max_load_persync = 24;
 #endif
 
 		int preview_count = 0;
@@ -23161,12 +23806,30 @@ void process_entity_library(void)
 		time_t tCurrentTimeSec;
 		time(&tCurrentTimeSec);
 
-		ImGui::Begin("Entity Library##ExternalWindow", &bExternal_Entities_Window, ex_window_flags);
+		// Always attach the full library to the lower dock, including when the
+		// user's old uiv3.layout remembers it as a floating popup. DockBuilder
+		// alone only queues the docking for its initial workspace creation.
+		if (g_pwBottomAssetDockId != 0)
+			ImGui::SetNextWindowDockID(g_pwBottomAssetDockId, ImGuiCond_Always);
+		// An opaque window is required: transparent backgrounds let terrain
+		// show through the library and make it look like a viewport overlay.
+		ImGui::SetNextWindowBgAlpha(1.0f);
+		// This is a permanent dock window, not a closable popup.
+        ImGui::Begin("Asset Browser##PWAssetBrowser", NULL, ex_window_flags);
+        // Never learn a new dock from a mistakenly detached browser.
+        // The workspace owns this ID, not the individual asset panel.
+		if (justOpened)
+			ImGui::SetWindowFocus("Asset Browser##PWAssetBrowser");
 
 		bool bAddSelectionToGame = false;
 		bool bIsWeDocked = ImGui::IsWindowDocked();
 		static int current_tab = -1;
 
+        if (ImGui::Button("Asset Inspector...##PWOpenAssetInspector"))
+            PWAssetInspector::Open();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Browse folders and inspect images or 3D assets. Insert models in front of the editor camera.");
+        if(!pwRemoveNotice.empty()) ImGui::TextWrapped("%s",pwRemoveNotice.c_str());
 
 		CheckTutorialAction("TABMARKERS", 54.0f); //Tutorial: check if we are waiting for this action
 		if (current_tab == 1 && bTutorialCheckAction)
@@ -23481,8 +24144,7 @@ void process_entity_library(void)
 
 					bool bFirstShiftHasBeenSeen = false;
 					bool bAnySelectedItemsAvailable = false;
-					static cFolderItem::sFolderFiles * firstShiftFile = NULL;
-					static cFolderItem::sFolderFiles * lastShiftFile = NULL;
+
 
 					for (int splitloop = 0; splitloop < splitsections; splitloop++) {
 
@@ -23631,7 +24293,8 @@ void process_entity_library(void)
 												uniqueId++;
 
 											int textureId = 0;
-											if (myfiles->iPreview <= 0)
+												if (myfiles->iPreview == -2) { textureId = 0; }
+											else if (myfiles->iPreview <= 0)
 											{
 												//Only Visible.
 												int gcpy = ImGui::GetCursorPosY();
@@ -23640,31 +24303,54 @@ void process_entity_library(void)
 													myfiles->last_used = (long)tCurrentTimeSec;
 													if (max_load_persync-- >= 0)
 													{
-														//Load preview.
-														std::string sImgName = myfiles->m_sPath.Get();
-														sImgName = sImgName + "\\" + Left(myfiles->m_sName.Get(), Len(myfiles->m_sName.Get()) - 4);
-														sImgName += ".bmp";
-														myfiles->iPreview = uniqueId; //TOOL_ENTITY; //Just for testing.
-														SetMipmapNum(1); //PE: mipmaps not needed.
-														image_setlegacyimageloading(true);
-														
-														//cyb
-														char *fp = new char[sImgName.length() + 1];
-														strcpy(fp, sImgName.c_str());
-														if (FileExist(fp) == 0)
+														// Preserve the asset's OWN thumbnail, not one generic
+														// icon for every entity. Classic assets normally use BMP,
+														// while imported/community packs may ship PNG/JPG.
+														// Dark Basic FileExist can reject absolute paths: check
+														// the Windows filesystem directly before falling back.
+														std::string previewBase = myfiles->m_sPath.Get();
+														previewBase += "\\";
+														previewBase += Left(myfiles->m_sName.Get(), Len(myfiles->m_sName.Get()) - 4);
+														std::string sImgName;
+														const char* previewExtensions[] = { ".bmp", ".png", ".jpg", ".jpeg" };
+														for (const char* extension : previewExtensions)
 														{
-															sImgName = (g.mysystem.root_s + "files\\editors\\gfx\\missing.bmp").Get();
+															const std::string candidate = previewBase + extension;
+															const DWORD attributes = GetFileAttributesA(candidate.c_str());
+															if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+															{
+																sImgName = candidate;
+																break;
+															}
 														}
-														delete[] fp;
+														if (sImgName.empty())
+														{
+															// Record only a few samples so missing DLC/model
+															// thumbnail packs do not flood the runtime log.
+															static int pwMissingThumbnailSamples = 0;
+															if (pwMissingThumbnailSamples++ < 5)
+															{
+																char warning[1024] = { 0 };
+																sprintf_s(warning, sizeof(warning), "PW ASSET THUMBNAIL MISSING: %.870s", previewBase.c_str());
+																timestampactivity(0, warning);
+															}
+															// No arbitrary fallback image: it made every missing asset
+														// look identical. A missing thumbnail is labelled below.
+														sImgName.clear();
+														}
+														myfiles->iPreview = uniqueId;
+														SetMipmapNum(1);
+														image_setlegacyimageloading(true);
 													
-														LoadImage((char *)sImgName.c_str(), myfiles->iPreview);
+														if (!sImgName.empty())
+															LoadImage((char *)sImgName.c_str(), myfiles->iPreview);
 														image_setlegacyimageloading(false);
 														SetMipmapNum(-1);
 
-														if (!GetImageExistEx(myfiles->iPreview))
+														if (sImgName.empty() || !GetImageExistEx(myfiles->iPreview))
 														{
-															myfiles->iPreview = TOOL_ENTITY;
-															textureId = TOOL_ENTITY;
+															myfiles->iPreview = -2; // Stable missing-preview sentinel; never use a toolbar icon as an asset preview.
+															textureId = 0; // Missing previews use a clearly labelled clickable placeholder.
 														}
 														else {
 															loaded_images++;
@@ -23672,10 +24358,10 @@ void process_entity_library(void)
 														}
 													}
 													else
-														textureId = TOOL_ENTITY;
+														textureId = 0; // Missing previews use a clearly labelled clickable placeholder.
 												}
 												else {
-													textureId = TOOL_ENTITY;
+													textureId = 0; // Missing previews use a clearly labelled clickable placeholder.
 												}
 											}
 											else
@@ -23695,7 +24381,7 @@ void process_entity_library(void)
 																myfiles->iPreview = 0;
 																loaded_images--;
 															}
-															textureId = TOOL_ENTITY;
+															textureId = 0; // Missing previews use a clearly labelled clickable placeholder.
 														}
 														else
 															textureId = myfiles->iPreview;
@@ -23716,7 +24402,7 @@ void process_entity_library(void)
 
 												if (myfiles->iPreview > 0 && !GetImageExistEx(myfiles->iPreview)) {
 													myfiles->iPreview = 0;
-													textureId = TOOL_ENTITY;
+													textureId = 0; // No thumbnail: show labelled placeholder, not toolbar icon.
 												}
 
 												if (!bHeaderDisplayed) {
@@ -23793,7 +24479,9 @@ void process_entity_library(void)
 												}
 
 
-												if (ImGui::ImgBtn(textureId, ImVec2(media_icon_size, media_icon_size), drawCol_back, drawCol_normal, drawCol_hover, drawCol_Down, -1, 0, 0, 0, true))
+												if (textureId > 0 && GetImageExistEx(textureId)
+												? ImGui::ImgBtn(textureId, ImVec2(media_icon_size, media_icon_size), drawCol_back, drawCol_normal, drawCol_hover, drawCol_Down, -1, 0, 0, 0, true)
+												: ImGui::Button("No preview##PWAsset", ImVec2(media_icon_size, media_icon_size)))
 												{
 
 													if (bTutorialCheckAction) TutorialNextAction(); //Clicked get next tutorial action.
@@ -23839,27 +24527,69 @@ void process_entity_library(void)
 														std::string sFpeName = path_for_filename.c_str();
 														sFpeName = sFpeName + "\\" + myfiles->m_sName.Get();
 														t.addentityfile_s = sFpeName.c_str();
-														if (t.addentityfile_s != "")
-														{
-															entity_adduniqueentity(false);
-															t.tasset = t.entid;
-															if (t.talreadyloaded == 0)
-															{
-																editor_filllibrary();
-															}
-														}
-														t.inputsys.constructselection = t.tasset;
-
-														t.gridentity = t.entid;
-														t.inputsys.constructselection = t.entid;
-														t.inputsys.domodeentity = 1;
-														t.grideditselect = 5;
-
-														editor_refresheditmarkers();
-														//PE: Close window for now.
-														bCheckForClosing = true;
+                                                        if (t.addentityfile_s != "")
+                                                        {
+                                                            entity_adduniqueentity(false);
+                                                            const int pwBankObject = g.entitybankoffset + t.entid;
+                                                            // Importer failure previously gave a normal-looking
+                                                            // scene entry even if the FPE/DBO was empty or absent.
+                                                            // Expose the failure instead of placing a ghost model.
+                                                            const PWImportedGeometry::Report pwAsset =
+                                                                PWImportedGeometry::Inspect(
+                                                                    t.entid > 0 && ObjectExist(pwBankObject)
+                                                                        ? GetObjectData(pwBankObject) : nullptr);
+                                                            const float pwX = ObjectExist(pwBankObject)
+                                                                ? ObjectSizeX(pwBankObject, 2) : 0.0f;
+                                                            const float pwY = ObjectExist(pwBankObject)
+                                                                ? ObjectSizeY(pwBankObject, 2) : 0.0f;
+                                                            const float pwZ = ObjectExist(pwBankObject)
+                                                                ? ObjectSizeZ(pwBankObject, 2) : 0.0f;
+                                                            if (!pwAsset.usable ||
+                                                                !PWImportedGeometry::SensibleExtent(pwX, pwY, pwZ))
+                                                            {
+                                                                t.tasset = 0;
+                                                                t.gridentity = 0;
+                                                                t.inputsys.constructselection = 0;
+                                                                popup_text("Asset could not be placed: FPE model has no usable geometry. Reimport FBX and check DBO output.");
+                                                                char pwDiagnostic[512] = {};
+                                                                sprintf_s(pwDiagnostic, sizeof(pwDiagnostic),
+                                                                    "PW ASSET PLACEMENT BLOCKED: %s | vertices=%llu | bounds=%0.4f,%0.4f,%0.4f",
+                                                                    t.addentityfile_s.Get(), pwAsset.vertices, pwX, pwY, pwZ);
+                                                                timestampactivity(0, pwDiagnostic);
+                                                                OutputDebugStringA(pwDiagnostic);
+                                                            }
+                                                            else
+                                                            {
+                                                                char pwDiagnostic[384] = {};
+                                                                sprintf_s(pwDiagnostic, sizeof(pwDiagnostic),
+                                                                    "PW ASSET PLACEABLE: %s | vertices=%llu | bounds=%0.4f,%0.4f,%0.4f",
+                                                                    t.addentityfile_s.Get(), pwAsset.vertices, pwX, pwY, pwZ);
+                                                                timestampactivity(0, pwDiagnostic);
+                                                                t.tasset = t.entid;
+                                                                t.gridentity = t.entid;
+                                                                t.inputsys.constructselection = t.entid;
+                                                                t.inputsys.domodeentity = 1;
+                                                                t.grideditselect = 5;
+                                                                editor_refresheditmarkers();
+                                                                bCheckForClosing = true;
+                                                            }
+                                                        }
 													}
 												}
+
+                                                // Right-click the actual thumbnail (including missing previews).
+                                                if(i==0 && !isMarkers && ImGui::BeginPopupContextItem("##PWRemoveAssetContext")) {
+                                                    const std::string candidate=PWAssetRemoval::FullPath(
+                                                        std::string(myfiles->m_sPath.Get())+"\\"+myfiles->m_sName.Get());
+                                                    if(PWAssetRemoval::IsUserFpe(candidate)) {
+                                                        if(ImGui::MenuItem("Delete imported asset...")) {
+                                                            pwRemovePending=candidate;
+                                                            pwRemoveIssue.clear();
+                                                            pwOpenRemove=true;
+                                                        }
+                                                    } else ImGui::TextDisabled("Only custom user assets can be removed.");
+                                                    ImGui::EndPopup();
+                                                }
 
 												//if (!bEntity_Properties_Window && !g_bCharacterCreatorPlusActivated && !bImporter_Window && i == 0 && ImGui::IsItemHovered()) {
 												if (!bEntity_Properties_Window && !bImporter_Window && i == 0 && ImGui::IsItemHovered()) { //cyb
@@ -24097,10 +24827,38 @@ void process_entity_library(void)
 #endif
 		lf_multi_selections_count = multi_selections_count; //Use last frames count.
 
-		ImGui::EndTabBar();
+        ImGui::EndTabBar();
 
+        if(pwOpenRemove) {
+            ImGui::OpenPopup("Delete imported asset##PWRemoveConfirm");
+            pwOpenRemove=false;
+        }
+        if(ImGui::BeginPopupModal("Delete imported asset##PWRemoveConfirm",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextWrapped("Remove this custom asset from the browser?");
+            ImGui::TextWrapped("%s",pwRemovePending.c_str());
+            ImGui::TextWrapped("Only its FPE registration will be moved. Models, textures and scripts stay untouched.");
+            ImGui::TextWrapped("Recovery: rename the following file to remove its .pw-quarantine suffix:");
+            ImGui::TextWrapped("%s",PWAssetRemoval::Destination(pwRemovePending).c_str());
+            ImGui::TextWrapped("Other saved maps have not been checked. Back up maps that use this asset.");
+            if(!pwRemoveIssue.empty()) ImGui::TextWrapped("%s",pwRemoveIssue.c_str());
+            if(ImGui::Button("Move to recovery")) {
+                if(PWAssetRemoval::Quarantine(pwRemovePending,pwRemoveIssue)) {
+                    pwRefreshFolder=PWAssetRemoval::Key(pwRemovePending.substr(0,pwRemovePending.find_last_of('\\')));
+                    pwRemoveNotice="Asset removed from browser. Recovery file: "+PWAssetRemoval::Destination(pwRemovePending);
+                    firstShiftFile=lastShiftFile=nullptr;
+                    CheckTooltipObjectDelete();
+                    pwRemovePending.clear();
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+            ImGui::SameLine();
+            if(ImGui::Button("Cancel")) {
+                pwRemovePending.clear(); pwRemoveIssue.clear(); ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
 
-		if (bAddSelectionToGame) {
+        if (bAddSelectionToGame) {
 
 			DeleteWaypointsAddedToCurrentCursor();
 			CheckTooltipObjectDelete();
@@ -24169,10 +24927,8 @@ void process_entity_library(void)
 								{
 									entity_adduniqueentity(false);
 									t.tasset = t.entid;
-									if (t.talreadyloaded == 0)
-									{
-										editor_filllibrary();
-									}
+									// PW browser reads the entity bank directly; never synchronise with
+																// the retired external IDE (editor_filllibrary blocks placement).
 								}
 
 								searchfiles->iFlags = 0;
@@ -24219,14 +24975,8 @@ void process_entity_library(void)
 				bAreWeOverLapping = true;
 			}
 		}
-		if (!bIsWeDocked && bCheckForClosing) {
-			if (bAreWeOverLapping)
-				bExternal_Entities_Window = false;
-		}
-
-		//Remove window on right click if we are overlapping.
-		if (bAreWeOverLapping && t.inputsys.mclick == 2)
-			bExternal_Entities_Window = false;
+		// The PW browser is permanently docked; floating-dialog overlap checks
+		// must not hide it after dragging assets or right-clicking.
 
 
 		bCheckForClosing = false;
@@ -24236,6 +24986,9 @@ void process_entity_library(void)
 		ImGui::End();
 
 	}
+    // A separate user-requested popup; never docks, replaces, or tears off
+    // the permanent bottom Asset Browser.
+    PWAssetInspector::Draw();
 
 }
 
