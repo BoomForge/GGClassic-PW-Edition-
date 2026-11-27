@@ -1,5 +1,5 @@
 #pragma once
-// M5B isolated D3D11.2 backend. No live GameGuru image registry admission yet.
+// M5B D3D11.2 backend; explicit opt-in live admission is in CImageC.cpp.
 // One stable tiled resource, one private pool, one independently reclaimable
 // finest mip. Coarse and packed mips are permanently backed.
 #include "PW-TextureMip.h"
@@ -76,9 +76,13 @@ public:
         layout_.total=total;layout_.finest=static_cast<UINT>(tiles);
         if(!layout_.Valid())return false;
         D3D11_BUFFER_DESC poolDesc={};
-        poolDesc.ByteWidth=layout_.Bytes(true);poolDesc.Usage=D3D11_USAGE_DEFAULT;poolDesc.MiscFlags=D3D11_RESOURCE_MISC_TILE_POOL;
+        // Create the permanent coarse allocation first, then grow for the
+        // top mip. Returning to the previous allocation size is more likely
+        // to free a complete driver allocation than shrinking one large pool.
+        poolDesc.ByteWidth=layout_.Bytes(false);poolDesc.Usage=D3D11_USAGE_DEFAULT;poolDesc.MiscFlags=D3D11_RESOURCE_MISC_TILE_POOL;
         if(FAILED(device->CreateBuffer(&poolDesc,nullptr,pool_.GetAddressOf())))return false;
         allocated_=poolDesc.ByteWidth;
+        if(!Resize(layout_.Bytes(true)))return false;
         // Whole logical resource in native order, physical ranges reversed:
         // highest-resolution mip at the end of the pool, all other tiles first.
         // Includes the packed mip tail without guessing its internal layout.
