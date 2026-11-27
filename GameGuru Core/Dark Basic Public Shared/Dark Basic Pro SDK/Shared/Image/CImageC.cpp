@@ -33,6 +33,9 @@
 #include "PW-TextureStage.h"
 #include "PW-TextureMip.h"
 #include "PW-TextureResidency.h"
+#ifdef DX11
+#include "PW-TextureTiled.h"
+#endif
 #include <memory>
 
 extern "C" HANDLE GG_CreateFile( LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile );
@@ -336,6 +339,180 @@ static PWMip::Span PWMipSpan(const DirectX::ScratchImage& image,UINT mip){
     }
     return span;
 }
+// M5B.2: independently owned tiled texture state. No pointer substitution;
+// original authored mip zero is retained in bounded CPU storage for restoration.
+struct PWTiledLive {
+    std::unique_ptr<PWTiled::Texture> texture;
+    std::unique_ptr<ID3D11ShaderResourceView,PWViewRelease> view;
+    ID3D11Texture2D* resource=nullptr; // owned by texture
+    std::vector<std::uint8_t> top;
+    UINT row=0;
+    PWResidency::State policy;
+    std::uint64_t generation=0;
+    ULONGLONG lastSeen=0;
+    float nearest=0;
+    bool observed=false,everObserved=false,pinned=false;
+};
+static std::vector<PWTiledLive> pwTiled;
+static bool pwTiledEnabled=false;
+static unsigned pwTiledAttempts=0,pwTiledAdmitted=0,pwTiledDown=0,pwTiledUp=0,pwTiledFailures=0,pwTiledPins=0;
+static ULONGLONG pwTiledLastPolicy=0,pwTiledLastSample=0,pwTiledLastFrame=0,pwTiledMaxFrameMs=0,pwTiledMaxOpMs=0;
+static unsigned long long pwTiledReclaimed=0;
+static bool PWTiledRestore(PWTiledLive& item){
+    if(item.texture->Full())return true;
+    PWMip::Span span;span.pixels=item.top.data();span.row=item.row;span.bytes=static_cast<UINT>(item.top.size());
+    const ULONGLONG start=GetTickCount64();
+    const bool restored=item.texture->Promote(span);
+    pwTiledMaxOpMs=(std::max)(pwTiledMaxOpMs,GetTickCount64()-start);
+    if(restored){++pwTiledUp;item.policy=PWResidency::State{};}
+    else ++pwTiledFailures;
+    return restored;
+}
+static bool PWTiledPin(ID3D11Resource* resource){
+    for(auto& item:pwTiled){
+        if(item.resource!=resource)continue;
+        if(!item.pinned){item.pinned=true;++pwTiledPins;}
+        // A raw consumer must never get an incomplete resource.
+        return PWTiledRestore(item);
+    }
+    return true;
+}
+static void PWTiledFinish(){
+    for(auto it=pwTiled.begin();it!=pwTiled.end();){
+        // Mapped tile pools are reference counted by D3D. A fully restored
+        // texture can outlive this tracker safely through its existing views.
+        if(!PWAdaptiveDeviceOK()||PWTiledRestore(*it)){it=pwTiled.erase(it);continue;}
+        it->pinned=true; // retain recovery bytes after a failed restoration
+        ++it;
+    }
+}
+static bool PWTiledCandidate(const std::string& path,const GGIMAGE_INFO& info){
+    return pwTiledEnabled&&pwTiled.size()<PWMip::MaxPending&&pwTiledAttempts<16&&PWMipMarked(path)&&
+        PWMip::Eligible(info.Width,info.Height,info.MipLevels,info.Format);
+}
+static ID3D11Resource* PWTiledStart(const DirectX::ScratchImage& decoded){
+    if(!pwTiledEnabled||pwTiled.size()>=PWMip::MaxPending||pwTiledAttempts>=16)return nullptr;
+    ++pwTiledAttempts;
+    const auto& m=decoded.GetMetadata();
+    if(m.mipLevels>12||m.arraySize!=1||m.dimension!=DirectX::TEX_DIMENSION_TEXTURE2D||m.IsCubemap()||
+        !PWMip::Eligible(static_cast<UINT>(m.width),static_cast<UINT>(m.height),static_cast<UINT>(m.mipLevels),m.format))return nullptr;
+    PWMip::Span spans[12]={};
+    for(UINT i=0;i<static_cast<UINT>(m.mipLevels);++i)spans[i]=PWMipSpan(decoded,i);
+    try{
+        PWTiledLive item;item.texture.reset(new PWTiled::Texture);
+        if(!item.texture->Initialize(m_pD3D,m_pImmediateContext,static_cast<UINT>(m.width),static_cast<UINT>(m.height),
+            static_cast<UINT>(m.mipLevels),m.format,spans)){++pwTiledFailures;return nullptr;}
+        const auto* bytes=static_cast<const std::uint8_t*>(spans[0].pixels);
+        item.top.assign(bytes,bytes+spans[0].bytes);item.row=spans[0].row;
+        item.resource=item.texture->Resource();item.generation=pwStage.generation;
+        if(!item.resource)return nullptr;
+        pwTiled.push_back(std::move(item));
+        auto* resource=pwTiled.back().resource;resource->AddRef();
+        ++pwTiledAdmitted;return resource;
+    }catch(...){++pwTiledFailures;return nullptr;}
+}
+static ID3D11Resource* PWTiledLoadFile(const char* full,const GGIMAGE_INFO& info){
+    // Explicitly opted-in fixtures can exercise residency on the first visit,
+    // without depending on a background staging hit. Bounded transient decode.
+    if(!PWTiledCandidate(full,info))return nullptr;
+    try{
+        std::vector<std::uint8_t> bytes;BY_HANDLE_FILE_INFORMATION stamp={},now={};
+        if(!PWTextureStage::Read(full,PWTextureStage::FileLimit,pwStage.cancel,bytes,stamp))return nullptr;
+        PWTextureStage::File current(full);
+        if(!current.Info(now)||!PWTextureStage::SameFile(stamp,now))return nullptr;
+        DirectX::TexMetadata meta={};
+        if(FAILED(DirectX::GetMetadataFromDDSMemory(bytes.data(),bytes.size(),DirectX::DDS_FLAGS_NONE,meta))||
+            meta.width!=info.Width||meta.height!=info.Height||meta.mipLevels!=info.MipLevels||meta.format!=info.Format||
+            meta.arraySize!=1||meta.dimension!=DirectX::TEX_DIMENSION_TEXTURE2D||meta.IsCubemap())return nullptr;
+        DirectX::ScratchImage decoded;DirectX::TexMetadata actual={};
+        if(FAILED(DirectX::LoadFromDDSMemory(bytes.data(),bytes.size(),DirectX::DDS_FLAGS_NONE,&actual,decoded))||
+            decoded.GetPixelsSize()>PWMip::DecodeReserve||actual.width!=meta.width||actual.height!=meta.height||
+            actual.mipLevels!=meta.mipLevels||actual.format!=meta.format)return nullptr;
+        return PWTiledStart(decoded);
+    }catch(...){++pwTiledFailures;return nullptr;}
+}
+static void PWTiledRegister(ID3D11Resource* resource,ID3D11ShaderResourceView* view){
+    for(auto& item:pwTiled){
+        if(item.resource!=resource||!view)continue;
+        if(!item.view){view->AddRef();item.view.reset(view);}
+        else if(item.view.get()!=view)PWTiledPin(resource);
+        return;
+    }
+}
+static void PWTiledObserve(ID3D11ShaderResourceView* view,float distance,bool safe){
+    if(pwTiled.empty()||!view)return;
+    PWTiledLive* found=nullptr;
+    for(auto& item:pwTiled)if(item.view.get()==view){found=&item;break;}
+    if(!found){
+        // Unknown alias views are not treated as safe sampled diffuse uses.
+        ID3D11Resource* resource=nullptr;view->GetResource(&resource);
+        if(resource){PWTiledPin(resource);resource->Release();}
+        return;
+    }
+    auto& item=*found;
+    if(!safe||!std::isfinite(distance)||distance<0){PWTiledPin(item.resource);return;}
+    if(!item.observed||distance<item.nearest)item.nearest=distance;
+    item.observed=true;item.everObserved=true;item.lastSeen=GetTickCount64();
+}
+static void PWTiledSample(ULONGLONG now){
+    if(!pwTiledEnabled||pwTiled.empty()||(pwTiledLastSample&&now-pwTiledLastSample<1000))return;
+    pwTiledLastSample=now;
+    unsigned long long pool=0,cpu=0;
+    for(const auto& item:pwTiled){pool+=item.texture->PoolBytes();cpu+=item.top.size();}
+    PROCESS_MEMORY_COUNTERS_EX pm={};pm.cb=sizeof(pm);
+    const BOOL memoryOK=GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pm),sizeof(pm));
+    char temp[MAX_PATH]={},path[MAX_PATH+80]={},row[512]={};
+    const DWORD n=GetTempPathA(MAX_PATH,temp);
+    if(!n||n>=MAX_PATH||sprintf_s(path,sizeof(path),"%sGGCPW-texturetiled-%lu.csv",temp,(unsigned long)GetCurrentProcessId())<=0)return;
+    HANDLE file=CreateFileA(path,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(file==INVALID_HANDLE_VALUE)return;
+    LARGE_INTEGER size={};DWORD written=0;
+    if(GetFileSizeEx(file,&size)&&size.QuadPart==0){
+        const char header[]="generation,tick_ms,dxgi_valid,dxgi_usage,dxgi_budget,pool_bytes,cpu_backing_bytes,ram_valid,working_set,private_bytes,admitted,demotions,promotions,pins,failures,cumulative_pool_shrink_bytes,max_frame_interval_ms,max_transition_ms\r\n";
+        WriteFile(file,header,sizeof(header)-1,&written,nullptr);
+    }
+    const int len=sprintf_s(row,sizeof(row),"%llu,%llu,%d,%llu,%llu,%llu,%llu,%d,%llu,%llu,%u,%u,%u,%u,%u,%llu,%llu,%llu\r\n",
+        (unsigned long long)pwStage.generation,(unsigned long long)now,pwAdaptiveTelemetry?1:0,pwAdaptiveUsage,pwAdaptiveBudget,pool,cpu,
+        memoryOK?1:0,(unsigned long long)pm.WorkingSetSize,(unsigned long long)pm.PrivateUsage,pwTiledAdmitted,pwTiledDown,pwTiledUp,pwTiledPins,pwTiledFailures,
+        pwTiledReclaimed,(unsigned long long)pwTiledMaxFrameMs,(unsigned long long)pwTiledMaxOpMs);
+    if(len>0)WriteFile(file,row,(DWORD)len,&written,nullptr);
+    CloseHandle(file);pwTiledMaxFrameMs=pwTiledMaxOpMs=0;
+}
+static void PWTiledTick(){
+    if(pwTiled.empty()||!PWAdaptiveDeviceOK())return;
+    const ULONGLONG now=GetTickCount64();
+    if(pwTiledLastFrame)pwTiledMaxFrameMs=(std::max)(pwTiledMaxFrameMs,now-pwTiledLastFrame);
+    pwTiledLastFrame=now;PWAdaptiveQuery(now);
+    if(!pwTiledLastPolicy||now-pwTiledLastPolicy>=100){
+        pwTiledLastPolicy=now;bool transitioned=false;
+        // Restore pinned/near/stale textures first; only one scheduled
+        // transition per policy tick. Mandatory raw-access restores are separate.
+        for(auto& item:pwTiled){
+            const bool recent=item.everObserved&&now-item.lastSeen<=PWResidency::UnseenDelay;
+            const bool protect=item.pinned||item.generation!=pwStage.generation||!pwTiledEnabled||!item.view;
+            const unsigned desired=protect?0:PWResidency::Desired(item.policy.current,1,item.nearest,recent,pwAdaptivePressure);
+            if(!transitioned&&!desired&&!item.texture->Full()){
+                PWTiledRestore(item);transitioned=true;
+            }
+            if(!desired&&item.texture->Full())item.policy=PWResidency::State{};
+        }
+        for(auto& item:pwTiled){
+            const bool recent=item.everObserved&&now-item.lastSeen<=PWResidency::UnseenDelay;
+            const unsigned target=(!pwTiledEnabled||item.pinned||item.generation!=pwStage.generation||!item.view)?0:
+                PWResidency::Desired(item.policy.current,1,item.nearest,recent,pwAdaptivePressure);
+            if(!transitioned&&target&&item.texture->Full()&&PWResidency::Step(item.policy,1,now)){
+                const UINT before=item.texture->PoolBytes();const ULONGLONG start=GetTickCount64();
+                const bool ok=item.texture->Demote();transitioned=true;
+                pwTiledMaxOpMs=(std::max)(pwTiledMaxOpMs,GetTickCount64()-start);
+                if(ok){++pwTiledDown;pwTiledReclaimed+=before-item.texture->PoolBytes();}
+                else{++pwTiledFailures;item.pinned=true;}
+            }
+            if(!target&&item.texture->Full())item.policy=PWResidency::State{};
+            item.observed=false;
+        }
+    }
+    PWTiledSample(now);
+}
 static bool PWMipStep(PWPendingMip& pending){
     if(!m_pD3D||!m_pImmediateContext||FAILED(m_pD3D->GetDeviceRemovedReason())||
         pending.generation!=pwStage.generation||!pending.first)return false;
@@ -426,9 +603,10 @@ static ID3D11Resource* PWStageTake(const char* resolved,const GGIMAGE_INFO& info
         auto found=std::find_if(ready.begin(),ready.end(),[&](const PWStagedDDS& x){
             return x.generation==pwStage.generation&&_stricmp(x.path.c_str(),full)==0;
         });
-        if(found==ready.end()){++pwStage.missed;return nullptr;}
-        item=std::move(*found);ready.erase(found);
+        if(found==ready.end()){++pwStage.missed;}
+        else{item=std::move(*found);ready.erase(found);}
     }
+    if(item.bytes.empty())return allowPromotion?PWTiledLoadFile(full,info):nullptr;
     const auto& meta=item.metadata;
     if(meta.width!=info.Width||meta.height!=info.Height||meta.mipLevels!=info.MipLevels||meta.format!=info.Format){
         ++pwStage.invalid;return nullptr;
@@ -439,6 +617,9 @@ static ID3D11Resource* PWStageTake(const char* resolved,const GGIMAGE_INFO& info
     BY_HANDLE_FILE_INFORMATION now={};
     if(!current.Info(now)||!PWTextureStage::SameFile(item.stamp,now)){++pwStage.invalid;return nullptr;}
     if(allowPromotion){
+        if(PWTiledCandidate(full,info)&&item.decoded){
+            if(auto* tiled=PWTiledStart(*item.decoded)){++pwStage.uploaded;return tiled;}
+        }
         if(auto* promoted=PWMipStart(item)){++pwStage.uploaded;return promoted;}
     }
     ID3D11Resource* resource=nullptr;
@@ -462,7 +643,7 @@ static ID3D11Resource* PWStageTake(const char* resolved,const GGIMAGE_INFO& info
 #endif
 void PWTextureStageEnd(){
 #ifdef DX11
-    pwStage.Stop();PWMipDrain();PWAdaptiveForget();PWStageReport();pwStage.active=false;pwAdaptiveEnabled=false;
+    pwStage.Stop();PWTiledSample(GetTickCount64());PWTiledFinish();PWMipDrain();PWAdaptiveForget();PWStageReport();pwStage.active=false;pwAdaptiveEnabled=false;pwTiledEnabled=false;
 #endif
 }
 void PWTextureStageBegin(){
@@ -476,6 +657,11 @@ void PWTextureStageBegin(){
     pwMipStarted=pwMipSteps=pwMipFinished=0;
     char adaptive[8]={};
     pwAdaptiveEnabled=GetEnvironmentVariableA("GGCPW_TEXTURE_RESIDENCY",adaptive,sizeof(adaptive))==1&&adaptive[0]=='1';
+    char tiled[8]={};
+    pwTiledEnabled=pwAdaptiveEnabled&&PWMipEnabled()&&PWTiled::Supported(m_pD3D)&&
+        GetEnvironmentVariableA("GGCPW_TEXTURE_TILED",tiled,sizeof(tiled))==1&&tiled[0]=='1';
+    pwTiledAttempts=pwTiledAdmitted=pwTiledDown=pwTiledUp=pwTiledFailures=pwTiledPins=0;
+    pwTiledLastPolicy=pwTiledLastSample=pwTiledLastFrame=pwTiledMaxFrameMs=pwTiledMaxOpMs=pwTiledReclaimed=0;
     pwAdaptivePressure=false;pwAdaptiveTelemetry=false;pwAdaptiveUsage=pwAdaptiveBudget=0;
     pwAdaptiveLastQuery=pwAdaptiveLastPolicy=0;pwAdaptiveUp=pwAdaptiveDown=0;
     pwStage.prepared.store(0);pwStage.preparedBytes.store(0);
@@ -530,14 +716,15 @@ void PWTextureStageBegin(){
 
 bool PWTextureResidencyObserving(){
 #ifdef DX11
-    return pwAdaptiveEnabled&&!pwAdaptive.empty();
+    return (pwAdaptiveEnabled&&!pwAdaptive.empty())||!pwTiled.empty();
 #else
     return false;
 #endif
 }
-void PWTextureResidencyObserve(ID3D11ShaderResourceView* view,float distance,bool safeMainDiffuse){
+void PWTextureResidencyObserve(ID3D11ShaderResourceView* view,float distance,bool safeMainDiffuse,bool shadowCamera){
 #ifdef DX11
-    if(!pwAdaptiveEnabled||!view)return;
+    PWTiledObserve(view,distance,safeMainDiffuse&&!shadowCamera);
+    if(shadowCamera||!pwAdaptiveEnabled||!view)return;
     for(auto& item:pwAdaptive){
         if(item.view.get()!=view)continue;
         if(!safeMainDiffuse||!std::isfinite(distance)||distance<0){item.protectedUse=true;return;}
@@ -545,7 +732,7 @@ void PWTextureResidencyObserve(ID3D11ShaderResourceView* view,float distance,boo
         item.observed=true;item.everObserved=true;item.lastSeen=GetTickCount64();return;
     }
 #else
-    (void)view;(void)distance;(void)safeMainDiffuse;
+    (void)view;(void)distance;(void)safeMainDiffuse;(void)shadowCamera;
 #endif
 }
 void PWTextureStageTick(){
@@ -555,7 +742,7 @@ void PWTextureStageTick(){
         auto& pending=pwMipPending.front();
         if(!PWMipStep(pending)||!pending.first)pwMipPending.erase(pwMipPending.begin());
     }
-    PWAdaptiveTick();
+    PWAdaptiveTick();PWTiledTick();
 #endif
 }
 
@@ -606,6 +793,7 @@ namespace
 			#ifdef DX11
             if(pImage->second->lpTexture){
                 if(!pwMipPending.empty())PWMipDrain(pImage->second->lpTexture);
+                PWTiledPin(pImage->second->lpTexture);
                 PWAdaptiveForget(pImage->second->lpTexture);
             }
             SAFE_RELEASE( pImage->second->lpTextureView );
@@ -1352,6 +1540,10 @@ DARKSDK void ImageDestructorD3D ( void )
 
     // Now clear the list
     m_List.clear();
+#ifdef DX11
+    // Device teardown: no subsequent draw may use recovery trackers.
+    pwTiled.clear();
+#endif
 
 }
 
@@ -1390,6 +1582,7 @@ DARKSDK void CreateShaderResourceViewFor ( tagImgData* pImgPtr, int iTextureFlag
 		Error1 ( "Failed to create resource view for image" );
 		return;
 	}
+    PWTiledRegister(pImgPtr->lpTexture,pImgPtr->lpTextureView);
     PWAdaptiveRegister(pImgPtr->lpTexture,pImgPtr->lpTextureView);
 }
 #endif
@@ -1888,8 +2081,15 @@ DARKSDK LPGGTEXTURE GetTextureCore ( char* szFilename, GGIMAGE_INFO* info, int i
 		// just as about to load texture file, check if we already have done in preload thread
 
 		ID3D11Resource* pPreCreatedTexture = nullptr;
-        if(!(g_iImageBlockMode==1&&pFileInMemoryData))
+        if(!(g_iImageBlockMode==1&&pFileInMemoryData)){
             pPreCreatedTexture=PWTakePreloadedTexture(szFilename,m_iMipMapNum,iDivideTextureSize,*info);
+            // A legacy preload would otherwise bypass the opt-in live path.
+            // Release only the transferred preload reference, not the registry.
+            if(pPreCreatedTexture&&pwTiledEnabled&&m_iMipMapNum==-1&&iDivideTextureSize<=1&&iOneToOnePixels==0&&iFullTexturePlateMode==0){
+                char full[MAX_PATH]={};
+                if(PWPreloadPath(szFilename,full)&&PWTiledCandidate(full,*info)){pPreCreatedTexture->Release();pPreCreatedTexture=nullptr;}
+            }
+        }
 
 		// not unknown, use file format
 		GGFORMAT newImageFormat = (*info).Format;
@@ -2669,6 +2869,7 @@ DARKSDK LPGGTEXTURE GetImagePointer ( int iID )
 	if (m_imgptr->lpTexture) {
 #ifdef DX11
         if(!pwMipPending.empty())PWMipDrain(m_imgptr->lpTexture);
+        if(!PWTiledPin(m_imgptr->lpTexture))return NULL;
         PWAdaptiveForget(m_imgptr->lpTexture);
 #endif
 
@@ -3754,6 +3955,7 @@ DARKSDK void CreateReplaceImage ( int iID, int iTexSize, ID3D11Texture2D* pTex, 
 #ifdef DX11
     if(m_imgptr->lpTexture){
         if(!pwMipPending.empty())PWMipDrain(m_imgptr->lpTexture);
+        PWTiledPin(m_imgptr->lpTexture);
         PWAdaptiveForget(m_imgptr->lpTexture);
     }
 #endif
