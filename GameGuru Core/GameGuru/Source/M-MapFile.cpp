@@ -32,7 +32,7 @@ static void PWCapStandaloneCopy(const char* relative,const char* destination)
 {
     if(!g_pwExportCap2048)return;
     const auto saved=PWExportTextureCap::CapCopiedFile(relative,destination,2048);
-    if(saved) timestampactivity(0,cstr(cstr("PW export texture cap: ")+relative).Get());
+    if(saved) { char message[512]; snprintf(message,sizeof(message),"PW export texture cap: %s",relative); timestampactivity(0,message); }
 }
 
 int g_mapfile_iStage = 0;
